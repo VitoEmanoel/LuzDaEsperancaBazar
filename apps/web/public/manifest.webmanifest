@@ -1,0 +1,11 @@
+{
+  "name": "Bazar Luz da Esperança",
+  "short_name": "Bazar Luz",
+  "description": "PDV e gestão do bazar beneficente do Luz da Esperança — Parnaíba, PI.",
+  "start_url": "/pdv",
+  "display": "standalone",
+  "background_color": "#faf7f2",
+  "theme_color": "#2d461f",
+  "lang": "pt-BR",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

@@ -1,0 +1,24 @@
+# Dependências e builds
+node_modules/
+dist/
+coverage/
+*.log
+*.tsbuildinfo
+
+# Prisma (gerado no postinstall)
+apps/api/src/generated/
+
+# Segredos — NUNCA versionar (.env.example é o modelo)
+.env
+.env.*
+!.env.example
+
+# Uploads da API (anexos de lotes; dados pessoais possíveis)
+apps/api/uploads/
+
+# SO / editores
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/

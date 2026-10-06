@@ -1,0 +1,30 @@
+{
+  "name": "bazar-luz-da-esperanca",
+  "private": true,
+  "version": "0.2.0",
+  "description": "Sistema de Bazar — Luz da Esperança (Parnaíba/PI): PDV offline, estoque duplo, caixa, financeiro e prestação de contas.",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "workspaces": [
+    "apps/web",
+    "apps/api"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev -w @bazar/web",
+    "dev:api": "npm run dev -w @bazar/api",
+    "build": "npm run build -w @bazar/api && npm run build -w @bazar/web",
+    "typecheck": "npm run typecheck --workspaces",
+    "db:deploy": "npm run db:deploy -w @bazar/api",
+    "db:seed": "npm run db:seed -w @bazar/api",
+    "test:smoke": "npm run test:smoke -w @bazar/api",
+    "test:concorrencia": "npm run test:concorrencia -w @bazar/api",
+    "audit": "npm audit --audit-level=high",
+    "test:reteste": "npm run test:reteste -w @bazar/api"
+  },
+  "overrides": {
+    "mysql2": "^3.24.5",
+    "deepmerge-ts": "^8.0.2",
+    "uuid": "^11.1.1"
+  }
+}

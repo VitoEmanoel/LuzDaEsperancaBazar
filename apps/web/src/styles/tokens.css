@@ -1,0 +1,103 @@
+/* ==========================================================================
+ * Design tokens — Brandbook Luz da Esperança (docs/marca/identidade-visual.md)
+ *
+ * 1. Paleta da marca (valores EXATOS do brandbook — não alterar).
+ * 2. Tokens semânticos (o que as telas usam). Quando a cor da marca não atinge
+ *    contraste WCAG AA (RNF-16) para texto pequeno, usa-se uma variação mais
+ *    escura do MESMO matiz, documentada ao lado.
+ * ========================================================================== */
+:root {
+  /* --- 1. Paleta estratégica (slide 08) --- */
+  --marca-verde-esperanca: #5b8c3e;   /* primária: esperança, renovação, cura */
+  --marca-dourado-terra:   #8c6d46;   /* secundária: tradição, calor humano */
+  --marca-branco-osso:     #faf7f2;   /* fundo acolhedor */
+  --marca-cinza-texto:     #4a4a4a;   /* legibilidade do corpo */
+  /* tons de apoio usados nas capas do brandbook */
+  --marca-verde-floresta:  #2d461f;
+  --marca-verde-musgo:     #3e5a2e;
+  --marca-salvia:          #bfcdb3;
+  --marca-areia:           #d8b989;
+  --marca-linho:           #e7e2d8;
+  --marca-cinza-suave:     #7a7a72;
+
+  /* --- Paleta de acento (slide 09) — no máx. 1–2 por tela --- */
+  --acento-coral:   #e85d4c;   /* Reforço de Luz */
+  --acento-laranja: #f2994a;   /* Cursos profissionalizantes */
+  --acento-sol:     #f2c94c;   /* Sopa Fraterna */
+  --acento-ceu:     #3d9bd1;   /* Tratamentos espirituais */
+  --acento-roxo:    #9b6fc4;   /* Mocidade e evangelização */
+
+  /* --- Tipografia (slide 10) --- */
+  --fonte-titulo: "Lora Variable", "Lora", Georgia, "Times New Roman", serif;   /* títulos e display */
+  --fonte-corpo:  "Nunito Variable", "Nunito", system-ui, "Segoe UI", Roboto, sans-serif; /* corpo */
+  --fonte-mono:   ui-monospace, "Cascadia Mono", Consolas, monospace;           /* comprovante */
+
+  /* --- 2. Tokens semânticos (tema claro) --- */
+  --bg: var(--marca-branco-osso);
+  --surface: #ffffff;
+  --surface-2: #f3efe7;                /* osso um tom abaixo */
+  --text: var(--marca-cinza-texto);    /* 8,3:1 sobre o fundo */
+  --heading: var(--marca-verde-musgo); /* 7,3:1 */
+  --muted: #6b6b63;                    /* cinza-suave escurecido: 5,0:1 (o original dá 4,0:1) */
+  --border: var(--marca-linho);
+  --border-strong: #b5ad9e;            /* contorno de campos */
+
+  --primary: #4e7a34;                  /* verde-esperança AA: 5,1:1 com texto branco */
+  --primary-hover: var(--marca-verde-musgo);
+  --primary-soft: #eef3e8;
+  --on-primary: #ffffff;
+  --brand: var(--marca-verde-esperanca); /* destaques grandes/decorativos */
+  --secondary: #7a5e3b;                /* dourado-terra AA para texto pequeno: 5,6:1 */
+
+  --ok: #3b6427;     --ok-bg: #eef3e8;
+  --warn: #7f5f12;   --warn-bg: #fdf4d8;   /* derivado do amarelo-sol */
+  --danger: #b83a2b; --err-bg: #fbe9e6;    /* derivado do vermelho-coral */
+  --info: #1f6f9f;   --info-bg: #e6f2fa;   /* derivado do azul-céu */
+  --on-danger: #ffffff;
+
+  /* Navegação (fundo das capas do brandbook) */
+  --nav-bg: var(--marca-verde-floresta);
+  --nav-text: var(--marca-branco-osso);
+  --nav-muted: var(--marca-salvia);
+  --nav-accent: var(--marca-areia);
+  --nav-active-bg: var(--marca-verde-musgo);
+
+  /* Forma */
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --shadow: 0 1px 2px rgb(45 70 31 / 0.06), 0 2px 8px rgb(45 70 31 / 0.05);
+  --shadow-lg: 0 12px 40px rgb(45 70 31 / 0.22);
+  --focus: var(--marca-verde-esperanca);
+
+  color-scheme: light;
+}
+
+/* Tema escuro: derivado do verde-floresta das capas do brandbook */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141f0e;
+    --surface: #1c2a15;
+    --surface-2: #26361d;
+    --text: #ece8df;
+    --heading: #c9dcb8;
+    --muted: #b4c2a8;
+    --border: #34472a;
+    --border-strong: #5a6e4c;
+    --primary: #8dba6c;
+    --primary-hover: #a5cb88;
+    --primary-soft: #23361a;
+    --on-primary: #12200b;
+    --brand: #8dba6c;
+    --secondary: var(--marca-areia);
+    --ok: #9fcf7f;     --ok-bg: #1f3317;
+    --warn: #f2c94c;   --warn-bg: #352b0f;
+    --danger: #f08a7d; --err-bg: #3b1813;
+    --info: #7cc0e8;   --info-bg: #13293a;
+    --on-danger: #1d0905;
+    --nav-bg: #0f180a;
+    --nav-active-bg: #26361d;
+    --focus: #a5cb88;
+    color-scheme: dark;
+  }
+}

@@ -1,0 +1,126 @@
+/* Layout — Backoffice (app/layout/AppLayout), páginas de autenticação e telas centrais. */
+
+/* --- Shell do Backoffice: menu lateral em verde-floresta (capas do brandbook) --- */
+.shell { display: grid; grid-template-columns: 272px 1fr; min-height: 100vh; }
+.sidebar {
+  --flor-miolo: var(--nav-bg);
+  background: var(--nav-bg); color: var(--nav-text); padding: 1.25rem .85rem 1.5rem; overflow-y: auto;
+  position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column;
+}
+.sidebar .brandmark { padding: 0 .5rem 1.1rem; margin-bottom: .5rem; border-bottom: 1px solid rgb(250 247 242 / .12); }
+.sidebar .brandmark-sub { color: var(--nav-accent); }
+.nav-group-title {
+  display: flex; align-items: center; gap: .5rem; font-size: .74rem; font-weight: 800; text-transform: uppercase;
+  letter-spacing: .07em; color: var(--nav-accent); margin: 1.15rem .75rem .35rem;
+}
+.nav-group-title::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--grupo-cor, var(--nav-accent)); }
+.nav-item {
+  display: flex; align-items: center; min-height: 44px; padding: 0 .85rem; border-radius: var(--radius-sm);
+  color: var(--nav-text); text-decoration: none; font-weight: 600; border-left: 3px solid transparent;
+  transition: background-color .15s;
+}
+.nav-item:hover { background: rgb(250 247 242 / .08); color: var(--nav-text); }
+.nav-item.active { background: var(--nav-active-bg); border-left-color: var(--nav-accent); color: #fff; font-weight: 800; }
+.sidebar :focus-visible { outline-color: var(--nav-accent); }
+.sidebar-rodape { margin-top: auto; padding: 1.25rem .75rem 0; font-size: .78rem; color: var(--nav-muted); }
+
+.main { display: flex; flex-direction: column; min-width: 0; }
+.topbar {
+  display: flex; align-items: center; gap: .75rem; padding: .55rem 1.25rem; min-height: 64px;
+  background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 30;
+}
+.topbar .user { display: flex; flex-direction: column; line-height: 1.2; text-align: right; }
+.topbar .user small { color: var(--muted); }
+.avatar {
+  width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; flex: none;
+  background: var(--primary-soft); color: var(--primary); font-family: var(--fonte-titulo); font-weight: 700;
+}
+.menu-toggle { display: none; }
+.content { padding: 1.5rem 1.75rem 2.5rem; }
+.page { max-width: 1280px; }
+.page.narrow, .narrow { max-width: 760px; }
+.page-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+.page-header h1 { margin: 0; }
+.page-header .actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+
+/* Cada grupo do menu recebe uma cor de acento (uma por área, como as frentes no brandbook) */
+.nav-group[data-cor="coral"]   { --grupo-cor: var(--acento-coral); }
+.nav-group[data-cor="laranja"] { --grupo-cor: var(--acento-laranja); }
+.nav-group[data-cor="sol"]     { --grupo-cor: var(--acento-sol); }
+.nav-group[data-cor="ceu"]     { --grupo-cor: var(--acento-ceu); }
+.nav-group[data-cor="roxo"]    { --grupo-cor: var(--acento-roxo); }
+.shortcut[data-cor="coral"]   { --atalho-cor: var(--acento-coral); }
+.shortcut[data-cor="laranja"] { --atalho-cor: var(--acento-laranja); }
+.shortcut[data-cor="sol"]     { --atalho-cor: var(--acento-sol); }
+.shortcut[data-cor="ceu"]     { --atalho-cor: var(--acento-ceu); }
+.shortcut[data-cor="roxo"]    { --atalho-cor: var(--acento-roxo); }
+
+/* --- Início --- */
+.saudacao { color: var(--muted); margin-top: -.75rem; margin-bottom: 1.25rem; }
+.alerts-grid { display: grid; gap: .5rem; margin-bottom: 1.25rem; }
+.shortcut-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 1rem; }
+.shortcut {
+  display: flex; flex-direction: column; gap: .3rem; text-decoration: none; color: var(--text); min-height: 112px;
+  justify-content: flex-end; position: relative; border-top: 4px solid var(--atalho-cor, var(--brand));
+  transition: transform .15s, box-shadow .15s;
+}
+.shortcut:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); color: var(--text); }
+.shortcut strong { color: var(--heading); font-family: var(--fonte-titulo); font-size: 1.2rem; }
+.shortcut span { color: var(--muted); }
+
+/* --- Autenticação: painel de marca + formulário --- */
+.auth-page { min-height: 100vh; display: grid; grid-template-columns: minmax(320px, 1fr) minmax(360px, 520px); }
+.auth-hero {
+  --flor-miolo: var(--marca-verde-floresta);
+  background: var(--marca-verde-floresta); color: var(--marca-branco-osso); padding: 3rem clamp(2rem, 7vw, 6rem);
+  display: flex; flex-direction: column; justify-content: center; gap: 1.25rem; position: relative; overflow: hidden;
+}
+.auth-hero::after { /* pétala decorativa, traço orgânico */
+  content: ""; position: absolute; right: -120px; bottom: -120px; width: 360px; height: 360px; border-radius: 50%;
+  border: 40px solid rgb(191 205 179 / .08);
+}
+.auth-hero h1 { color: var(--marca-branco-osso); font-size: 2.4rem; margin: 0; }
+.auth-hero .lema { color: var(--marca-areia); font-size: 1.1rem; margin: 0; }
+.auth-hero .descricao { color: var(--marca-salvia); max-width: 34ch; }
+.auth-hero .local { color: var(--marca-salvia); font-size: .85rem; margin-top: 1rem; }
+.auth-form { display: flex; flex-direction: column; justify-content: center; padding: 3rem clamp(1.25rem, 5vw, 3.5rem); background: var(--bg); }
+.auth-form h2 { font-size: 1.6rem; margin: 0 0 .25rem; }
+.auth-form form { width: 100%; max-width: 400px; }
+
+/* Telas centrais (abrir/fechar caixa, trocar senha) */
+.center-page { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.25rem; padding: 1.25rem; }
+.center-page > .brandmark { color: var(--heading); }
+.center-page > .brandmark .brandmark-sub { color: var(--secondary); }
+.login-card { width: min(460px, 100%); border-top: 5px solid var(--brand); }
+.fechamento { width: min(640px, 100%); }
+
+/* --- Blocos de domínio --- */
+.contadores { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+.contadores .card { display: flex; flex-direction: column; }
+.contadores strong { font-size: 1.7rem; font-family: var(--fonte-titulo); color: var(--heading); }
+.col-aprovar { border-top: 4px solid var(--ok); }
+.col-descartar { border-top: 4px solid var(--danger); }
+.lista-escolha, .lista-clientes { list-style: none; padding: 0; margin: .5rem 0; display: grid; gap: .35rem; }
+.lista-escolha .btn, .lista-clientes .btn { justify-content: flex-start; text-align: left; font-weight: 600; }
+.timeline { list-style: none; padding: 0; border-left: 3px solid var(--marca-salvia); margin-left: .5rem; }
+.timeline li { position: relative; padding: .5rem 0 .75rem 1.25rem; display: flex; flex-wrap: wrap; gap: .25rem 1rem; }
+.timeline li::before { content: ""; position: absolute; left: -9px; top: .85rem; width: 14px; height: 14px; border-radius: 50%; background: var(--brand); border: 3px solid var(--bg); }
+.timeline time { color: var(--muted); min-width: 140px; }
+.perms { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+.senha-provisoria { font-size: 1.5rem; text-align: center; font-family: var(--fonte-mono); }
+
+/* --- Responsivo (tablet 10", RNF-11) --- */
+@media (max-width: 900px) {
+  .shell { grid-template-columns: 1fr; }
+  .sidebar { position: fixed; inset: 0 auto 0 0; width: min(300px, 85vw); height: 100vh; z-index: 40; transform: translateX(-100%); transition: transform .2s; box-shadow: var(--shadow-lg); }
+  .sidebar.open { transform: none; }
+  .menu-toggle { display: inline-flex; }
+  .contadores { grid-template-columns: 1fr; }
+  .table { display: block; overflow-x: auto; }
+  .content { padding: 1rem; }
+  .auth-page { grid-template-columns: 1fr; }
+  .auth-hero { padding: 2rem 1.5rem; }
+  .auth-hero h1 { font-size: 1.8rem; }
+  .auth-hero .descricao, .auth-hero .local { display: none; }
+  .topbar .user { display: none; }
+}

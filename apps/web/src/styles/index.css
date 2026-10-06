@@ -1,0 +1,7 @@
+/* Ponto de entrada dos estilos. Ordem: tokens → base → componentes → layout → telas → impressão. */
+@import "./tokens.css";
+@import "./base.css";
+@import "./components.css";
+@import "./layout.css";
+@import "./pdv.css";
+@import "./print.css";

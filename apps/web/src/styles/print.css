@@ -1,0 +1,10 @@
+/* Impressão: só a área marcada (comprovante, etiquetas), sempre preto no branco. */
+@media print {
+  body { background: #fff; }
+  body * { visibility: hidden; }
+  .print-area, .print-area * { visibility: visible; }
+  .print-area { position: absolute; left: 0; top: 0; width: 100%; color: #000; background: #fff; }
+  .comprovante { width: 80mm; font-size: 12px; }
+  .aviso-nao-fiscal { border-color: #000; }
+  .etiqueta { break-inside: avoid; border-color: #999; }
+}
