@@ -40,6 +40,9 @@ class Cliente {
 
 const hoje = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Fortaleza' }).format(new Date());
 
+/** Soma em reais (duas casas) como o servidor devolve: 183 -> '183.00'. */
+const fromMoney = (v: number) => v.toFixed(2);
+
 async function main() {
   const admin = new Cliente();
   console.log('ACS — autenticação');
@@ -215,6 +218,18 @@ async function main() {
   await caixa.post('/clientes', { id: cliOff, nome: 'João Exemplo', telefone: '86900000003', cienciaAviso: true });
   const vJoao = await caixa.put(`/vendas/${uuid()}`, { ...base, caixaId: cx3, clienteId: cliOff, itens: [{ categoriaId: catRoupa.id, quantidade: 1 }], pagamentos: [{ forma: 'FIADO', valor: '10.00' }], vencimentoFiado: hoje });
   check(vJoao.status === 201, 'venda fiada de outro cliente (deixa débito para o teste de LGPD)', vJoao.data);
+  // Cancelar venda em dinheiro com o caixa AINDA ABERTO: sai do valor esperado e NÃO gera reembolso no financeiro
+  const prevAntes = (await caixa.get(`/caixas/${cx3}/previa-fechamento`)).data;
+  const vAberto = uuid();
+  check((await caixa.put(`/vendas/${vAberto}`, { ...base, caixaId: cx3, itens: [{ categoriaId: catRoupa.id, quantidade: 1 }], pagamentos: [{ forma: 'DINHEIRO', valor: '10.00' }] })).status === 201, 'venda em dinheiro no caixa aberto');
+  check((await caixa.get(`/caixas/${cx3}/previa-fechamento`)).data.esperadoDinheiro === fromMoney(Number(prevAntes.esperadoDinheiro) + 10), 'dinheiro esperado sobe com a venda', prevAntes);
+  check((await admin.post(`/vendas/${vAberto}/cancelar`, { motivo: 'Cancelada com o caixa aberto' })).status === 200, 'venda cancelada com o caixa aberto');
+  check((await caixa.get(`/caixas/${cx3}/previa-fechamento`)).data.esperadoDinheiro === prevAntes.esperadoDinheiro, 'cancelar com caixa aberto devolve o dinheiro esperado ao valor anterior');
+  const reembAposAberto = (await admin.get('/contas-pagar?status=PAGA')).data.items.filter((c: any) => c.categoriaDespesaNome === 'Reembolso de venda');
+  check(reembAposAberto.length === 2, 'cancelar com caixa aberto NÃO cria reembolso no financeiro', reembAposAberto.length);
+  // Cada operador vê só as próprias vendas
+  const vendasCaixa = (await caixa.get('/vendas')).data, vendasVend = (await vend.get('/vendas')).data, vendasAdmin = (await admin.get('/vendas')).data;
+  check(vendasCaixa.total > 0 && vendasVend.total === 0 && vendasAdmin.total >= vendasCaixa.total, 'cada operador vê só as próprias vendas; o Administrador vê todas', { caixa: vendasCaixa.total, vend: vendasVend.total, admin: vendasAdmin.total });
 
   console.log('FIN — contas a pagar e compra');
   const cp = (await admin.post('/contas-pagar', { id: uuid(), descricao: 'Energia (fictícia)', valor: '30.00', vencimento: hoje })).data;
@@ -228,7 +243,7 @@ async function main() {
   check(compra.status === 201 && compra.data.pago === false, 'lote de compra');
   check((await admin.get('/contas-pagar?status=ABERTA')).data.items.some((c: any) => c.valor === '120.00' && c.loteId === compra.data.id), 'compra gera conta a pagar (RN-05)');
   const resumo = (await admin.get(`/financeiro/resumo?de=${hoje}&ate=${hoje}`)).data;
-  check(resumo.saidas === '103.00' && typeof resumo.resultado === 'string', 'resumo financeiro (as saídas são os dois reembolsos pagos fora do caixa)', resumo);
+  check(resumo.saidas === '0.00' && resumo.reembolsos === '103.00' && typeof resumo.resultado === 'string', 'resumo financeiro: reembolso aparece à parte e não deduz duas vezes', resumo);
 
   console.log('FIS — regra fiscal versionada');
   const geral = (await admin.get('/regras-fiscais')).data.find((r: any) => r.alvo === 'GERAL');
@@ -265,6 +280,17 @@ async function main() {
   const aud = (await admin.get('/auditoria?pageSize=100')).data;
   check(aud.total > 20 && !JSON.stringify(aud).includes('Maria'), 'auditoria sem PII', aud.total);
   check((await admin.get('/rota-que-nao-existe')).status === 404, '404 em RFC 9457');
+
+  console.log('Vendedor padrão — fluxo do PDV só com as permissões mínimas (caixa.operar e clientes.gerenciar)');
+  const cxV = uuid();
+  check((await vend.post('/caixas', { id: cxV, terminalId: term2.id, fundoTroco: '20.00' })).status === 201, 'Vendedor padrão abre o caixa');
+  check((await vend.get('/pdv/catalogo')).status === 200, 'Vendedor padrão carrega o catálogo do PDV');
+  const vV = await vend.put(`/vendas/${uuid()}`, { terminalId: term2.id, caixaId: cxV, itens: [{ categoriaId: catRoupa.id, quantidade: 1 }], pagamentos: [{ forma: 'DINHEIRO', valor: '10.00', valorRecebido: '10.00' }] });
+  check(vV.status === 201 && vV.data.total === '10.00', 'Vendedor padrão registra uma venda', vV.data);
+  check((await vend.post(`/caixas/${cxV}/lancamentos`, { id: uuid(), tipo: 'SUPRIMENTO', valor: '10.00', motivo: 'Reforço de troco' })).status === 204, 'Vendedor padrão faz suprimento');
+  // fundo 20 + venda 10 + suprimento 10 = 40
+  const fV = (await vend.post(`/caixas/${cxV}/fechar`, { contado: '40.00' })).data;
+  check(fV.status === 'FECHADO' && fV.diferenca === '0.00', 'Vendedor padrão fecha o caixa sem diferença', fV);
 
   console.log(`\n${oks} ok, ${falhas} falha(s)`);
   process.exit(falhas ? 1 : 0);

@@ -1,4 +1,4 @@
-/** Sangria / suprimento (exige conexão). */
+/** Sangria / suprimento do caixa aberto. */
 import { useState } from 'react';
 import { Modal } from '../../../shared/components/Modal';
 import { ErrorAlert, Field } from '../../../shared/components/ui';

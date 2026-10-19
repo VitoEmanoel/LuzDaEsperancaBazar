@@ -57,7 +57,7 @@ export function App() {
               <Route path="financeiro/resumo" element={P(['relatorios.consultar'], <ResumoFinanceiroPage />)} />
               <Route path="relatorios/:tipo" element={P(['relatorios.consultar', 'relatorios.estoque'], <RelatoriosPage />)} />
               <Route path="cadastros/:tipo" element={P(['cadastros.gerenciar', 'cadastros.consultar'], <CadastrosPage />)} />
-              <Route path="admin/*" element={<AdminPage />} />
+              <Route path="admin/*" element={P(['usuarios.gerenciar', 'perfis.gerenciar', 'parametros.gerenciar', 'auditoria.consultar', 'terminais.gerenciar', 'privacidade.gerenciar', 'fiscal.gerenciar', 'cadastros.gerenciar'], <AdminPage />)} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

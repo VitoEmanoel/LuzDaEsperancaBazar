@@ -20,10 +20,17 @@ export const armazenamento = {
   apagar(chave: string): void {
     try { localStorage.removeItem(PREFIXO + chave); } catch { /* idem */ }
   },
-  /** Logout e terminal desativado: apaga tudo que este sistema guardou no aparelho. */
-  limparTudo(): void {
+  /**
+   * Logout: apaga o que é de quem usava (carrinho). O terminal fixo é do APARELHO, não da pessoa: continua para o próximo turno.
+   * Terminal desativado: `incluirTerminal` apaga também a escolha do terminal.
+   */
+  limparTudo(opts: { incluirTerminal?: boolean } = {}): void {
     try {
-      for (const k of Object.keys(localStorage)) if (k.startsWith(PREFIXO)) localStorage.removeItem(k);
+      for (const k of Object.keys(localStorage)) {
+        if (!k.startsWith(PREFIXO)) continue;
+        if (k === PREFIXO + CHAVES.terminalId && !opts.incluirTerminal) continue;
+        localStorage.removeItem(k);
+      }
     } catch { /* idem */ }
   },
 };

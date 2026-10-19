@@ -2,6 +2,10 @@
 -- e reembolso em dinheiro como saída no financeiro (o Administrador deixa de operar caixa).
 -- Perfis criados pelo Administrador (padrao = false) não são tocados.
 
+-- Nomes de perfil e de categoria são únicos: se o Administrador já criou algo com o mesmo nome, ele só ganha o sufixo " (anterior)".
+UPDATE "perfil" SET "nome" = "nome" || ' (anterior)' WHERE "padrao" = false AND "nome" IN ('Vendedor', 'Estoquista', 'Financeiro');
+UPDATE "categoria_despesa" SET "nome" = "nome" || ' (anterior)' WHERE "nome" = 'Reembolso de venda' AND "id" <> '00000000-0000-4000-8000-0000000000c1';
+
 -- Caixa vira Vendedor e Triagem vira Estoquista (mesmos ids, usuários e histórico preservados).
 UPDATE "perfil" SET "nome" = 'Vendedor', "descricao" = 'Opera o PDV: vende e abre e fecha o próprio caixa'
  WHERE "id" = '00000000-0000-4000-8000-0000000000a2';
@@ -38,15 +42,14 @@ INSERT INTO "perfil_permissao" ("perfil_id", "permissao_codigo") VALUES
   ('00000000-0000-4000-8000-0000000000a3', 'cadastros.consultar'),
   ('00000000-0000-4000-8000-0000000000a3', 'relatorios.estoque');
 
--- Financeiro: contas, relatórios e consulta de estoque
+-- Financeiro: contas, relatórios e consulta de estoque (lê categorias de despesa pela permissão de contas a pagar)
 INSERT INTO "perfil_permissao" ("perfil_id", "permissao_codigo") VALUES
   ('00000000-0000-4000-8000-0000000000a4', 'contas_pagar.gerenciar'),
   ('00000000-0000-4000-8000-0000000000a4', 'contas_receber.receber'),
   ('00000000-0000-4000-8000-0000000000a4', 'contas_receber.lancar'),
   ('00000000-0000-4000-8000-0000000000a4', 'relatorios.consultar'),
   ('00000000-0000-4000-8000-0000000000a4', 'relatorios.estoque'),
-  ('00000000-0000-4000-8000-0000000000a4', 'estoque.consultar'),
-  ('00000000-0000-4000-8000-0000000000a4', 'cadastros.consultar');
+  ('00000000-0000-4000-8000-0000000000a4', 'estoque.consultar');
 
 -- Reembolso em dinheiro (cancelar venda de caixa fechado, estornar recebimento) vira uma saída paga no financeiro.
 INSERT INTO "categoria_despesa" ("id", "nome") VALUES

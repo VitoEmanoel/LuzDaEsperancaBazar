@@ -43,6 +43,8 @@ Quatro perfis padrão: **Admin, Estoquista, Vendedor e Financeiro**. O Admin cri
 | Relatórios de receita e prestação de contas | sim | — | — | sim |
 | Usuários, perfis, terminais, parâmetros, auditoria, LGPD, fiscal | sim | — | — | — |
 
+> **O que a Sprint 1 já entrega e o que entra depois.** A migração `0005` entrega a visibilidade com as funcionalidades que já existem. Os itens da matriz que dependem de funcionalidade nova entram na sprint dela: preço pelo Estoquista e desconto no produto (Sprint 3), consulta de lotes e produtos pelo Financeiro (S3-12), criar parceiro pelo Estoquista (S2-06), aprovação de produtos (Sprints 2 e 3), lançar compra (S5-11) e caixas do dia (S5-06).
+
 ### Entrada de mercadoria
 1. O estoquista cria o lote de doação; **parceiro é obrigatório** e ele pode criar o parceiro na hora.
 2. O estoquista cadastra os produtos do lote (título da etiqueta, nome, modelo, marca, ano, tipo, tamanho, cor, condição, categoria, quantidade, preço e valor atribuído).

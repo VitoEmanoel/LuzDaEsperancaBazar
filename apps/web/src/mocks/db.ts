@@ -38,7 +38,7 @@ const PERFIL_ADMIN = sid('perfadm'), PERFIL_VENDEDOR = sid('perfcxa'), PERFIL_ES
 // Mesmas permissões dos perfis padrão da migração 0005 (o Administrador não opera o PDV).
 const vendedorPerms: Permissao[] = ['caixa.operar', 'clientes.gerenciar'];
 const estoquistaPerms: Permissao[] = ['entrada.registrar', 'estoque.consultar', 'estoque.transferir', 'cadastros.consultar', 'relatorios.estoque'];
-const financeiroPerms: Permissao[] = ['contas_pagar.gerenciar', 'contas_receber.receber', 'contas_receber.lancar', 'relatorios.consultar', 'relatorios.estoque', 'estoque.consultar', 'cadastros.consultar'];
+const financeiroPerms: Permissao[] = ['contas_pagar.gerenciar', 'contas_receber.receber', 'contas_receber.lancar', 'relatorios.consultar', 'relatorios.estoque', 'estoque.consultar'];
 
 const catRoupaAd = sid('catroup'), catRoupaInf = sid('catinf'), catCalc = sid('catcalc'), catLivro = sid('catliv'), catUtens = sid('catute'), catPeca = sid('catpeca');
 const parcNI = sid('parcni'), parcA = sid('parca'), parcB = sid('parcb');

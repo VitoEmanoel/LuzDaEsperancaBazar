@@ -39,7 +39,7 @@ export function usePdvSessao(): PdvSessao {
         try { cx = await caixaApi.atual(); }
         catch (e) {
           if (e instanceof ApiError && e.status === 404) { if (vivo) setSemCaixa(true); return; }
-          if (e instanceof ApiError && e.code === 'TERMINAL_DESATIVADO') { armazenamento.limparTudo(); if (vivo) setTerminalDesativado(true); return; }
+          if (e instanceof ApiError && e.code === 'TERMINAL_DESATIVADO') { armazenamento.limparTudo({ incluirTerminal: true }); if (vivo) setTerminalDesativado(true); return; }
           throw e;
         }
         if (vivo) setCaixa(cx);

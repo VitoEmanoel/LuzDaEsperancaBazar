@@ -38,23 +38,27 @@ class Cliente {
 type Perfil = 'admin' | 'estoquista' | 'vendedor' | 'financeiro';
 const TODOS: Perfil[] = ['admin', 'estoquista', 'vendedor', 'financeiro'];
 
-/** [método, rota, corpo, quem PODE (os demais devem receber 403)] */
-const ACESSOS: [string, string, unknown, Perfil[]][] = [
+/** [método, rota, corpo, quem PODE (os demais devem receber 403), status esperado para quem pode (padrão 200)] */
+const ACESSOS: [string, string, unknown, Perfil[], number[]?][] = [
   ['GET', '/usuarios', undefined, ['admin']],
   ['GET', '/perfis', undefined, ['admin']],
   ['GET', '/auditoria', undefined, ['admin']],
   ['GET', '/parametros', undefined, ['admin']],
   ['GET', '/regras-fiscais', undefined, ['admin']],
-  ['POST', '/categorias', {}, ['admin']],
+  ['POST', '/categorias', {}, ['admin'], [400]],
   ['GET', '/lotes', undefined, ['admin', 'estoquista']],
   ['GET', '/estoque', undefined, ['admin', 'estoquista', 'financeiro']],
-  ['GET', '/itens/codigo/BZ999999', undefined, TODOS], // leitura de código: PDV (vendedor) e estoque
+  ['GET', '/itens/codigo/BZ999999', undefined, TODOS, [404]], // leitura de código: PDV (vendedor) e estoque
   ['GET', '/contas-pagar', undefined, ['admin', 'financeiro']],
   ['GET', '/contas-receber', undefined, ['admin', 'financeiro']],
-  ['GET', '/financeiro/resumo', undefined, ['admin', 'financeiro']],
+  ['GET', '/financeiro/resumo?de=2026-01-01&ate=2026-12-31', undefined, ['admin', 'financeiro']],
   ['GET', '/caixas', undefined, ['admin', 'financeiro']],
-  ['GET', '/caixas/atual', undefined, ['vendedor']],
-  ['POST', '/caixas', {}, ['vendedor']],
+  ['GET', '/caixas/atual', undefined, ['vendedor'], [404]],
+  ['POST', '/caixas', {}, ['vendedor'], [400]],
+  // O Administrador (e os demais) não vendem nem mexem em caixa: só o Vendedor passa da permissão (o corpo vazio dá 400)
+  ['PUT', `/vendas/${uuid()}`, {}, ['vendedor'], [400]],
+  ['POST', `/caixas/${uuid()}/lancamentos`, {}, ['vendedor'], [400]],
+  ['POST', `/caixas/${uuid()}/fechar`, {}, ['vendedor'], [400]],
   ['GET', '/pdv/catalogo', undefined, ['vendedor']],
   ['GET', '/vendas', undefined, ['admin', 'vendedor']],
   ['GET', '/terminais', undefined, ['admin', 'vendedor']],
@@ -70,7 +74,7 @@ const PERMISSOES_ESPERADAS: Record<Perfil, string[]> = {
   admin: [], // calculado: tudo menos caixa.operar
   vendedor: ['caixa.operar', 'clientes.gerenciar'],
   estoquista: ['cadastros.consultar', 'entrada.registrar', 'estoque.consultar', 'estoque.transferir', 'relatorios.estoque'],
-  financeiro: ['cadastros.consultar', 'contas_pagar.gerenciar', 'contas_receber.lancar', 'contas_receber.receber', 'estoque.consultar', 'relatorios.consultar', 'relatorios.estoque'],
+  financeiro: ['contas_pagar.gerenciar', 'contas_receber.lancar', 'contas_receber.receber', 'estoque.consultar', 'relatorios.consultar', 'relatorios.estoque'],
 };
 
 async function novoUsuario(admin: Cliente, login: string, perfilId: string) {
@@ -105,11 +109,12 @@ async function main() {
   const clientes: Record<Perfil, Cliente> = { admin, estoquista: null as any, vendedor: null as any, financeiro: null as any };
   const sufixo = uuid().slice(0, 6);
   for (const k of ['estoquista', 'vendedor', 'financeiro'] as const) clientes[k] = (await novoUsuario(admin, `p_${k}_${sufixo}`, ids[k])).cliente;
-  for (const [metodo, rota, corpo, podem] of ACESSOS) {
+  for (const [metodo, rota, corpo, podem, esperado = [200]] of ACESSOS) {
     for (const k of TODOS) {
       const r = await clientes[k].req(metodo, rota, corpo);
       const deveria = podem.includes(k);
-      check(deveria ? r.status !== 403 : r.status === 403, `${k} ${deveria ? 'acessa' : 'NÃO acessa'} ${metodo} ${rota.split('?')[0]}`, { status: r.status, code: r.data?.code });
+      const ok = deveria ? esperado.includes(r.status) : r.status === 403;
+      check(ok, `${k} ${deveria ? 'acessa' : 'NÃO acessa'} ${metodo} ${rota.split('?')[0].replace(/[0-9a-f-]{36}/, ':id')}`, { status: r.status, esperado: deveria ? esperado : [403], code: r.data?.code });
     }
   }
   // Relatório fora do grupo de estoque: a recusa vem do servidor mesmo com a permissão de estoque
@@ -117,7 +122,7 @@ async function main() {
 
   console.log('Cada um vê só o seu');
   const vAdm = (await admin.get('/vendas')).data, vVend = (await clientes.vendedor.get('/vendas')).data;
-  check(vAdm.total > 0 && vVend.total === 0, 'vendedor só vê as próprias vendas; o Administrador vê todas', { admin: vAdm.total, vendedor: vVend.total });
+  check(vAdm.total > 0 && vVend.total === 0, 'vendedor que nunca vendeu não enxerga as vendas dos outros; o Administrador vê todas (o isolamento entre dois vendedores com vendas está no smoke)', { admin: vAdm.total, vendedor: vVend.total });
   const mes = (await clientes.vendedor.get('/caixas/atual'));
   check(mes.status === 404, 'vendedor sem caixa aberto não recebe caixa de outro operador', mes.status);
 

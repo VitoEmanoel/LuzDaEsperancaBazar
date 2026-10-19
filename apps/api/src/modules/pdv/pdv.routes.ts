@@ -60,7 +60,6 @@ export async function rotasPdv(app: FastifyInstance) {
       clientesFiado: clientes,
       regrasFiscais: regras.map(regraDto),
       fiadoPrazoDias: prazo || undefined,
-      // Prazo máximo para o PDV reabrir sem internet com o resumo do operador (RF-PDV-10, ticket 9)
     };
     const etag = `"${createHash('sha256').update(JSON.stringify(corpo)).digest('base64url').slice(0, 27)}"`;
     reply.header('ETag', etag).header('Cache-Control', 'private, no-cache');

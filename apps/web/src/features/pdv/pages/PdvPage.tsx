@@ -21,6 +21,9 @@ import { armazenamento, CHAVES } from '../../../shared/lib/armazenamento';
 import { BrandMark } from '../../../shared/components/BrandMark';
 import { useToast } from '../../../shared/components/Toast';
 
+/** O que fica guardado no aparelho: o carrinho, de quem o montou, e o id da venda em andamento. */
+interface CarrinhoSalvo { usuarioId: string; vendaId?: string; linhas: LinhaCarrinho[] }
+
 export function PdvPage() {
   const { me, can } = useAuth();
   const sessao = usePdvSessao();
@@ -43,17 +46,24 @@ export function PdvPage() {
   const modalAberto = pagando || lancando || !!comprovante;
   const focarCodigo = useCallback(() => { setTimeout(() => codigoRef.current?.focus(), 0); }, []);
 
-  // Carrinho preservado no aparelho (sessão expirada / recarga da página). Sem dado pessoal.
+  // Carrinho preservado no aparelho (sessão expirada / recarga da página), de QUEM o montou: outro operador não herda o carrinho.
+  // O id da venda em andamento também fica guardado: se a resposta se perder e a página recarregar, o reenvio não duplica a venda.
+  const restaurou = useRef(false);
   useEffect(() => {
-    const salvo = armazenamento.ler<LinhaCarrinho[]>(CHAVES.carrinho);
-    if (salvo?.length) setLinhas(salvo);
+    const salvo = armazenamento.ler<CarrinhoSalvo>(CHAVES.carrinho);
+    if (salvo && salvo.usuarioId === me?.id && salvo.linhas.length) {
+      vendaId.current = salvo.vendaId ?? null;
+      restaurou.current = true;
+      setLinhas(salvo.linhas);
+    } else if (salvo) armazenamento.apagar(CHAVES.carrinho);
     carregouCarrinho.current = true;
-  }, []);
+  }, [me?.id]);
   useEffect(() => {
-    if (!carregouCarrinho.current) return;
-    armazenamento.gravar(CHAVES.carrinho, linhas);
-    vendaId.current = null; // carrinho mudou: próxima tentativa é uma venda nova
-  }, [linhas]);
+    if (!carregouCarrinho.current || !me) return;
+    if (restaurou.current) restaurou.current = false; // carrinho acabou de voltar do aparelho: mantém o id da venda
+    else vendaId.current = null; // o operador mudou o carrinho: a próxima tentativa é uma venda nova
+    armazenamento.gravar(CHAVES.carrinho, { usuarioId: me.id, vendaId: vendaId.current ?? undefined, linhas } satisfies CarrinhoSalvo);
+  }, [linhas, me]);
 
   // Atalhos de teclado globais.
   useEffect(() => {
@@ -123,7 +133,10 @@ export function PdvPage() {
 
   /** Finaliza: grava direto no servidor. O mesmo id é reaproveitado se a tentativa falhar e for repetida. */
   async function finalizar(pg: ResultadoPagamento) {
-    vendaId.current ??= uuid();
+    if (!vendaId.current) {
+      vendaId.current = uuid();
+      if (me) armazenamento.gravar(CHAVES.carrinho, { usuarioId: me.id, vendaId: vendaId.current, linhas } satisfies CarrinhoSalvo);
+    }
     const venda: Venda = await pdvApi.registrarVenda(vendaId.current, {
       terminalId: caixa.terminalId, caixaId: caixa.id,
       itens: paraItensRequest(linhas), pagamentos: pg.pagamentos,
