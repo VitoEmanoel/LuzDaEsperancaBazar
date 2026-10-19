@@ -1,6 +1,6 @@
 -- =====================================================================================
 -- Sistema de Bazar — Luz da Esperança · DDL COMPLETA (instalação do zero, PostgreSQL 11+; testado no 16)
--- Gerado pela concatenação das migrações oficiais — a fonte da verdade continua sendo
+-- Gerado pela concatenação das migrações oficiais (0001 a 0004) — a fonte da verdade continua sendo
 -- prisma/migrations/* aplicadas com `prisma migrate deploy`. Use este arquivo para revisão,
 -- ambientes sem Node/Prisma ou para recriar um banco de teste:
 --   createdb -O bazar_owner bazar_teste
@@ -1689,3 +1689,21 @@ BEGIN
     GRANT SELECT ON saldo_estoque TO bazar_api;
   END IF;
 END $$;
+
+-- =====================================================================================
+-- 0004_remove_offline
+-- =====================================================================================
+-- Sprint 1: o sistema passa a ser só web e online. Remove o que existia apenas para o PDV offline.
+-- As colunas venda.numero_local e venda.origem_registro ficam (histórico); toda venda nova é ONLINE.
+
+DROP TABLE "pendencia_sincronizacao";
+DROP TYPE "StatusPendencia";
+
+DELETE FROM "perfil_permissao" WHERE "permissao_codigo" = 'sincronizacao.resolver';
+
+-- permissao tem trigger que bloqueia DELETE (fn_bloqueia_exclusao); desligado só neste comando.
+ALTER TABLE "permissao" DISABLE TRIGGER "tg_permissao_sem_exclusao";
+DELETE FROM "permissao" WHERE "codigo" = 'sincronizacao.resolver';
+ALTER TABLE "permissao" ENABLE TRIGGER "tg_permissao_sem_exclusao";
+
+DELETE FROM "parametro" WHERE "chave" = 'pdv.max_horas_sem_sync';

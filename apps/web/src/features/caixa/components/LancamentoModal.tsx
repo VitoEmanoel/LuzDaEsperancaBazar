@@ -7,14 +7,14 @@ import { errorMessage } from '../../../shared/api/http';
 import { fromCents, tryCents } from '../../../shared/lib/money';
 import { uuid } from '../../../shared/lib/uuid';
 
-export function LancamentoModal({ aberto, caixaId, online, onFechar, onOk }: { aberto: boolean; caixaId: string; online: boolean; onFechar: () => void; onOk: (msg: string) => void }) {
+export function LancamentoModal({ aberto, caixaId, onFechar, onOk }: { aberto: boolean; caixaId: string; onFechar: () => void; onOk: (msg: string) => void }) {
   const [tipo, setTipo] = useState<'SANGRIA' | 'SUPRIMENTO'>('SANGRIA');
   const [valor, setValor] = useState('');
   const [motivo, setMotivo] = useState('');
   const [erro, setErro] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   const cents = tryCents(valor);
-  const valido = online && cents !== null && cents > 0 && motivo.trim().length >= 3;
+  const valido = cents !== null && cents > 0 && motivo.trim().length >= 3;
 
   async function salvar() {
     if (!valido) return;
@@ -29,7 +29,6 @@ export function LancamentoModal({ aberto, caixaId, online, onFechar, onOk }: { a
   return (
     <Modal titulo="Sangria / suprimento" aberto={aberto} onFechar={onFechar} largura="sm" fechavel={!enviando}
       rodape={<><button className="btn" onClick={onFechar}>Voltar</button><button className="btn btn-primary" disabled={!valido || enviando} onClick={salvar}>Registrar</button></>}>
-      {!online && <div className="alert alert-warn">Sangria e suprimento exigem conexão.</div>}
       <div className="row" role="radiogroup" aria-label="Tipo">
         {(['SANGRIA', 'SUPRIMENTO'] as const).map((t) => (
           <label key={t} className="check"><input type="radio" checked={tipo === t} onChange={() => setTipo(t)} /> {t === 'SANGRIA' ? 'Sangria (retirada)' : 'Suprimento (reforço)'}</label>

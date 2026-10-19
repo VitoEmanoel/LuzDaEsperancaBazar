@@ -8,8 +8,7 @@ import { ErrorAlert, Field } from '../../../shared/components/ui';
 import { FORMAS_PAGAMENTO, type CatalogoPdv, type FormaPagamento, type PagamentoRequest } from '../../../shared/api/types';
 import { formatMoney, fromCents, toCents, tryCents } from '../../../shared/lib/money';
 import { clientesApi } from '../../cadastros/cadastros.api';
-import { NetworkError, errorMessage } from '../../../shared/api/http';
-import { enfileirarCliente } from '../../../shared/offline/queue';
+import { errorMessage } from '../../../shared/api/http';
 import { uuid } from '../../../shared/lib/uuid';
 import { maskPhone, todayLocal } from '../../../shared/lib/format';
 import { clientesComMesmoTelefone, type ClienteResumo } from '../../cadastros/telefoneDuplicado';
@@ -31,7 +30,6 @@ interface Props {
   aberto: boolean;
   subtotalCents: number;
   limiteDescontoPct: number;
-  online: boolean;
   clientesLocais: CatalogoPdv['clientesFiado'];
   onNovoClienteLocal: (c: { id: string; nome: string; telefone: string }) => void;
   onConfirmar: (r: ResultadoPagamento) => Promise<void>;
@@ -135,7 +133,7 @@ export function PagamentoModal(p: Props) {
         {temFiado && (
           <fieldset className="fiado">
             <legend>Fiado</legend>
-            <SeletorCliente online={p.online} clientesLocais={p.clientesLocais} cliente={cliente} onSelecionar={setCliente} onNovoClienteLocal={p.onNovoClienteLocal} />
+            <SeletorCliente clientesLocais={p.clientesLocais} cliente={cliente} onSelecionar={setCliente} onNovoClienteLocal={p.onNovoClienteLocal} />
             <Field label="Vencimento"><input type="date" value={vencimento} min={todayLocal()} onChange={(e) => setVencimento(e.target.value)} /></Field>
           </fieldset>
         )}
@@ -146,9 +144,9 @@ export function PagamentoModal(p: Props) {
   );
 }
 
-/** Busca de cliente: online via POST /clientes/busca (sem PII na URL); offline no catálogo local. */
-function SeletorCliente({ online, clientesLocais, cliente, onSelecionar, onNovoClienteLocal }: {
-  online: boolean; clientesLocais: CatalogoPdv['clientesFiado']; cliente: { id: string; nome: string } | null;
+/** Busca de cliente via POST /clientes/busca (sem PII na URL). */
+function SeletorCliente({ clientesLocais, cliente, onSelecionar, onNovoClienteLocal }: {
+  clientesLocais: CatalogoPdv['clientesFiado']; cliente: { id: string; nome: string } | null;
   onSelecionar: (c: { id: string; nome: string } | null) => void; onNovoClienteLocal: Props['onNovoClienteLocal'];
 }) {
   const [termo, setTermo] = useState('');
@@ -165,26 +163,22 @@ function SeletorCliente({ online, clientesLocais, cliente, onSelecionar, onNovoC
   }, [termo, clientesLocais]);
 
   useEffect(() => {
-    if (!online || termo.trim().length < 2) { setRemotos(null); return; }
+    if (termo.trim().length < 2) { setRemotos(null); return; }
     const t = setTimeout(() => { clientesApi.buscar(termo.trim(), true).then(setRemotos).catch(() => setRemotos(null)); }, 300);
     return () => clearTimeout(t);
-  }, [termo, online]);
+  }, [termo]);
 
   async function cadastrar(mesmoAssim = false) {
     setErro(null);
     const digitos = tel.replace(/\D/g, '');
     if (nome.trim().length < 3 || digitos.length < 10 || !ciencia) { setErro('Informe nome, telefone com DDD e a ciência do aviso de privacidade.'); return; }
     if (!mesmoAssim) {
-      const achados = await clientesComMesmoTelefone(digitos, { online, locais: clientesLocais });
+      const achados = await clientesComMesmoTelefone(digitos, { online: true, locais: clientesLocais });
       if (achados.length) { setDuplicados(achados); return; }
     }
     setDuplicados(null);
     const c = { id: uuid(), nome: nome.trim(), telefone: tel.trim(), cienciaAviso: true };
-    try {
-      if (online) await clientesApi.criar(c); else await enfileirarCliente(c);
-    } catch (e) {
-      if (e instanceof NetworkError) await enfileirarCliente(c); else { setErro(errorMessage(e)); return; }
-    }
+    try { await clientesApi.criar(c); } catch (e) { setErro(errorMessage(e)); return; }
     onNovoClienteLocal(c); onSelecionar({ id: c.id, nome: c.nome }); setNovo(false); setNome(''); setTel(''); setCiencia(false);
   }
   function usarExistente(c: ClienteResumo) {
@@ -211,7 +205,6 @@ function SeletorCliente({ online, clientesLocais, cliente, onSelecionar, onNovoC
           )}
           <ErrorAlert erro={erro} />
           <div className="row"><button type="button" className="btn" onClick={() => { setNovo(false); setDuplicados(null); }}>Cancelar</button><button type="button" className="btn btn-primary" onClick={() => void cadastrar()}>Cadastrar</button></div>
-          {!online && <small className="hint">Sem conexão: o cliente será enviado na próxima sincronização.</small>}
         </div>
       )}
     </div>

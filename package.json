@@ -2,7 +2,7 @@
   "name": "bazar-luz-da-esperanca",
   "private": true,
   "version": "0.2.0",
-  "description": "Sistema de Bazar — Luz da Esperança (Parnaíba/PI): PDV offline, estoque duplo, caixa, financeiro e prestação de contas.",
+  "description": "Sistema de Bazar — Luz da Esperança (Parnaíba/PI): PDV, estoque duplo, caixa, financeiro e prestação de contas.",
   "engines": {
     "node": ">=20.19"
   },

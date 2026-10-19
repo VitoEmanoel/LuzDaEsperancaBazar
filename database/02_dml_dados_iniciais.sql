@@ -30,7 +30,6 @@ INSERT INTO permissao (codigo, modulo, descricao) VALUES
   ('caixa.operar', 'PDV', 'Abrir/fechar caixa, vender, sangria, suprimento'),
   ('venda.cancelar', 'PDV', 'Cancelar venda'),
   ('venda.desconto_autorizar', 'PDV', 'Desconto acima do limite do perfil'),
-  ('sincronizacao.resolver', 'PDV', 'Pendências de venda offline'),
   ('terminais.gerenciar', 'CXA', 'Pontos de caixa'),
   ('contas_pagar.gerenciar', 'FIN', 'Contas a pagar e lote de compra'),
   ('contas_receber.receber', 'FIN', 'Receber fiado, extrato do cliente'),
@@ -74,8 +73,7 @@ INSERT INTO parametro (chave, valor, descricao) VALUES
   ('alerta.vencimento_dias', '3', 'Avisar contas a pagar com vencimento em até N dias'),
   ('sessao.timeout_min', '30', 'Tempo de inatividade da sessão em minutos (PA-17)'),
   ('senha.tamanho_minimo', '8', 'Tamanho mínimo da senha (PA-17)'),
-  ('anexo.tamanho_max_mb', '5', 'Tamanho máximo do anexo do lote em MB (RNF-18)'),
-  ('pdv.max_horas_sem_sync', '8', 'Tempo máximo do PDV sem sincronizar em horas (PA-17)')
+  ('anexo.tamanho_max_mb', '5', 'Tamanho máximo do anexo do lote em MB (RNF-18)')
 ON CONFLICT (chave) DO NOTHING;
 
 INSERT INTO instituicao (id, nome, uf, atualizado_em) VALUES (1, 'Associação Luz da Esperança', 'PI', now())

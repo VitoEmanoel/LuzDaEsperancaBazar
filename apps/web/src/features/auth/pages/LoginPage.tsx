@@ -52,10 +52,7 @@ export function LoginPage() {
       <form onSubmit={entrar} noValidate>
         <h2>Boas-vindas!</h2>
         <p className="muted">Entre com seu usuário e senha para começar.</p>
-        {!navigator.onLine && (
-          <div className="alert alert-warn">Sem internet. O PDV só reabre offline para o operador que estava com o caixa aberto neste dispositivo (dentro do prazo configurado). Para outros acessos, conecte-se.</div>
-        )}
-        {sessaoExpirada && <div className="alert alert-info">Sua sessão expirou. Entre novamente — o carrinho em andamento foi preservado.</div>}
+        {sessaoExpirada && <div className="alert alert-info">Sua sessão expirou. Entre novamente — o carrinho em andamento foi preservado neste aparelho.</div>}
         <Field label="Usuário">
           <input value={usuario} onChange={(e) => setUsuario(e.target.value)} autoComplete="username" autoFocus required maxLength={60} />
         </Field>

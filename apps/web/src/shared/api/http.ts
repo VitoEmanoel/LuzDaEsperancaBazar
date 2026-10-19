@@ -11,7 +11,6 @@
  *  - Query string nunca deve conter PII (nome/telefone): buscas de cliente usam POST /clientes/busca.
  */
 import type { ProblemDetails } from './types';
-import { reportNetwork, isSimulatedOffline } from '../lib/connectivity';
 
 const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api/v1';
 const TIMEOUT_MS = 15_000;
@@ -35,7 +34,7 @@ export class ApiError extends Error {
   get status() { return this.problem.status; }
   get code() { return this.problem.code; }
 }
-/** Sem conexão / timeout: o PDV usa isso para cair no modo offline. */
+/** Sem conexão / timeout. */
 export class NetworkError extends Error {
   constructor(message = 'Sem conexão com o servidor') { super(message); this.name = 'NetworkError'; }
 }
@@ -95,7 +94,6 @@ function buildPath(path: string, query?: RequestOptions['query']) {
 }
 
 async function send(method: string, path: string, opts: RequestOptions): Promise<TransportResponse> {
-  if (isSimulatedOffline()) { reportNetwork(false); throw new NetworkError(); }
   const headers: Record<string, string> = { Accept: 'application/json', ...opts.headers };
   let body: string | FormData | undefined;
   if (opts.formData) body = opts.formData; // o navegador define o boundary do multipart
@@ -105,11 +103,8 @@ async function send(method: string, path: string, opts: RequestOptions): Promise
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? TIMEOUT_MS);
   try {
-    const res = await transport({ method, path: buildPath(path, opts.query), headers, body }, ctrl.signal);
-    reportNetwork(true);
-    return res;
+    return await transport({ method, path: buildPath(path, opts.query), headers, body }, ctrl.signal);
   } catch {
-    reportNetwork(false);
     throw new NetworkError(ctrl.signal.aborted ? 'Tempo de resposta esgotado' : undefined);
   } finally {
     clearTimeout(timer);
@@ -129,7 +124,7 @@ export function refreshAccessToken(): Promise<boolean> {
       tokenStore.clear();
       return false;
     } catch (e) {
-      if (e instanceof NetworkError) throw e; // offline não é sessão expirada
+      if (e instanceof NetworkError) throw e; // falha de rede não é sessão expirada
       return false;
     } finally {
       setTimeout(() => { refreshing = null; }, 0);

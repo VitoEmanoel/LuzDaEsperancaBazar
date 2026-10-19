@@ -1,6 +1,6 @@
 /**
  * RF-CAD-04 cenário 3 (ticket 12): antes de cadastrar um cliente, procura outro com o MESMO telefone.
- * Online: `POST /clientes/busca` (telefone no corpo, nunca na URL). Offline ou sem rede: lista local do PDV.
+ * Online: `POST /clientes/busca` (telefone no corpo, nunca na URL). Se a busca falhar, usa a lista de clientes do catálogo do PDV.
  * Não bloqueia: quem decide é o operador ("Usar existente" ou "Cadastrar mesmo assim").
  */
 import { clientesApi } from './cadastros.api';

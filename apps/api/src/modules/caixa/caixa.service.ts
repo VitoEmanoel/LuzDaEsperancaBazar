@@ -11,7 +11,7 @@ export type Forma = (typeof FORMAS)[number];
  *  + recebimentos de fiado em dinheiro feitos neste caixa e não estornados + suprimentos − sangrias.
  */
 export async function calcularPrevia(db: Db, caixaId: string) {
-  const cx = await db.caixaSessao.findUniqueOrThrow({ where: { id: caixaId }, select: { valorAbertura: true, terminalId: true } });
+  const cx = await db.caixaSessao.findUniqueOrThrow({ where: { id: caixaId }, select: { valorAbertura: true } });
   const porForma = await db.$queryRaw<{ forma: Forma; total: string }[]>`
     SELECT p.forma::text AS forma, sum(p.valor)::text AS total
     FROM venda_pagamento p JOIN venda v ON v.id = p.venda_id
@@ -19,7 +19,6 @@ export async function calcularPrevia(db: Db, caixaId: string) {
   const qtdVendas = await db.venda.count({ where: { sessaoId: caixaId, status: 'FINALIZADA' } });
   const receb = await db.recebimento.aggregate({ where: { sessaoId: caixaId, estornadoEm: null, forma: 'DINHEIRO' }, _sum: { valor: true } });
   const lanc = await db.caixaLancamento.groupBy({ by: ['tipo'], where: { sessaoId: caixaId }, _sum: { valor: true } });
-  const pendencias = await db.pendenciaSincronizacao.count({ where: { terminalId: cx.terminalId, status: 'PENDENTE' } });
 
   const totais = Object.fromEntries(FORMAS.map((f) => [f, 0])) as Record<Forma, number>;
   for (const r of porForma) totais[r.forma] = toCents(Number(r.total).toFixed(2));
@@ -32,7 +31,6 @@ export async function calcularPrevia(db: Db, caixaId: string) {
       fundoTroco: money(cx.valorAbertura), suprimentos: fromCents(sup), sangrias: fromCents(sang),
       totaisPorForma: Object.fromEntries(FORMAS.map((f) => [f, fromCents(totais[f])])) as Record<Forma, string>,
       esperadoDinheiro: fromCents(esperado), quantidadeVendas: qtdVendas,
-      filaPendente: pendencias,
     },
   };
 }

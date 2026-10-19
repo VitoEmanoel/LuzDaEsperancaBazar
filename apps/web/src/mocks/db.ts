@@ -6,8 +6,8 @@
  */
 import type {
   CaixaSessao, Campanha, Categoria, CategoriaDespesa, Cliente, ContaPagar, ContaReceber, FormaPagamento,
-  HistoricoEvento, Instituicao, LocalEstoque, Motivo, Parametro, Parceiro, Pendencia, Perfil, Permissao,
-  Recebimento, RegraFiscal, Terminal, TipoControle, TipoEntrada, Venda, VendaRequest, AuditoriaRegistro,
+  HistoricoEvento, Instituicao, LocalEstoque, Motivo, Parametro, Parceiro, Perfil, Permissao,
+  Recebimento, RegraFiscal, Terminal, TipoControle, TipoEntrada, Venda, AuditoriaRegistro,
 } from '../shared/api/types';
 import { PERMISSOES } from '../shared/api/types';
 
@@ -33,7 +33,6 @@ export interface MovDb { id: string; itemId: string; tipo: HistoricoEvento['tipo
 export interface DescarteDb { id: string; loteId: string; categoriaId: string; motivoId: string; registradoEm: string; revertido: boolean }
 export interface VendaDb extends Venda { caixaId: string; terminalId: string; operadorId: string; alocacoes: { itemId: string; quantidade: number; precoUnit: number }[]; clienteId?: string }
 export interface CaixaDb extends CaixaSessao { operadorId: string; lancamentos: { id: string; tipo: 'SANGRIA' | 'SUPRIMENTO'; valor: number; motivo: string; em: string }[] }
-export interface PendenciaDb extends Pendencia { req: VendaRequest; operadorId: string }
 
 const PERFIL_ADMIN = sid('perfadm'), PERFIL_CAIXA = sid('perfcxa'), PERFIL_TRIAGEM = sid('perftri');
 const caixaPerms: Permissao[] = ['caixa.operar', 'clientes.gerenciar', 'contas_receber.receber', 'cadastros.consultar', 'estoque.consultar'];
@@ -104,7 +103,6 @@ export const db = {
   descartes: [] as DescarteDb[],
   vendas: [] as VendaDb[],
   caixas: [] as CaixaDb[],
-  pendencias: [] as PendenciaDb[],
   contasPagar: [
     { id: sid('cp1'), descricao: 'Conta de energia — setembro', categoriaDespesaId: despEnergia, categoriaDespesaNome: 'Energia', valor: '187.40', vencimento: data(-2), status: 'ABERTA' },
     { id: sid('cp2'), descricao: 'Sacolas e etiquetas', categoriaDespesaId: despMaterial, categoriaDespesaNome: 'Material de consumo', valor: '96.00', vencimento: data(5), status: 'ABERTA' },
@@ -122,7 +120,6 @@ export const db = {
     { chave: 'sessao.timeout_min', valor: '30', descricao: 'Tempo de inatividade da sessão (min)', tipo: 'number' },
     { chave: 'senha.tamanho_minimo', valor: '8', descricao: 'Tamanho mínimo da senha', tipo: 'number' },
     { chave: 'anexo.tamanho_max_mb', valor: '5', descricao: 'Tamanho máximo do anexo do lote (MB)', tipo: 'number' },
-    { chave: 'pdv.max_horas_sem_sync', valor: '8', descricao: 'Tempo máximo do PDV sem sincronizar (h)', tipo: 'number' },
   ] as Parametro[],
   auditoria: [] as AuditoriaRegistro[],
 };

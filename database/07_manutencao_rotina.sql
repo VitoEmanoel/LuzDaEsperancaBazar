@@ -23,8 +23,6 @@ UNION ALL
 -- 5. Alertas operacionais
 SELECT 'caixas_abertos_ha_mais_de_18h', count(*) FROM caixa_sessao WHERE status = 'ABERTO' AND aberto_em < now() - interval '18 hours'
 UNION ALL
-SELECT 'pendencias_offline_abertas', count(*) FROM pendencia_sincronizacao WHERE status = 'PENDENTE'
-UNION ALL
 SELECT 'contas_pagar_vencidas', count(*) FROM conta_pagar WHERE status = 'ABERTA' AND vencimento < current_date;
 
 -- 6. Estatísticas das tabelas que mais crescem (o autovacuum cuida do resto)

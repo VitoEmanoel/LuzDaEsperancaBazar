@@ -59,7 +59,7 @@ SELECT format('GRANT CONNECT ON DATABASE %I TO bazar_relatorio', current_databas
 SELECT 'GRANT USAGE ON SCHEMA public TO bazar_relatorio' WHERE :'senha_relatorio' <> '' \gexec
 SELECT 'GRANT SELECT ON ALL TABLES IN SCHEMA public TO bazar_relatorio' WHERE :'senha_relatorio' <> '' \gexec
 -- LGPD (RN-29): sem dados pessoais, credenciais nem tokens para o papel de leitura
-SELECT 'REVOKE SELECT ON cliente, consentimento, usuario, sessao_usuario, idempotencia, auditoria, pendencia_sincronizacao FROM bazar_relatorio'
+SELECT 'REVOKE SELECT ON cliente, consentimento, usuario, sessao_usuario, idempotencia, auditoria FROM bazar_relatorio'
  WHERE :'senha_relatorio' <> '' \gexec
 SELECT 'GRANT SELECT (id, ativo, anonimizado_em, criado_em) ON cliente TO bazar_relatorio' WHERE :'senha_relatorio' <> '' \gexec
 SELECT 'GRANT SELECT (id, nome, perfil_id, ativo) ON usuario TO bazar_relatorio' WHERE :'senha_relatorio' <> '' \gexec

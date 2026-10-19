@@ -18,7 +18,6 @@ const TIPOS_PARAM: Record<string, { tipo: 'number' | 'text'; min?: number; max?:
   'sessao.timeout_min': { tipo: 'number', min: 5, max: 480 },
   'senha.tamanho_minimo': { tipo: 'number', min: 8, max: 64 },
   'anexo.tamanho_max_mb': { tipo: 'number', min: 1, max: 10 },
-  'pdv.max_horas_sem_sync': { tipo: 'number', min: 1, max: 72 },
 };
 
 export async function rotasAdmin(app: FastifyInstance) {

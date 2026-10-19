@@ -1,14 +1,13 @@
-/** Comprovante NÃO FISCAL (aviso explícito). Venda offline mostra número provisório. */
+/** Comprovante NÃO FISCAL (aviso explícito). */
 import { Modal } from '../../../shared/components/Modal';
 import type { Instituicao, Venda } from '../../../shared/api/types';
 import { FORMAS_PAGAMENTO } from '../../../shared/api/types';
 import { formatMoney } from '../../../shared/lib/money';
 import { formatDate, formatDateTime, formatDocumento } from '../../../shared/lib/format';
 
-/** `instituicao` vem do servidor (ou da cópia local, offline); sem ela, cai no nome padrão e sem CNPJ. */
+/** `instituicao` vem do servidor; sem ela, cai no nome padrão e sem CNPJ. */
 export function ComprovanteModal({ venda, instituicao, onFechar }: { venda: Venda | null; instituicao?: Instituicao | null; onFechar: () => void }) {
   if (!venda) return null;
-  const provisoria = venda.numero === null;
   return (
     <Modal titulo="Venda concluída" aberto onFechar={onFechar} largura="sm"
       rodape={<><button className="btn" onClick={() => window.print()}>Imprimir</button><button className="btn btn-primary" onClick={onFechar} autoFocus>Nova venda (Enter)</button></>}>
@@ -23,8 +22,7 @@ export function ComprovanteModal({ venda, instituicao, onFechar }: { venda: Vend
         )}
         <p className="aviso-nao-fiscal">DOCUMENTO NÃO FISCAL — SEM VALOR FISCAL</p>
         <p>
-          {provisoria ? <>Nº provisório: <strong>{venda.numeroLocal}</strong><br /><small>Venda offline — receberá o número oficial ao sincronizar.</small></>
-            : <>Venda nº <strong>{venda.numero}</strong></>}
+          Venda nº <strong>{venda.numero}</strong>
           <br />{formatDateTime(venda.ocorridaEm)} · {venda.operadorNome}
         </p>
         <table>

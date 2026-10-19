@@ -101,15 +101,15 @@ PWA, fila offline e sincronização, tela de triagem (vira cadastro + aprovaçã
 **Objetivo:** sistema só web, com os 4 perfis e a visibilidade correta.
 
 Remover offline e PWA
-- [ ] S1-01 Preparar o ambiente na pasta do projeto (dependências, `.env` de teste, banco de teste) e criar a branch da sprint
-- [ ] S1-02 Remover o Service Worker (`public/sw.js`), o registro no `main.tsx` e o manifesto PWA
-- [ ] S1-03 Remover a fila offline, o IndexedDB e a sincronização (`shared/offline/*`, `connectivity`)
-- [ ] S1-04 Remover o operador offline do login (`operadorOffline.ts`, `AuthContext`, `LoginPage`)
-- [ ] S1-05 Remover a tela de Sincronização e o item de menu
-- [ ] S1-06 Remover a rota `/sync/lote` e a permissão `sincronizacao.resolver` na API, se existirem
-- [ ] S1-07 Remover os bloqueios por fila offline na abertura e no fechamento de caixa e no logout
-- [ ] S1-08 Manter a idempotência por UUID em venda, transferência e recebimento (evita duplicar em clique duplo)
-- [ ] S1-09 Ajustar a API simulada (mocks) e os testes que cobriam sincronização; registrar a nova contagem de testes
+- [x] S1-01 Preparar o ambiente na pasta do projeto (dependências, `.env` de teste, banco de teste) e criar a branch da sprint
+- [x] S1-02 Remover o Service Worker (`public/sw.js`), o registro no `main.tsx` e o manifesto PWA
+- [x] S1-03 Remover a fila offline, o IndexedDB e a sincronização (`shared/offline/*`, `connectivity`)
+- [x] S1-04 Remover o operador offline do login (`operadorOffline.ts`, `AuthContext`, `LoginPage`)
+- [x] S1-05 Remover a tela de Sincronização e o item de menu
+- [x] S1-06 Remover a rota `/sync/lote` e a permissão `sincronizacao.resolver` na API, se existirem
+- [x] S1-07 Remover os bloqueios por fila offline na abertura e no fechamento de caixa e no logout
+- [x] S1-08 Manter a idempotência por UUID em venda, transferência e recebimento (evita duplicar em clique duplo)
+- [x] S1-09 Ajustar a API simulada (mocks) e os testes que cobriam sincronização; registrar a nova contagem de testes
 
 Perfis e visibilidade
 - [ ] S1-10 Migração nova: renomear Caixa para Vendedor, Triagem para Estoquista e criar o perfil Financeiro

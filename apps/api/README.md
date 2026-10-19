@@ -47,7 +47,7 @@ src/
     cadastros/   cadastros, clientes, instituição
     entradas/    lotes, anexo, triagem, descartes, etiquetas
     estoque/     estoque, histórico, transferência, baixa, ajuste, preço, carga inicial
-    pdv/         catálogo, venda, sync offline, pendências, cancelamento
+    pdv/         catálogo, venda, cancelamento
     caixa/       terminais, caixa, sangria/suprimento, fechamento
     financeiro/  contas a pagar/receber, recebimentos, estornos, resumo
     fiscal/      regras fiscais versionadas
@@ -70,8 +70,7 @@ Scripts SQL do DBA ficam em `/database` na raiz do monorepo.
 | CAD | `POST /clientes/busca` · `GET,POST /clientes` · `PATCH /clientes/:id` · `GET,PUT /instituicao` | clientes.gerenciar, caixa.operar… |
 | ENT/TRI | `GET,POST /lotes` · `GET /lotes/:id` · `POST,GET /lotes/:id/documento` · `POST /lotes/:id/{itens,descartes,encerrar,reabrir}` · `POST /descartes/:id/reverter` · `GET /etiquetas` | entrada.registrar / triagem.reabrir |
 | EST | `GET /estoque` · `GET /itens/codigo/:codigo` · `GET /itens/:id/historico` · `POST /transferencias` · `POST /baixas` · `POST /ajustes` · `PATCH /itens/:id/preco` · `PATCH /categorias/:id/preco` · `POST /carga-inicial` | estoque.* |
-| PDV | `GET /pdv/catalogo` (ETag) · `PUT /vendas/:id` · `POST /sync/lote` · `GET /vendas` · `GET /vendas/:id/comprovante` · `POST /vendas/:id/cancelar` | caixa.operar / venda.cancelar |
-| PDV | `GET /pendencias` · `POST /pendencias/:id/{reprocessar,descartar}` | sincronizacao.resolver |
+| PDV | `GET /pdv/catalogo` (ETag) · `PUT /vendas/:id` · `GET /vendas` · `GET /vendas/:id/comprovante` · `POST /vendas/:id/cancelar` | caixa.operar / venda.cancelar |
 | CXA | `GET,POST /terminais` · `PATCH /terminais/:id` · `GET /caixas/atual` · `POST /caixas` · `POST /caixas/:id/lancamentos` · `GET /caixas/:id/previa-fechamento` · `POST /caixas/:id/fechar` · `GET /caixas` | terminais.gerenciar / caixa.operar / relatorios.consultar |
 | FIN | `GET,POST /contas-pagar` · `PATCH /contas-pagar/:id` · `POST /contas-pagar/:id/{pagar,cancelar}` · `GET,POST /contas-receber` · `POST /contas-receber/:id/recebimentos` · `POST /recebimentos/:id/estornar` · `GET /clientes/:id/extrato` · `GET /financeiro/resumo` | contas_* / recebimento.estornar / relatorios.consultar |
 | FIS | `GET,POST /regras-fiscais` | fiscal.gerenciar |
@@ -93,11 +92,11 @@ Scripts SQL do DBA ficam em `/database` na raiz do monorepo.
 | RN-15 pagamentos = total; troco só em dinheiro | servidor recalcula tudo | `ck_pagamento_*`, `ck_venda_totais` |
 | RN-17 regra fiscal versionada, cópia na venda | `fiscal.service.ts` | `tg_valida_regra_fiscal`, `ux_regra_vigente` |
 | RN-19 fechamento | `calcularPrevia()` | `ck_caixa_fechamento` |
-| RN-26 offline sem perder nem duplicar | id do terminal = chave; recusa vira pendência | PK da venda, `pendencia(tipo, referencia_id)` único |
+| RN-26 venda não duplica | id da venda gerado no cliente = chave de idempotência | PK da venda |
 | RN-27 recebimento/estorno | sangria se o caixa do recebimento fechou | `tg_valida_recebimento`, recálculo do status |
 | RN-28 lote triado fechado | | `tg_lote_aberto_item` / `_descarte` |
 | RN-29 auditoria sem PII | `shared/audit.ts` remove campos pessoais | `auditoria` só inclusão |
-| RN-31 datas | filtros por dia em America/Fortaleza; online = hora do servidor, offline = hora do terminal (com limites) | baixa usa `venda.ocorrida_em` |
+| RN-31 datas | filtros por dia em America/Fortaleza; a hora da venda é a do servidor | baixa usa `venda.ocorrida_em` |
 
 ## Segurança (baseline OWASP ASVS L2 / API Top 10)
 
@@ -127,16 +126,15 @@ Azure Key Vault ou Google Secret Manager; `UPLOAD_DIR` em volume com backup (RNF
 ## Divergências e decisões (validar com PO/front)
 
 1. **Permissão de desconto:** o front usa `venda.desconto_autorizar`; o doc 02 chama `desconto.autorizar`. Mantido o código do front.
-2. **Status traduzidos no contrato:** lote `AGUARDANDO_TRIAGEM`/`EM_TRIAGEM` → `ABERTO`; venda `FINALIZADA` → `CONCLUIDA`; pendência `PENDENTE/RESOLVIDA` → `ABERTA/REPROCESSADA`. O banco segue o doc 04.
+2. **Status traduzidos no contrato:** lote `AGUARDANDO_TRIAGEM`/`EM_TRIAGEM` → `ABERTO`; venda `FINALIZADA` → `CONCLUIDA`. O banco segue o doc 04.
 3. **`instituicao.endereco`** adicionada (o front envia endereço). **`idempotencia`**: tabela técnica para reenvio de transferência/baixa/ajuste.
-4. **Venda online usa a hora do servidor**; `origem=OFFLINE` usa a hora do terminal, recusando hora futura (> 5 min) ou anterior à abertura do caixa.
+4. **A hora da venda é sempre a do servidor.** As colunas `venda.origem_registro` e `venda.numero_local` ficam só pelo histórico.
 5. **Item por categoria é vendido pelo preço padrão ATUAL da categoria** (RN-08); `preco` em `ItemEstoque` reflete isso.
-6. **Reprocessar pendência:** se o caixa original já fechou, a venda entra no caixa aberto do mesmo terminal (caixa fechado não reabre); sem caixa aberto → `409 SEM_CAIXA_ABERTO`.
+6. **Sem modo offline** (migração `0004_remove_offline`): não há `/sync/lote`, pendências nem a permissão `sincronizacao.resolver`.
 7. **Reverter descarte** reabre o lote (EM_TRIAGEM) para a nova triagem (RN-20); o item pode informar `descarteOrigemId` (opcional).
 8. **Campos opcionais extras aceitos** (o front pode ignorar): `valorAtribuido`/`descarteOrigemId` na triagem, `forma` no recebimento (padrão DINHEIRO), `formaPagamento` no pagamento de conta e no lote de compra pago (padrão PIX), `fiadoPrazoDias` no catálogo.
 9. **`fiado.prazo_dias`** vem vazio (PA-07): sem ele o PDV precisa mandar `vencimentoFiado`.
-10. **`filaPendente`** na prévia = pendências abertas do terminal no servidor (a fila local é do aparelho).
-11. **`GET /instituicao`** também liberado a `caixa.operar` (dados do comprovante, RF-PDV-08).
+10. **`GET /instituicao`** também liberado a `caixa.operar` (dados do comprovante, RF-PDV-08).
 
 ## Pendências conhecidas
 

@@ -98,7 +98,7 @@ async function main() {
   const term = (await admin.post('/terminais', { id: uuid(), nome: `Reteste ${uuid().slice(0, 4)}` })).data;
   let cx = await admin.get('/caixas/atual');
   if (cx.status === 404) cx = await admin.post('/caixas', { id: uuid(), terminalId: term.id, fundoTroco: '50.00' });
-  check(cx.data?.operadorId, 'caixa traz operadorId (PDV offline — ticket 9)', cx.data);
+  check(cx.data?.operadorId, 'caixa traz operadorId', cx.data);
   const caixaId = cx.data.id;
   const cliente = (await admin.post('/clientes', { id: uuid(), nome: 'Cliente Reteste', telefone: `8699${String(Date.now()).slice(-7)}`, cienciaAviso: true })).data;
   const conta = (await admin.post('/contas-receber', { id: uuid(), clienteId: cliente.id, descricao: 'Fiado reteste', valor: '30.00', vencimento: hoje })).data;
@@ -127,7 +127,6 @@ async function main() {
     check(r.status === 200 && r.data.cnpj, 'GET /instituicao', r.data);
   }
   const cat = await admin.get('/pdv/catalogo');
-  check(typeof cat.data?.pdvMaxHorasSemSync === 'number', 'catálogo traz pdv.max_horas_sem_sync (ticket 9)', cat.data?.pdvMaxHorasSemSync);
 
   console.log('Ticket 7 — relatórios de vendas e descartes');
   const q = `de=2026-01-01&ate=${hoje}`;

@@ -7,7 +7,6 @@ import { useState } from 'react';
 import { useAuth } from '../../features/auth/AuthContext';
 import type { Permissao } from '../../shared/api/types';
 import { useToast } from '../../shared/components/Toast';
-import { useOnline } from '../../shared/offline/hooks';
 import { BrandMark } from '../../shared/components/BrandMark';
 
 interface ItemMenu { to: string; rotulo: string; perms: Permissao[] }
@@ -30,7 +29,6 @@ const MENU: { grupo: string; cor: 'coral' | 'laranja' | 'sol' | 'ceu' | 'roxo'; 
   ] },
   { grupo: 'Gestão', cor: 'ceu', itens: [
     { to: '/relatorios/prestacao-contas', rotulo: 'Relatórios', perms: ['relatorios.consultar'] },
-    { to: '/sincronizacao', rotulo: 'Pendências de sincronização', perms: ['sincronizacao.resolver'] },
     { to: '/cadastros/categorias', rotulo: 'Cadastros', perms: ['cadastros.gerenciar', 'cadastros.consultar', 'clientes.gerenciar'] },
     { to: '/admin', rotulo: 'Administração', perms: ['usuarios.gerenciar', 'perfis.gerenciar', 'parametros.gerenciar', 'auditoria.consultar', 'terminais.gerenciar', 'privacidade.gerenciar', 'fiscal.gerenciar'] },
   ] },
@@ -46,7 +44,6 @@ export function AppLayout() {
   const { me, can, logout } = useAuth();
   const toast = useToast();
   const nav = useNavigate();
-  const online = useOnline();
   const [menuAberto, setMenuAberto] = useState(false);
 
   async function sair() {
@@ -77,7 +74,6 @@ export function AppLayout() {
       <div className="main">
         <header className="topbar">
           <button className="btn btn-ghost menu-toggle" onClick={() => setMenuAberto((v) => !v)} aria-label="Abrir menu">☰</button>
-          {!online && <span className="badge badge-erro">Sem conexão — o Backoffice exige internet</span>}
           <div className="spacer" />
           <span className="user">{me?.nome}<small>{me?.perfil.nome}</small></span>
           <span className="avatar" aria-hidden="true">{iniciais(me?.nome)}</span>

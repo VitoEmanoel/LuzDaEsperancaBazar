@@ -1,6 +1,6 @@
 # @bazar/web — Front-end
 
-Interface web (React 19 + TypeScript estrito + Vite) do sistema de bazar, com **PDV PWA offline** e **Backoffice**.
+Interface web (React 19 + TypeScript estrito + Vite) do sistema de bazar, com **PDV** e **Backoffice** (somente web, exige internet).
 Baseado na *Especificação Técnica* (seções 4 e 5). Não contém lógica de servidor nem banco: a pasta `src/mocks` só simula a API em desenvolvimento.
 
 ## Rodar
@@ -22,21 +22,21 @@ Usuários da API simulada (**somente dev**; o build de produção não inclui `s
 | `caixa` | `Caixa@123` | Caixa (vai direto ao PDV) |
 | `triagem` | `Triagem@123` | Triagem |
 
-Códigos de peças etiquetadas no seed: `BZ000001` a `BZ000005`. No PDV em dev há a caixa **“Simular offline”**.
+Códigos de peças etiquetadas no seed: `BZ000001` a `BZ000005`. 
 A API simulada vive na memória da aba: recarregar a página (F5) zera os dados.
 
 ## Estrutura (por domínio — espelha `apps/api/src/modules`)
 
 ```
 src/
-  main.tsx               bootstrap: fontes, estilos, mocks (só dev), Service Worker (só prod)
+  main.tsx               bootstrap: fontes, estilos, mocks (só dev)
   app/
     App.tsx              rotas (Especificação Técnica, seção 4) + providers
     layout/AppLayout.tsx menu lateral filtrado por permissão (só UX) + barra superior
   features/              uma pasta por módulo de negócio; cada uma tem <modulo>.api.ts, pages/, components/, hooks/
     auth/                AuthContext, guards, login, troca de senha            (API: acesso)
     inicio/              painel inicial com alertas e atalhos
-    pdv/                 PDV, carrinho, pagamento, comprovante, vendas, sync   (API: pdv)
+    pdv/                 PDV, carrinho, pagamento, comprovante, vendas         (API: pdv)
     caixa/               abrir/fechar caixa, sangria e suprimento               (API: caixa)
     entradas/            lotes de entrada e triagem                             (API: entradas)
     estoque/             posição, histórico, transferência, ajustes, ItemPicker (API: estoque)
@@ -48,11 +48,9 @@ src/
     api/                 http.ts (cliente único: token em memória, refresh single-flight, timeout, RFC 9457) e types.ts (DTOs)
     components/          BrandMark, Modal, ConfirmMotivo, Toast, Barcode (Code 39), ui (Field, Badge, Tabs…)
     hooks/               useAsync
-    lib/                 dinheiro em centavos, datas America/Fortaleza, UUID, conectividade, beep
-    offline/             IndexedDB mínimo, fila de vendas/clientes, sync idempotente, hooks
+    lib/                 dinheiro em centavos, datas America/Fortaleza, UUID, armazenamento local mínimo, beep
   styles/                tokens.css (brandbook) → base → components → layout → pdv → print (index.css importa todos)
   mocks/                 API simulada (dev) — imita permissões, 409 de negócio, PEPS, idempotência
-public/sw.js             Service Worker: cacheia só o shell estático e /assets (inclui fontes), nunca /api
 ```
 
 Regras de dependência: `features/*` podem usar `shared/*` e, quando necessário, outra feature
@@ -62,25 +60,24 @@ Regras de dependência: `features/*` podem usar `shared/*` e, quando necessário
 
 Segue o brandbook da instituição (`docs/marca/identidade-visual.md`): verde-esperança, dourado-terra,
 branco-osso e cinza-texto; acentos das pétalas um por área do menu; **Lora** nos títulos e **Nunito** no
-corpo, servidas pelo próprio app (`@fontsource-variable/*`) — sem CDN, compatível com a CSP `'self'` e com o
-PDV offline. Todas as cores ficam em `src/styles/tokens.css`; telas não usam cor fixa.
+corpo, servidas pelo próprio app (`@fontsource-variable/*`) — sem CDN, compatível com a CSP `'self'`.
+Todas as cores ficam em `src/styles/tokens.css`; telas não usam cor fixa.
 
 ## Rotas implementadas (seção 4)
 
 `/login`, `/trocar-senha`, `/`, `/pdv`, `/pdv/abrir`, `/pdv/fechar`, `/vendas`, `/entradas`, `/entradas/novo`,
 `/entradas/:id/triagem`, `/estoque`, `/estoque/itens/:id`, `/estoque/transferir`, `/estoque/ajustes`,
-`/financeiro/pagar`, `/financeiro/receber`, `/financeiro/resumo`, `/relatorios/:tipo`, `/sincronizacao`,
+`/financeiro/pagar`, `/financeiro/receber`, `/financeiro/resumo`, `/relatorios/:tipo`,
 `/cadastros/:tipo`, `/admin/*` (usuários, perfis, terminais, parâmetros, instituição, regra fiscal, auditoria, importação, LGPD).
 
 ## PDV
 
 - Campo de código sempre focado; leitor USB em modo teclado (Enter). Feedback sonoro e visual.
-- Atalhos: **F2** quantidade/categoria · **F4** pagamento · **Esc** remove último · **F6** sangria/suprimento · **F8** sincronizar.
+- Atalhos: **F2** quantidade/categoria · **F4** pagamento · **Esc** remove último · **F6** sangria/suprimento.
 - Pagamento dividido, troco, fiado (cliente + vencimento), cadastro rápido de cliente com ciência LGPD, desconto limitado pelo perfil.
-- **Offline**: a venda vai para o IndexedDB com número provisório `OFF-XXXX-0001`; sobe em `POST /sync/lote` ao reconectar
-  (automático e a cada 30 s). O id da venda (UUID do cliente) é a chave de idempotência: se a rede cair no meio do
-  `PUT /vendas/:id`, a mesma venda vai para a fila sem risco de duplicar. Recusa vira pendência no servidor (RN-26).
-- Abrir caixa exige conexão; fechar exige fila vazia. O carrinho é preservado se a sessão expirar.
+- A venda é gravada direto no servidor. O id da venda (UUID do cliente) é a chave de idempotência: se a resposta se perder
+  e o operador repetir, a mesma venda é devolvida, sem duplicar. O carrinho é preservado no aparelho se a sessão expirar.
+- Sem modo offline: se faltar internet, o PDV mostra o erro e a venda não é registrada.
 
 ## Segurança no front-end (baseline da seção 3)
 
@@ -91,8 +88,8 @@ PDV offline. Todas as cores ficam em `src/styles/tokens.css`; telas não usam co
 | Timeout em toda requisição (15 s; 60 s upload/relatório) | `shared/api/http.ts` |
 | Busca de cliente via **POST** `/clientes/busca` — nenhuma PII em URL | `features/cadastros/cadastros.api.ts` |
 | Telefone mascarado em listas; nada de PII em `console.*` | `shared/lib/format.ts` |
-| IndexedDB guarda só o mínimo do RNF-19; sem tokens/senhas/documentos | `shared/offline/idb.ts` |
-| Logout limpa token, IndexedDB e caches do SW; bloqueado se houver fila não sincronizada | `AuthContext.tsx` |
+| O aparelho guarda só o terminal fixo e o carrinho; sem tokens, senhas, documentos ou dados de cliente | `shared/lib/armazenamento.ts` |
+| Logout limpa o token em memória e o que o sistema guardou no aparelho | `AuthContext.tsx` |
 | Logout explícito não “herda” a rota do usuário anterior | `guards.tsx` |
 | Terminal desativado (`code: TERMINAL_DESATIVADO`) apaga dados locais | `usePdvSessao.ts` |
 | Menus/botões filtrados por permissão **apenas como UX** — o servidor decide (403) | `AppLayout.tsx`, `guards.tsx` |

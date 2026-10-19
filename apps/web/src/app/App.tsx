@@ -22,7 +22,6 @@ import { ContasPagarPage } from '../features/financeiro/pages/ContasPagarPage';
 import { ContasReceberPage } from '../features/financeiro/pages/ContasReceberPage';
 import { ResumoFinanceiroPage } from '../features/financeiro/pages/ResumoFinanceiroPage';
 import { RelatoriosPage } from '../features/relatorios/pages/RelatoriosPage';
-import { SincronizacaoPage } from '../features/pdv/pages/SincronizacaoPage';
 import { CadastrosPage } from '../features/cadastros/pages/CadastrosPage';
 import { AdminPage } from '../features/admin/pages/AdminPage';
 import type { Permissao } from '../shared/api/types';
@@ -57,7 +56,6 @@ export function App() {
               <Route path="financeiro/receber" element={P(['contas_receber.receber'], <ContasReceberPage />)} />
               <Route path="financeiro/resumo" element={P(['relatorios.consultar'], <ResumoFinanceiroPage />)} />
               <Route path="relatorios/:tipo" element={P(['relatorios.consultar'], <RelatoriosPage />)} />
-              <Route path="sincronizacao" element={P(['sincronizacao.resolver'], <SincronizacaoPage />)} />
               <Route path="cadastros/:tipo" element={P(['cadastros.gerenciar', 'cadastros.consultar', 'clientes.gerenciar'], <CadastrosPage />)} />
               <Route path="admin/*" element={<AdminPage />} />
             </Route>

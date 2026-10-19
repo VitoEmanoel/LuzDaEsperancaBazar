@@ -153,7 +153,7 @@ async function main() {
   const cat = await caixa.req('GET', '/pdv/catalogo');
   check(cat.status === 200 && cat.data.itensEtiquetados.length === 2 && cat.data.clientesFiado.length === 1, 'catálogo do PDV', cat.data);
   check((await caixa.req('GET', '/pdv/catalogo', undefined, { headers: { 'if-none-match': cat.headers.get('etag')! } })).status === 304, 'catálogo 304 com ETag');
-  const base = { terminalId: term1.id, caixaId: cxId, ocorridaEm: new Date().toISOString(), origem: 'ONLINE' };
+  const base = { terminalId: term1.id, caixaId: cxId };
   const v1 = uuid();
   const r1 = await caixa.put(`/vendas/${v1}`, { ...base, itens: [{ codigo: pec1.codigo, quantidade: 1 }, { categoriaId: catRoupa.id, quantidade: 6 }], pagamentos: [{ forma: 'DINHEIRO', valor: '95.00', valorRecebido: '100.00' }] });
   check(r1.status === 201 && r1.data.total === '95.00' && r1.data.troco === '5.00', 'venda online com troco', r1.data);
@@ -172,22 +172,6 @@ async function main() {
   check((await caixa.put(`/vendas/${uuid()}`, { ...base, itens: [{ categoriaId: catRoupa.id, quantidade: 1 }], pagamentos: [{ forma: 'FIADO', valor: '10.00' }] })).data?.code === 'FIADO_SEM_CLIENTE', 'fiado sem cliente (RN-03)');
   check((await caixa.put(`/vendas/${uuid()}`, { ...base, itens: [{ categoriaId: catRoupa.id, quantidade: 999 }], pagamentos: [{ forma: 'PIX', valor: '9990.00' }] })).data?.code === 'SALDO_INSUFICIENTE', 'venda por categoria sem saldo');
 
-  console.log('PDV — sincronização offline');
-  const off1 = uuid(), off2 = uuid(), cliOff = uuid();
-  const sync = await caixa.post('/sync/lote', {
-    clientes: [{ id: cliOff, nome: 'João Offline', telefone: '86900000003', cienciaAviso: true }],
-    vendas: [
-      { id: off1, ...base, origem: 'OFFLINE', numeroLocal: 'OFF-0001', clienteId: cliOff, itens: [{ categoriaId: catRoupa.id, quantidade: 1 }], pagamentos: [{ forma: 'FIADO', valor: '10.00' }], vencimentoFiado: hoje },
-      { id: off2, ...base, origem: 'OFFLINE', numeroLocal: 'OFF-0002', itens: [{ codigo: pec1.codigo, quantidade: 1 }], pagamentos: [{ forma: 'DINHEIRO', valor: '35.00' }] },
-    ],
-  });
-  const res = Object.fromEntries(sync.data.resultados.map((x: any) => [x.id, x.status]));
-  check(res[cliOff] === 'GRAVADA' && res[off1] === 'GRAVADA' && res[off2] === 'PENDENCIA', 'sync: cliente antes, venda gravada, conflito vira pendência', sync.data);
-  const sync2 = await caixa.post('/sync/lote', { clientes: [], vendas: [{ id: off1, ...base, origem: 'OFFLINE', itens: [{ categoriaId: catRoupa.id, quantidade: 1 }], pagamentos: [{ forma: 'PIX', valor: '10.00' }] }] });
-  check(sync2.data.resultados[0].status === 'JA_EXISTENTE', 'reenvio não duplica (RN-26)');
-  const pend = (await admin.get('/pendencias?status=ABERTA')).data;
-  check(pend.total === 1 && pend.items[0].codigo === 'ITEM_INDISPONIVEL' && pend.items[0].total === '35.00', 'pendência preservada', pend);
-
   console.log('CXA/FIN — sangria, recebimento, fechamento');
   check((await caixa.post(`/caixas/${cxId}/lancamentos`, { id: uuid(), tipo: 'SANGRIA', valor: '999.00', motivo: 'Teste' })).data?.code === 'SANGRIA_ACIMA_SALDO', 'sangria acima do dinheiro');
   check((await caixa.post(`/caixas/${cxId}/lancamentos`, { id: uuid(), tipo: 'SUPRIMENTO', valor: '20.00', motivo: 'Reforço de troco' })).status === 204, 'suprimento');
@@ -198,7 +182,7 @@ async function main() {
   check((await caixa.post(`/contas-receber/${cr.id}/recebimentos`, { id: uuid(), valor: '50.00' })).data?.code === 'RECEBIMENTO_ACIMA_SALDO', 'recebimento acima do saldo');
   const prev = (await caixa.get(`/caixas/${cxId}/previa-fechamento`)).data;
   // 50 fundo + 95 venda dinheiro + 8 fiado recebido + 20 suprimento = 173
-  check(prev.esperadoDinheiro === '173.00' && prev.totaisPorForma.FIADO === '30.00', 'prévia RN-19', prev);
+  check(prev.esperadoDinheiro === '173.00' && prev.totaisPorForma.FIADO === '20.00', 'prévia RN-19', prev);
   check((await admin.get(`/caixas/${cxId}/previa-fechamento`)).status === 403, 'prévia de caixa alheio => 403 (anti-IDOR)');
   check((await caixa.post(`/caixas/${cxId}/fechar`, { contado: '170.00' })).data?.code === 'OBSERVACAO_OBRIGATORIA', 'diferença exige observação');
   const fech = (await caixa.post(`/caixas/${cxId}/fechar`, { contado: '170.00', observacao: 'Faltou troco de moedas' })).data;
@@ -220,14 +204,12 @@ async function main() {
   const prevAdm = (await admin.get(`/caixas/${cxAdm}/previa-fechamento`)).data;
   check(prevAdm.sangrias === '103.00', 'sangrias de estorno (8) e reembolso (95)', prevAdm);
   check((await tri.get(`/itens/${pec1.id}/historico`)).data.item.saldoBazar === 1, 'peça voltou ao bazar pelo estorno');
-  // pendência agora pode ser reprocessada: a peça voltou, o caixa original fechou -> usa o caixa aberto do terminal 1? (não há) => 409
-  const pr = await admin.post(`/pendencias/${pend.items[0].id}/reprocessar`);
-  check(pr.data?.code === 'SEM_CAIXA_ABERTO', 'reprocesso exige caixa aberto no terminal da venda', pr.data);
+  check((await tri.get(`/vendas/${v1}/comprovante`)).status === 403, 'triagem não vê comprovante');
   const cx3 = uuid(); await caixa.post('/caixas', { id: cx3, terminalId: term1.id, fundoTroco: '0.00' });
-  const pr2 = await admin.post(`/pendencias/${pend.items[0].id}/reprocessar`);
-  check(pr2.status === 200 && pr2.data.status === 'REPROCESSADA', 'pendência reprocessada após corrigir a causa', pr2.data);
-  check((await caixa.get(`/vendas/${off2}/comprovante`)).data.origem === 'OFFLINE', 'venda offline com número oficial');
-  check((await tri.get(`/vendas/${off2}/comprovante`)).status === 403, 'triagem não vê comprovante');
+  const cliOff = uuid();
+  await caixa.post('/clientes', { id: cliOff, nome: 'João Exemplo', telefone: '86900000003', cienciaAviso: true });
+  const vJoao = await caixa.put(`/vendas/${uuid()}`, { ...base, caixaId: cx3, clienteId: cliOff, itens: [{ categoriaId: catRoupa.id, quantidade: 1 }], pagamentos: [{ forma: 'FIADO', valor: '10.00' }], vencimentoFiado: hoje });
+  check(vJoao.status === 201, 'venda fiada de outro cliente (deixa débito para o teste de LGPD)', vJoao.data);
 
   console.log('FIN — contas a pagar e compra');
   const cp = (await admin.post('/contas-pagar', { id: uuid(), descricao: 'Energia (fictícia)', valor: '30.00', vencimento: hoje })).data;
@@ -257,7 +239,7 @@ async function main() {
   const linhaParc = pc.linhas.find((x: any) => x.nome === parc.nome);
   check(linhaParc && linhaParc.recebidos === 8 && linhaParc.descartados === 1, 'prestação de contas por parceiro', pc);
   const vr = (await admin.get(`/relatorios/vendas?de=${hoje}&ate=${hoje}&formato=json`)).data;
-  check(vr.linhas.length >= 3 && Number(vr.totais.imposto) > 0, 'relatório de vendas com imposto', vr.totais);
+  check(vr.linhas.length >= 2 && Number(vr.totais.imposto) > 0, 'relatório de vendas com imposto', vr.totais);
   for (const f of ['csv', 'xlsx', 'pdf']) {
     const r = await admin.req('GET', `/relatorios/estoque?de=${hoje}&ate=${hoje}&formato=${f}`);
     check(r.status === 200 && (r.data as ArrayBuffer).byteLength > 50, `exportação ${f}`);

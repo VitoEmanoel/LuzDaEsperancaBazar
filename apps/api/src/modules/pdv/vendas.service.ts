@@ -28,9 +28,6 @@ export const zVendaRequest = z.object({
   terminalId: zUuid,
   caixaId: zUuid,
   clienteId: zUuid.optional(),
-  numeroLocal: z.string().trim().max(40).optional(),
-  ocorridaEm: z.string().datetime({ offset: true }),
-  origem: z.enum(['ONLINE', 'OFFLINE']),
   itens: z.array(zItemVenda).min(1, 'venda sem itens').max(200),
   desconto: zMoney.optional(),
   pagamentos: z.array(z.object({
@@ -42,9 +39,6 @@ export const zVendaRequest = z.object({
 export type VendaRequest = z.infer<typeof zVendaRequest>;
 
 export interface Operador { id: string; nome: string; permissoes: Set<Permissao>; limiteDescontoPct: number }
-export type ModoVenda = 'ONLINE' | 'SYNC' | 'REPROCESSO';
-
-const TOLERANCIA_RELOGIO_MS = 5 * 60_000;
 
 // ---------------- DTO ----------------
 const vendaInclude = {
@@ -57,8 +51,8 @@ type VendaFull = Prisma.VendaGetPayload<{ include: typeof vendaInclude }>;
 
 export function vendaDto(v: VendaFull, operadorNome: string) {
   return {
-    id: v.id, numero: v.numero, numeroLocal: v.numeroLocal ?? undefined,
-    ocorridaEm: v.ocorridaEm.toISOString(), origem: v.origemRegistro,
+    id: v.id, numero: v.numero,
+    ocorridaEm: v.ocorridaEm.toISOString(),
     status: v.status === 'FINALIZADA' ? 'CONCLUIDA' : 'CANCELADA',
     subtotal: money(v.subtotal), desconto: money(v.desconto), total: money(v.total),
     troco: fromCents(v.pagamentos.reduce((s, p) => s + toCents(p.troco), 0)),
@@ -161,40 +155,25 @@ export interface ResultadoVenda { id: string; numero: number; jaExistia: boolean
 
 /**
  * Grava a venda dentro de `tx`. Lança AppError (regra de negócio) ou erro do banco.
- * modo SYNC: venda feita sem internet (origem OFFLINE, hora do terminal).
- * modo REPROCESSO: Administrador reprocessa pendência; se o caixa original já fechou, usa o caixa
- * aberto do MESMO terminal (o caixa fechado não é reaberto).
+ * A hora da venda é sempre a do servidor.
  */
-export async function processarVenda(tx: Tx, id: string, req: VendaRequest, op: Operador, modo: ModoVenda): Promise<ResultadoVenda> {
+export async function processarVenda(tx: Tx, id: string, req: VendaRequest, op: Operador): Promise<ResultadoVenda> {
   const existente = await tx.venda.findUnique({ where: { id }, select: { numero: true, registradaPorId: true } });
   if (existente) {
-    if (existente.registradaPorId !== op.id && modo !== 'REPROCESSO') throw new AppError(409, 'Identificador de venda já usado', 'ID_EM_USO');
+    if (existente.registradaPorId !== op.id) throw new AppError(409, 'Identificador de venda já usado', 'ID_EM_USO');
     return { id, numero: existente.numero, jaExistia: true };
   }
 
   // ----- caixa e terminal (anti-IDOR: nunca confia no caixaId/terminalId do corpo sem conferir) -----
-  let caixa = await tx.caixaSessao.findUnique({ where: { id: req.caixaId }, include: { terminal: true } });
+  const caixa = await tx.caixaSessao.findUnique({ where: { id: req.caixaId }, include: { terminal: true } });
   if (!caixa) throw new AppError(409, 'Caixa não encontrado', 'CAIXA_INEXISTENTE');
   if (caixa.terminalId !== req.terminalId) throw new AppError(403, 'Caixa não pertence a este terminal', 'CAIXA_DE_OUTRO_TERMINAL');
-  if (modo !== 'REPROCESSO' && caixa.abertoPorId !== op.id) throw new AppError(403, 'Caixa não pertence a esta sessão', 'CAIXA_DE_OUTRO_OPERADOR');
+  if (caixa.abertoPorId !== op.id) throw new AppError(403, 'Caixa não pertence a esta sessão', 'CAIXA_DE_OUTRO_OPERADOR');
   if (!caixa.terminal.ativo) throw new AppError(409, 'Terminal desativado', 'TERMINAL_DESATIVADO');
-  if (caixa.status !== 'ABERTO') {
-    if (modo !== 'REPROCESSO') throw new AppError(409, 'Caixa fechado', 'CAIXA_FECHADO'); // RN-12
-    const aberto = await tx.caixaSessao.findFirst({ where: { terminalId: caixa.terminalId, status: 'ABERTO' }, include: { terminal: true } });
-    if (!aberto) throw new AppError(409, 'O caixa da venda já foi fechado: abra um caixa neste terminal para reprocessar', 'SEM_CAIXA_ABERTO');
-    caixa = aberto;
-  }
+  if (caixa.status !== 'ABERTO') throw new AppError(409, 'Caixa fechado', 'CAIXA_FECHADO'); // RN-12
 
-  // ----- hora: online = hora do servidor; offline = hora do terminal, dentro de limites (RN-31) -----
-  const agora = Date.now();
-  let ocorrida = new Date(agora);
-  if (modo !== 'ONLINE') {
-    ocorrida = new Date(req.ocorridaEm);
-    if (ocorrida.getTime() > agora + TOLERANCIA_RELOGIO_MS) throw new AppError(409, 'Hora da venda no futuro (relógio do terminal)', 'DATA_INVALIDA');
-    if (modo === 'SYNC' && ocorrida.getTime() < caixa.abertoEm.getTime() - TOLERANCIA_RELOGIO_MS) {
-      throw new AppError(409, 'Venda anterior à abertura do caixa', 'DATA_INVALIDA');
-    }
-  }
+  // ----- hora: sempre a do servidor -----
+  const ocorrida = new Date();
   const diaVenda = localDate(ocorrida);
 
   // ----- itens -----
@@ -261,8 +240,7 @@ export async function processarVenda(tx: Tx, id: string, req: VendaRequest, op: 
   // ----- gravação -----
   const venda = await tx.venda.create({
     data: {
-      id, numeroLocal: req.numeroLocal ?? null, terminalId: caixa.terminalId, sessaoId: caixa.id, clienteId,
-      origemRegistro: modo === 'ONLINE' ? 'ONLINE' : 'OFFLINE',
+      id, terminalId: caixa.terminalId, sessaoId: caixa.id, clienteId,
       subtotal: fromCents(subtotal), desconto: fromCents(descVenda), total: fromCents(total),
       registradaPorId: op.id, ocorridaEm: ocorrida,
     },

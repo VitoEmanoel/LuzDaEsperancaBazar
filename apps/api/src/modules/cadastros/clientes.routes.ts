@@ -28,7 +28,7 @@ export const clienteDto = (c: ClienteRow) => ({
 });
 const comConsent = { consentimentos: { where: { revogadoEm: null }, select: { id: true }, take: 1 } } as const;
 
-/** Cria cliente com consentimento — idempotente pelo id gerado no terminal (cadastro offline). */
+/** Cria cliente com consentimento — idempotente pelo id gerado no cliente. */
 export async function criarCliente(tx: Tx, usuarioId: string, ip: string | undefined, b: z.infer<typeof zNovoCliente>) {
   const existente = await tx.cliente.findUnique({ where: { id: b.id }, include: comConsent });
   if (existente) return { cliente: existente, criado: false };

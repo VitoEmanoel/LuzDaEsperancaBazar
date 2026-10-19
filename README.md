@@ -1,7 +1,7 @@
 # Sistema de Bazar — Luz da Esperança
 
 Gestão do bazar beneficente do **Centro Espírita e Obras Sociais Luz da Esperança** (Parnaíba, PI):
-PDV com operação offline (PWA), entrada e triagem de doações, estoque duplo Bazar ⇄ Doações, caixa,
+PDV (somente web, exige internet), entrada e triagem de doações, estoque duplo Bazar ⇄ Doações, caixa,
 financeiro, relatórios de prestação de contas por parceiro/campanha, auditoria e LGPD.
 
 Monolito **React 19 + Vite** (web) · **Fastify 5 + Prisma 7 + PostgreSQL** (API) · TypeScript estrito nos dois.
@@ -107,5 +107,5 @@ Detalhes de cada parte: [`apps/web/README.md`](apps/web/README.md), [`apps/api/R
 - Segredos só por variável de ambiente (Azure Key Vault / Google Secret Manager em produção); `.env*` fora do Git.
 - JWT com algoritmo fixado, `exp`, `iss`/`aud`; refresh em cookie `HttpOnly; Secure; SameSite=Strict` com rotação.
 - AuthZ por permissão em todas as rotas no servidor (o front só esconde menus); papel de banco sem `DELETE`.
-- PDV offline guarda só o mínimo no IndexedDB, nunca token ou senha; logout apaga dados locais e caches.
+- O aparelho guarda só o terminal fixo e o carrinho em andamento (sem dado pessoal, token ou senha); logout apaga isso.
 - Fontes e assets servidos pelo próprio app (CSP `'self'`, sem CDN).

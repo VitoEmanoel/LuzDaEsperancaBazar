@@ -1,7 +1,7 @@
 /**
  * PDV — tela cheia, operável só com teclado e leitor (RNF-01/02).
- * Atalhos: F2 categoria · F4 pagamento · Esc remove último item · F6 sangria/suprimento · F8 sincronizar.
- * Offline: venda vai para a fila do IndexedDB com número provisório e sobe na reconexão (idempotente por id).
+ * Atalhos: F2 categoria · F4 pagamento · Esc remove último item · F6 sangria/suprimento.
+ * A venda é gravada direto no servidor (idempotente pelo id: reenviar não duplica).
  */
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
@@ -13,24 +13,17 @@ import { ComprovanteModal } from '../components/ComprovanteModal';
 import { LancamentoModal } from '../../caixa/components/LancamentoModal';
 import { estoqueApi } from '../../estoque/estoque.api';
 import { pdvApi } from '../pdv.api';
-import { NetworkError, errorMessage } from '../../../shared/api/http';
 import type { Venda, VendaRequest } from '../../../shared/api/types';
 import { formatMoney, fromCents, toCents } from '../../../shared/lib/money';
 import { uuid } from '../../../shared/lib/uuid';
 import { beep } from '../../../shared/lib/feedback';
-import { isSimulatedOffline, setSimulatedOffline } from '../../../shared/lib/connectivity';
-import { idb, KV } from '../../../shared/offline/idb';
-import { enfileirarVenda, proximoNumeroLocal } from '../../../shared/offline/queue';
-import { iniciarSyncAutomatico, sincronizarAgora } from '../../../shared/offline/sync';
-import { useOnline, useTamanhoFila } from '../../../shared/offline/hooks';
+import { armazenamento, CHAVES } from '../../../shared/lib/armazenamento';
 import { BrandMark } from '../../../shared/components/BrandMark';
 import { useToast } from '../../../shared/components/Toast';
 
 export function PdvPage() {
-  const { me, can, modoOfflinePdv } = useAuth();
+  const { me, can } = useAuth();
   const sessao = usePdvSessao();
-  const online = useOnline();
-  const fila = useTamanhoFila();
   const toast = useToast();
   const nav = useNavigate();
 
@@ -41,24 +34,26 @@ export function PdvPage() {
   const [pagando, setPagando] = useState(false);
   const [lancando, setLancando] = useState(false);
   const [comprovante, setComprovante] = useState<Venda | null>(null);
-  const [sincronizando, setSincronizando] = useState(false);
   const codigoRef = useRef<HTMLInputElement>(null);
   const qtdRef = useRef<HTMLInputElement>(null);
   const carregouCarrinho = useRef(false);
+  /** Id da venda em andamento: mantido entre tentativas para o reenvio não duplicar a venda. */
+  const vendaId = useRef<string | null>(null);
 
   const modalAberto = pagando || lancando || !!comprovante;
   const focarCodigo = useCallback(() => { setTimeout(() => codigoRef.current?.focus(), 0); }, []);
 
-  // Carrinho preservado localmente (sessão expirada / recarga da página).
-  useEffect(() => { idb.get<LinhaCarrinho[]>('kv', KV.carrinho).then((c) => { if (c?.length) setLinhas(c); carregouCarrinho.current = true; }); }, []);
-  useEffect(() => { if (carregouCarrinho.current) void idb.put('kv', linhas, KV.carrinho); }, [linhas]);
-
-  // Sincronização automática da fila offline.
-  useEffect(() => iniciarSyncAutomatico((r) => {
-    if (r.gravadas) toast(`${r.gravadas} venda(s) offline sincronizada(s).`);
-    if (r.pendencias.length) toast(`${r.pendencias.length} venda(s) viraram pendência para o administrador resolver.`, 'erro');
-    void sessao.recarregarCatalogo().catch(() => {});
-  }), [toast, sessao.recarregarCatalogo]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Carrinho preservado no aparelho (sessão expirada / recarga da página). Sem dado pessoal.
+  useEffect(() => {
+    const salvo = armazenamento.ler<LinhaCarrinho[]>(CHAVES.carrinho);
+    if (salvo?.length) setLinhas(salvo);
+    carregouCarrinho.current = true;
+  }, []);
+  useEffect(() => {
+    if (!carregouCarrinho.current) return;
+    armazenamento.gravar(CHAVES.carrinho, linhas);
+    vendaId.current = null; // carrinho mudou: próxima tentativa é uma venda nova
+  }, [linhas]);
 
   // Atalhos de teclado globais.
   useEffect(() => {
@@ -67,7 +62,6 @@ export function PdvPage() {
       if (e.key === 'F2') { e.preventDefault(); qtdRef.current?.focus(); qtdRef.current?.select(); }
       else if (e.key === 'F4') { e.preventDefault(); if (linhas.length) setPagando(true); }
       else if (e.key === 'F6') { e.preventDefault(); setLancando(true); }
-      else if (e.key === 'F8') { e.preventDefault(); void sincronizar(); }
       else if (e.key === 'Escape') { e.preventDefault(); removerUltimo(); }
     };
     window.addEventListener('keydown', onKey);
@@ -77,7 +71,7 @@ export function PdvPage() {
   useEffect(() => { if (!modalAberto) focarCodigo(); }, [modalAberto, focarCodigo]);
 
   if (sessao.terminalDesativado) {
-    return <div className="center-page"><div className="alert alert-error" role="alert">Este terminal foi desativado. Os dados locais foram apagados.</div><Link to="/" className="btn">Voltar</Link></div>;
+    return <div className="center-page"><div className="alert alert-error" role="alert">Este terminal foi desativado.</div><Link to="/" className="btn">Voltar</Link></div>;
   }
   if (sessao.semCaixa) return <Navigate to="/pdv/abrir" replace />;
   if (sessao.carregando) return <div className="center-page">Carregando PDV…</div>;
@@ -98,8 +92,8 @@ export function PdvPage() {
     if (!c) return;
     if (linhas.some((l) => l.codigo === c)) { feedback('erro', `A peça ${c} já está no carrinho.`); return; }
     let item = catalogo.itensEtiquetados.find((i) => i.codigo === c);
-    if (!item && online) {
-      // Catálogo pode estar desatualizado: confirma no servidor.
+    if (!item) {
+      // Peça fora do catálogo carregado (cadastrada depois): confirma no servidor.
       try {
         const r = await estoqueApi.porCodigo(c);
         if (r.controle === 'ETIQUETADO' && r.saldoBazar > 0) item = { itemId: r.id, codigo: r.codigo!, descricao: r.descricao, preco: r.preco };
@@ -127,44 +121,18 @@ export function PdvPage() {
   function removerUltimo() { setLinhas((ls) => ls.slice(0, -1)); focarCodigo(); }
   function remover(key: string) { setLinhas((ls) => ls.filter((l) => l.key !== key)); focarCodigo(); }
 
-  async function sincronizar() {
-    if (!online) { toast('Sem conexão para sincronizar.', 'erro'); return; }
-    setSincronizando(true);
-    try {
-      const r = await sincronizarAgora();
-      toast(r.gravadas || r.pendencias.length ? `${r.gravadas} sincronizada(s), ${r.pendencias.length} pendência(s).` : 'Nada a sincronizar.', r.pendencias.length ? 'erro' : 'ok');
-      await sessao.recarregarCatalogo().catch(() => {});
-    } catch (e) { toast(errorMessage(e), 'erro'); } finally { setSincronizando(false); }
-  }
-
-  /** Finaliza: online grava direto; sem rede (ou se a rede cair no meio) vai para a fila offline. */
+  /** Finaliza: grava direto no servidor. O mesmo id é reaproveitado se a tentativa falhar e for repetida. */
   async function finalizar(pg: ResultadoPagamento) {
-    const id = uuid();
-    const base: VendaRequest = {
-      terminalId: caixa.terminalId, caixaId: caixa.id, ocorridaEm: new Date().toISOString(), origem: online ? 'ONLINE' : 'OFFLINE',
+    vendaId.current ??= uuid();
+    const venda: Venda = await pdvApi.registrarVenda(vendaId.current, {
+      terminalId: caixa.terminalId, caixaId: caixa.id,
       itens: paraItensRequest(linhas), pagamentos: pg.pagamentos,
       ...(pg.descontoCents ? { desconto: fromCents(pg.descontoCents) } : {}),
       ...(pg.clienteId ? { clienteId: pg.clienteId, vencimentoFiado: pg.vencimentoFiado } : {}),
-    };
-    let venda: Venda | null = null;
-    if (online) {
-      try { venda = await pdvApi.registrarVenda(id, base); }
-      catch (e) { if (!(e instanceof NetworkError)) throw e; /* cai para offline com o MESMO id (idempotente) */ }
-    }
-    if (!venda) {
-      const numeroLocal = await proximoNumeroLocal(caixa.terminalId);
-      await enfileirarVenda({ ...base, id, origem: 'OFFLINE', numeroLocal });
-      const descontoCents = pg.descontoCents;
-      venda = {
-        id, numero: null, numeroLocal, ocorridaEm: base.ocorridaEm, origem: 'OFFLINE', status: 'CONCLUIDA',
-        subtotal: fromCents(subtotal), desconto: fromCents(descontoCents), total: fromCents(subtotal - descontoCents), troco: fromCents(pg.trocoCents),
-        itens: linhas.map((l) => ({ descricao: l.descricao, quantidade: l.quantidade, precoUnitario: fromCents(l.precoCents), total: fromCents(l.precoCents * l.quantidade) })),
-        pagamentos: pg.pagamentos, operadorNome: me?.nome ?? '', clienteNome: pg.clienteNome, vencimentoFiado: pg.vencimentoFiado,
-      };
-    }
-    // Tira do catálogo local as peças vendidas para não vender a mesma peça duas vezes neste terminal.
+    } satisfies VendaRequest);
+    // Tira do catálogo carregado as peças vendidas para não vender a mesma peça duas vezes neste terminal.
     const vendidos = new Set(linhas.filter((l) => l.codigo).map((l) => l.codigo));
-    await sessao.atualizarCatalogoLocal((c) => ({ ...c, itensEtiquetados: c.itensEtiquetados.filter((i) => !vendidos.has(i.codigo)) }));
+    sessao.atualizarCatalogo((c) => ({ ...c, itensEtiquetados: c.itensEtiquetados.filter((i) => !vendidos.has(i.codigo)) }));
     setLinhas([]);
     setPagando(false);
     setComprovante(venda);
@@ -176,13 +144,6 @@ export function PdvPage() {
       <header className="pdv-header">
         <BrandMark subtitulo="PDV · Bazar" tamanho={34} />
         <span className="terminal"><strong>{caixa.terminalNome}</strong><small>{me?.nome}</small></span>
-        <span className={`badge ${online ? 'badge-ok' : 'badge-erro'}`} role="status">{online ? 'Online' : 'OFFLINE'}</span>
-        <span className={`badge ${fila ? 'badge-alerta' : 'badge-neutro'}`}>Fila: {fila}</span>
-        {modoOfflinePdv && <span className="badge badge-alerta" title="Reaberto sem internet com o último login deste operador. Ao reconectar, a sessão é confirmada antes de sincronizar.">Sessão local</span>}
-        <button className="btn" onClick={sincronizar} disabled={sincronizando || !online}>Sincronizar (F8)</button>
-        {import.meta.env.DEV && (
-          <label className="check dev-only"><input type="checkbox" defaultChecked={isSimulatedOffline()} onChange={(e) => setSimulatedOffline(e.target.checked)} /> Simular offline</label>
-        )}
         <div className="spacer" />
         <button className="btn" onClick={() => setLancando(true)}>Sangria/Suprimento (F6)</button>
         <button className="btn" onClick={() => nav('/pdv/fechar')}>Fechar caixa</button>
@@ -238,13 +199,13 @@ export function PdvPage() {
       </div>
 
       <PagamentoModal
-        aberto={pagando} subtotalCents={subtotal} limiteDescontoPct={limiteDescontoPct} online={online}
+        aberto={pagando} subtotalCents={subtotal} limiteDescontoPct={limiteDescontoPct}
         clientesLocais={catalogo.clientesFiado}
-        onNovoClienteLocal={(c) => void sessao.atualizarCatalogoLocal((cat) => ({ ...cat, clientesFiado: [...cat.clientesFiado, c] }))}
+        onNovoClienteLocal={(c) => sessao.atualizarCatalogo((cat) => ({ ...cat, clientesFiado: [...cat.clientesFiado, c] }))}
         onConfirmar={finalizar}
         onFechar={() => setPagando(false)}
       />
-      <LancamentoModal aberto={lancando} caixaId={caixa.id} online={online} onFechar={() => setLancando(false)} onOk={(m) => toast(m)} />
+      <LancamentoModal aberto={lancando} caixaId={caixa.id} onFechar={() => setLancando(false)} onOk={(m) => toast(m)} />
       <ComprovanteModal venda={comprovante} instituicao={sessao.instituicao} onFechar={() => setComprovante(null)} />
     </div>
   );

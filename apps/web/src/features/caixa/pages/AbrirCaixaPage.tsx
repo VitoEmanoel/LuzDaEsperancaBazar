@@ -1,4 +1,4 @@
-/** Abertura de caixa por terminal com fundo de troco. Exige conexão (RNF-05). */
+/** Abertura de caixa por terminal com fundo de troco. */
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { caixaApi, terminaisApi } from '../caixa.api';
@@ -7,13 +7,11 @@ import type { Terminal } from '../../../shared/api/types';
 import { ErrorAlert, Field } from '../../../shared/components/ui';
 import { fromCents, tryCents } from '../../../shared/lib/money';
 import { uuid } from '../../../shared/lib/uuid';
-import { idb, KV } from '../../../shared/offline/idb';
-import { useOnline } from '../../../shared/offline/hooks';
+import { armazenamento, CHAVES } from '../../../shared/lib/armazenamento';
 import { BrandMark } from '../../../shared/components/BrandMark';
 
 export function AbrirCaixaPage() {
   const nav = useNavigate();
-  const online = useOnline();
   const [terminais, setTerminais] = useState<Terminal[]>([]);
   const [terminalId, setTerminalId] = useState('');
   const [fixo, setFixo] = useState(false);
@@ -23,34 +21,33 @@ export function AbrirCaixaPage() {
   const [carregouTerminais, setCarregouTerminais] = useState(false);
 
   useEffect(() => {
-    if (!online) return;
     (async () => {
       try {
-        const [lista, salvo] = await Promise.all([terminaisApi.listar({ ativo: true }), idb.get<string>('kv', KV.terminalId)]);
+        const lista = await terminaisApi.listar({ ativo: true });
+        const salvo = armazenamento.ler<string>(CHAVES.terminalId);
         setTerminais(lista); setCarregouTerminais(true);
         // Terminal fixo do dispositivo (escolhido na primeira abertura).
         if (salvo && lista.some((t) => t.id === salvo)) { setTerminalId(salvo); setFixo(true); }
         else if (lista.length === 1) setTerminalId(lista[0]!.id);
       } catch (e) { setErro(errorMessage(e)); }
     })();
-  }, [online]);
+  }, []);
 
   // Campo vazio = R$ 0,00 (fundo de troco pode ser zero)
   const fundoCents = fundo.trim() === '' ? 0 : tryCents(fundo);
-  const semTerminais = online && !erro && terminais.length === 0 && carregouTerminais;
+  const semTerminais = !erro && terminais.length === 0 && carregouTerminais;
   async function abrir(e: FormEvent) {
     e.preventDefault();
     if (!terminalId || fundoCents === null || fundoCents < 0) return;
     setEnviando(true); setErro(null);
     try {
-      const cx = await caixaApi.abrir({ id: uuid(), terminalId, fundoTroco: fromCents(fundoCents) });
-      await idb.put('kv', terminalId, KV.terminalId);
-      await idb.put('kv', cx, KV.caixaAtual);
+      await caixaApi.abrir({ id: uuid(), terminalId, fundoTroco: fromCents(fundoCents) });
+      armazenamento.gravar(CHAVES.terminalId, terminalId);
       nav('/pdv', { replace: true });
     } catch (err) {
       if (err instanceof ApiError && err.code === 'CAIXA_JA_ABERTO') {
         // Já há caixa deste operador: retoma.
-        try { const cx = await caixaApi.atual(); await idb.put('kv', cx, KV.caixaAtual); nav('/pdv', { replace: true }); return; } catch { /* mostra o erro original */ }
+        try { await caixaApi.atual(); nav('/pdv', { replace: true }); return; } catch { /* mostra o erro original */ }
       }
       setErro(errorMessage(err));
     } finally { setEnviando(false); }
@@ -61,7 +58,6 @@ export function AbrirCaixaPage() {
       <BrandMark />
       <form className="card login-card" onSubmit={abrir}>
         <h1>Abrir caixa</h1>
-        {!online && <div className="alert alert-warn" role="alert">A abertura de caixa exige conexão com a internet.</div>}
         {semTerminais && (
           <div className="alert alert-warn" role="alert">
             Nenhum terminal cadastrado. Peça ao administrador para criar um em <strong>Administração → Terminais</strong> (um por celular, tablet ou computador de caixa).
@@ -77,7 +73,7 @@ export function AbrirCaixaPage() {
           <input inputMode="decimal" value={fundo} onChange={(e) => setFundo(e.target.value)} placeholder="0,00" autoFocus />
         </Field>
         <ErrorAlert erro={erro} />
-        <button className="btn btn-primary btn-block btn-lg" disabled={!online || enviando || !terminalId || fundoCents === null}>Abrir caixa</button>
+        <button className="btn btn-primary btn-block btn-lg" disabled={enviando || !terminalId || fundoCents === null}>Abrir caixa</button>
         <Link to="/" className="btn btn-block">Voltar</Link>
       </form>
     </div>

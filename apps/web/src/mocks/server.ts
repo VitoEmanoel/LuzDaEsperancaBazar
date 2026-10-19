@@ -12,7 +12,7 @@
 import type { Transport, TransportRequest, TransportResponse } from '../shared/api/http';
 import type {
   CatalogoPdv, ContaReceber, FormaPagamento, HistoricoEvento, ItemEstoque, LocalEstoque, Me, Permissao,
-  ProblemDetails, RelatorioResposta, SyncLoteRequest, Venda, VendaRequest,
+  ProblemDetails, RelatorioResposta, Venda, VendaRequest,
 } from '../shared/api/types';
 import { PERMISSOES } from '../shared/api/types';
 import { fromCents, toCents } from '../shared/lib/money';
@@ -406,7 +406,6 @@ rota('GET', '/pdv/catalogo', ['caixa.operar'], ({ headers }) => {
     itensEtiquetados: db.itens.filter((i) => i.controle === 'ETIQUETADO' && i.saldo.BAZAR > 0).map((i) => ({ itemId: i.id, codigo: i.codigo!, descricao: i.descricao, preco: fromCents(i.preco) })),
     clientesFiado: db.clientes.filter((c) => c.ativo && !c.anonimizado).map((c) => ({ id: c.id, nome: c.nome, telefone: c.telefone })),
     regrasFiscais: db.regrasFiscais.filter((r) => !r.vigenciaFim),
-    pdvMaxHorasSemSync: Number(db.parametros.find((p) => p.chave === 'pdv.max_horas_sem_sync')?.valor ?? 8),
   };
   const etag = `"${hash(JSON.stringify(cat))}"`;
   if (headers['if-none-match'] === etag) return { status: 304, headers: { etag }, body: null };
@@ -415,14 +414,12 @@ rota('GET', '/pdv/catalogo', ['caixa.operar'], ({ headers }) => {
 function hash(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return (h >>> 0).toString(16); }
 
 /** Regra da venda (o servidor real faz isso numa transação única conferida no COMMIT). */
-function processarVenda(id: string, req: VendaRequest, user: UsuarioDb, opts: { relaxarCaixa?: boolean } = {}): VendaDb {
+function processarVenda(id: string, req: VendaRequest, user: UsuarioDb): VendaDb {
   const existente = db.vendas.find((v) => v.id === id); if (existente) return existente; // idempotência
   const caixa = db.caixas.find((c) => c.id === req.caixaId);
   if (!caixa) falha(404, 'Caixa não encontrado', 'CAIXA_INEXISTENTE');
-  if (!opts.relaxarCaixa) {
-    if (caixa!.operadorId !== user.id || caixa!.terminalId !== req.terminalId) falha(403, 'Caixa não pertence a esta sessão', 'CAIXA_DE_OUTRO_OPERADOR'); // anti-IDOR
-    if (caixa!.status !== 'ABERTO') falha(409, 'Caixa fechado', 'CAIXA_FECHADO');
-  }
+  if (caixa!.operadorId !== user.id || caixa!.terminalId !== req.terminalId) falha(403, 'Caixa não pertence a esta sessão', 'CAIXA_DE_OUTRO_OPERADOR'); // anti-IDOR
+  if (caixa!.status !== 'ABERTO') falha(409, 'Caixa fechado', 'CAIXA_FECHADO');
   if (!req.itens?.length) falha(400, 'Venda sem itens', 'VENDA_VAZIA');
   // Snapshot para desfazer se algo falhar (simula ROLLBACK).
   const snap = db.itens.map((i) => ({ i, s: { ...i.saldo } })); const movLen = db.movs.length;
@@ -467,7 +464,7 @@ function processarVenda(id: string, req: VendaRequest, user: UsuarioDb, opts: { 
     const cliente = db.clientes.find((c) => c.id === req.clienteId);
     if (fiado && (!cliente || !req.vencimentoFiado)) falha(400, 'Fiado exige cliente e vencimento', 'FIADO_SEM_CLIENTE');
     const v: VendaDb = {
-      id, numero: ++db.seq.venda, numeroLocal: req.numeroLocal, ocorridaEm: req.ocorridaEm, origem: req.origem, status: 'CONCLUIDA',
+      id, numero: ++db.seq.venda, ocorridaEm: now(), status: 'CONCLUIDA',
       subtotal: fromCents(subtotal), desconto: fromCents(desconto), total: fromCents(total), troco: fromCents(troco), itens: linhas, pagamentos: req.pagamentos,
       operadorNome: user.nome, clienteNome: cliente?.nome, clienteId: cliente?.id, vencimentoFiado: req.vencimentoFiado,
       caixaId: req.caixaId, terminalId: req.terminalId, operadorId: user.id, alocacoes,
@@ -481,34 +478,10 @@ function processarVenda(id: string, req: VendaRequest, user: UsuarioDb, opts: { 
 }
 const vendaDto = ({ caixaId: _c, terminalId: _t, operadorId: _o, alocacoes: _a, clienteId: _cl, ...v }: VendaDb): Venda => v;
 rota('PUT', '/vendas/:id', ['caixa.operar'], ({ user, params, body }) => {
-  exigir(body?.caixaId && body?.terminalId && body?.ocorridaEm, 'caixaId/terminalId/ocorridaEm');
+  exigir(body?.caixaId && body?.terminalId, 'caixaId/terminalId');
   const ja = db.vendas.some((v) => v.id === params.id);
   const v = processarVenda(params.id!, body, user);
   return ok(vendaDto(v), ja ? 200 : 201);
-});
-rota('POST', '/sync/lote', ['caixa.operar'], ({ user, body }) => {
-  const b = body as SyncLoteRequest; const resultados: any[] = [];
-  for (const c of b.clientes ?? []) {
-    if (!db.clientes.some((x) => x.id === c.id)) db.clientes.push({ ...c, ativo: true });
-    resultados.push({ id: c.id, tipo: 'cliente', status: 'GRAVADA' });
-  }
-  for (const v of [...(b.vendas ?? [])].sort((a, b) => a.ocorridaEm.localeCompare(b.ocorridaEm))) {
-    if (db.vendas.some((x) => x.id === v.id)) { resultados.push({ id: v.id, tipo: 'venda', status: 'JA_EXISTENTE', numero: db.vendas.find((x) => x.id === v.id)!.numero }); continue; }
-    try {
-      const r = processarVenda(v.id, v, user, { relaxarCaixa: true });
-      resultados.push({ id: v.id, tipo: 'venda', status: 'GRAVADA', numero: r.numero });
-    } catch (e) {
-      if (!(e instanceof Falha)) throw e;
-      const p = e.r.body as ProblemDetails;
-      if (!db.pendencias.some((x) => x.vendaId === v.id)) {
-        // RN-26: venda recusada é PRESERVADA como pendência para o Admin resolver.
-        const total = v.pagamentos.reduce((s, x) => s + toCents(x.valor), 0);
-        db.pendencias.push({ id: uid(), vendaId: v.id, numeroLocal: v.numeroLocal, terminalNome: db.terminais.find((t) => t.id === v.terminalId)?.nome ?? '—', operadorNome: user.nome, operadorId: user.id, ocorridaEm: v.ocorridaEm, total: fromCents(total), codigo: p.code ?? 'ERRO', motivo: p.detail ?? p.title, status: 'ABERTA', req: v });
-      }
-      resultados.push({ id: v.id, tipo: 'venda', status: 'PENDENCIA', motivo: p.detail ?? p.title });
-    }
-  }
-  return ok({ resultados });
 });
 rota('GET', '/vendas', ['caixa.operar', 'venda.cancelar'], ({ user, query }) => {
   const admin = perfilDe(user).permissoes.includes('venda.cancelar');
@@ -528,24 +501,6 @@ rota('POST', '/vendas/:id/cancelar', ['venda.cancelar'], ({ user, params, body }
   db.contasReceber.filter((c) => c.vendaNumero === v.numero).forEach((c) => { c.status = 'CANCELADA'; c.saldo = '0.00'; });
   auditar(user, 'VENDA_CANCELADA', 'venda', v.id); return ok(vendaDto(v));
 });
-rota('GET', '/pendencias', ['sincronizacao.resolver'], ({ query }) => ok(paginar(db.pendencias.filter((p) => !query.get('status') || p.status === query.get('status')).map(({ req: _r, operadorId: _o, ...p }) => p), query)));
-rota('POST', '/pendencias/:id/reprocessar', ['sincronizacao.resolver'], ({ user, params }) => {
-  const p = db.pendencias.find((x) => x.id === params.id); if (!p) return problem(404, 'Pendência não encontrada');
-  if (p.status !== 'ABERTA') return problem(409, 'Pendência já resolvida', 'PENDENCIA_RESOLVIDA');
-  const operador = db.usuarios.find((u) => u.id === p.operadorId)!;
-  try { processarVenda(p.vendaId, p.req, operador, { relaxarCaixa: true }); } catch (e) {
-    if (e instanceof Falha) { const pd = e.r.body as ProblemDetails; p.motivo = pd.detail ?? pd.title; p.codigo = pd.code ?? p.codigo; return e.r; } throw e;
-  }
-  p.status = 'REPROCESSADA'; auditar(user, 'PENDENCIA_REPROCESSADA', 'pendencia', p.id);
-  const { req: _r, operadorId: _o, ...dto } = p; return ok(dto);
-});
-rota('POST', '/pendencias/:id/descartar', ['sincronizacao.resolver'], ({ user, params, body }) => {
-  const p = db.pendencias.find((x) => x.id === params.id); if (!p) return problem(404, 'Pendência não encontrada');
-  exigir(String(body?.justificativa ?? '').trim().length >= 5, 'justificativa');
-  p.status = 'DESCARTADA'; auditar(user, 'PENDENCIA_DESCARTADA', 'pendencia', p.id);
-  const { req: _r, operadorId: _o, ...dto } = p; return ok(dto);
-});
-
 // ---------------- CXA ----------------
 // GET /terminais também liberado para caixa.operar (escolha na abertura) — DIVERGÊNCIA a validar com o back-end.
 rota('GET', '/terminais', ['terminais.gerenciar', 'caixa.operar'], ({ query }) => ok(db.terminais.filter((t) => query.get('ativo') === null || String(t.ativo) === query.get('ativo'))));
@@ -580,7 +535,7 @@ function previa(c: CaixaDb) {
   const sang = c.lancamentos.filter((l) => l.tipo === 'SANGRIA').reduce((s, l) => s + l.valor, 0);
   const sup = c.lancamentos.filter((l) => l.tipo === 'SUPRIMENTO').reduce((s, l) => s + l.valor, 0);
   const esperado = toCents(c.fundoTroco) + porForma.DINHEIRO + receb + sup - sang;
-  return { fundoTroco: c.fundoTroco, suprimentos: fromCents(sup), sangrias: fromCents(sang), totaisPorForma: Object.fromEntries(FORMAS.map((f) => [f, fromCents(porForma[f])])) as Record<FormaPagamento, string>, esperadoDinheiro: fromCents(esperado), quantidadeVendas: vendas.length, filaPendente: 0 };
+  return { fundoTroco: c.fundoTroco, suprimentos: fromCents(sup), sangrias: fromCents(sang), totaisPorForma: Object.fromEntries(FORMAS.map((f) => [f, fromCents(porForma[f])])) as Record<FormaPagamento, string>, esperadoDinheiro: fromCents(esperado), quantidadeVendas: vendas.length };
 }
 rota('GET', '/caixas/:id/previa-fechamento', ['caixa.operar'], ({ user, params }) => ok(previa(meuCaixa(user, params.id!))));
 rota('POST', '/caixas/:id/fechar', ['caixa.operar'], ({ user, params, body }) => {

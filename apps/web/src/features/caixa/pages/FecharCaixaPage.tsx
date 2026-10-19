@@ -1,6 +1,5 @@
 /**
  * Fechamento: esperado × contado × diferença, totais por forma. Observação obrigatória se houver diferença.
- * Bloqueado enquanto houver fila offline neste terminal (o servidor também recusa com 409).
  */
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -9,16 +8,12 @@ import { errorMessage } from '../../../shared/api/http';
 import { FORMAS_PAGAMENTO, type CaixaSessao, type PreviaFechamento } from '../../../shared/api/types';
 import { ErrorAlert, Field, MoneyText } from '../../../shared/components/ui';
 import { formatMoney, fromCents, toCents, tryCents } from '../../../shared/lib/money';
-import { idb, KV } from '../../../shared/offline/idb';
-import { useOnline, useTamanhoFila } from '../../../shared/offline/hooks';
-import { sincronizarAgora } from '../../../shared/offline/sync';
+import { armazenamento, CHAVES } from '../../../shared/lib/armazenamento';
 import { formatDateTime } from '../../../shared/lib/format';
 import { BrandMark } from '../../../shared/components/BrandMark';
 
 export function FecharCaixaPage() {
   const nav = useNavigate();
-  const online = useOnline();
-  const fila = useTamanhoFila();
   const [caixa, setCaixa] = useState<CaixaSessao | null>(null);
   const [previa, setPrevia] = useState<PreviaFechamento | null>(null);
   const [contado, setContado] = useState('');
@@ -34,19 +29,19 @@ export function FecharCaixaPage() {
       setPrevia(await caixaApi.previaFechamento(cx.id));
     } catch (e) { setErro(errorMessage(e)); }
   }
-  useEffect(() => { if (online) void carregar(); }, [online]);
+  useEffect(() => { void carregar(); }, []);
 
   const contadoCents = tryCents(contado);
   const difCents = previa && contadoCents !== null ? contadoCents - toCents(previa.esperadoDinheiro) : null;
   const precisaObs = difCents !== null && difCents !== 0;
-  const pode = online && fila === 0 && caixa && contadoCents !== null && contadoCents >= 0 && (!precisaObs || obs.trim().length >= 5);
+  const pode = caixa && contadoCents !== null && contadoCents >= 0 && (!precisaObs || obs.trim().length >= 5);
 
   async function fechar() {
     if (!pode || !caixa) return;
     setEnviando(true); setErro(null);
     try {
       const r = await caixaApi.fechar(caixa.id, fromCents(contadoCents!), obs.trim() || undefined);
-      await idb.del('kv', KV.caixaAtual); await idb.del('kv', KV.carrinho);
+      armazenamento.apagar(CHAVES.carrinho);
       setFechado(r);
     } catch (e) { setErro(errorMessage(e)); } finally { setEnviando(false); }
   }
@@ -70,13 +65,6 @@ export function FecharCaixaPage() {
       <BrandMark />
       <div className="card fechamento">
         <h1>Fechamento de caixa</h1>
-        {!online && <div className="alert alert-warn">O fechamento exige conexão.</div>}
-        {fila > 0 && (
-          <div className="alert alert-warn" role="alert">
-            Há {fila} registro(s) offline neste terminal. Sincronize antes de fechar.
-            <button className="btn" disabled={!online} onClick={() => sincronizarAgora().then(carregar).catch((e) => setErro(errorMessage(e)))}>Sincronizar agora</button>
-          </div>
-        )}
         {previa && (
           <>
             <table className="table">

@@ -126,12 +126,6 @@ enum TipoTitular {
   PARCEIRO
 }
 
-enum StatusPendencia {
-  PENDENTE
-  RESOLVIDA
-  DESCARTADA
-}
-
 // ===================== 4.1 Configuração e acesso =====================
 
 model Instituicao {
@@ -163,7 +157,6 @@ model Terminal {
   sessoes    SessaoUsuario[]
   caixas     CaixaSessao[]
   vendas     Venda[]
-  pendencias PendenciaSincronizacao[]
 
   @@map("terminal")
 }
@@ -233,7 +226,6 @@ model Usuario {
   lancamentoUsuario          CaixaLancamento[]        @relation("LancamentoUsuario")
   vendaRegistradaPor         Venda[]                  @relation("VendaRegistradaPor")
   vendaCanceladaPor          Venda[]                  @relation("VendaCanceladaPor")
-  pendenciaResolvidaPor      PendenciaSincronizacao[] @relation("PendenciaResolvidaPor")
   contaReceberCriadaPor      ContaReceber[]           @relation("ContaReceberCriadaPor")
   recebimentoUsuario         Recebimento[]            @relation("RecebimentoUsuario")
   recebimentoEstornadoPor    Recebimento[]            @relation("RecebimentoEstornadoPor")
@@ -659,28 +651,6 @@ model VendaPagamento {
 
   @@index([vendaId])
   @@map("venda_pagamento")
-}
-
-model PendenciaSincronizacao {
-  id             String          @id @default(uuid()) @db.Uuid
-  terminalId     String          @map("terminal_id") @db.Uuid
-  tipo           String
-  referenciaId   String          @map("referencia_id")
-  payload        Json
-  motivo         String
-  status         StatusPendencia @default(PENDENTE)
-  criadaEm       DateTime        @default(now()) @map("criada_em") @db.Timestamptz(3)
-  resolvidaPorId String?         @map("resolvida_por_id") @db.Uuid
-  resolvidaEm    DateTime?       @map("resolvida_em") @db.Timestamptz(3)
-  resolucao      String?
-
-  terminal     Terminal @relation(fields: [terminalId], references: [id])
-  resolvidaPor Usuario? @relation("PendenciaResolvidaPor", fields: [resolvidaPorId], references: [id], onDelete: Restrict)
-
-  @@unique([tipo, referenciaId])
-  @@index([terminalId, status])
-  @@index([status, criadaEm])
-  @@map("pendencia_sincronizacao")
 }
 
 // ============================ 4.6 Financeiro ============================
