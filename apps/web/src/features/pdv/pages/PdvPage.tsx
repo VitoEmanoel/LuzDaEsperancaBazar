@@ -9,8 +9,11 @@ import { useAuth } from '../../auth/AuthContext';
 import { usePdvSessao } from '../hooks/usePdvSessao';
 import { paraItensRequest, subtotalCents, type LinhaCarrinho } from '../carrinho';
 import { PagamentoModal, type ResultadoPagamento } from '../components/PagamentoModal';
+import { RemoverQuantidadeModal } from '../components/RemoverQuantidadeModal';
+import { ResumoCaixaModal } from '../../caixa/components/ResumoCaixaModal';
 import { ComprovanteModal } from '../components/ComprovanteModal';
 import { LancamentoModal } from '../../caixa/components/LancamentoModal';
+import { ApiError } from '../../../shared/api/http';
 import { estoqueApi } from '../../estoque/estoque.api';
 import { pdvApi } from '../pdv.api';
 import type { Venda, VendaRequest } from '../../../shared/api/types';
@@ -49,6 +52,8 @@ export function PdvPage() {
   const [msgLeitura, setMsgLeitura] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null);
   const [pagando, setPagando] = useState(false);
   const [lancando, setLancando] = useState(false);
+  const [resumindo, setResumindo] = useState(false);
+  const [removendo, setRemovendo] = useState<LinhaCarrinho | null>(null);
   const [comprovante, setComprovante] = useState<Venda | null>(null);
   const codigoRef = useRef<HTMLInputElement>(null);
   const qtdRef = useRef<HTMLInputElement>(null);
@@ -56,7 +61,7 @@ export function PdvPage() {
   const vendaId = useRef<string | null>(restaurado.current.vendaId ?? null);
   const linhasGravadas = useRef(restaurado.current.linhas);
 
-  const modalAberto = pagando || lancando || !!comprovante;
+  const modalAberto = pagando || lancando || resumindo || !!removendo || !!comprovante;
   const focarCodigo = useCallback(() => { setTimeout(() => codigoRef.current?.focus(), 0); }, []);
 
   useEffect(() => {
@@ -73,7 +78,14 @@ export function PdvPage() {
       if (e.key === 'F2') { e.preventDefault(); qtdRef.current?.focus(); qtdRef.current?.select(); }
       else if (e.key === 'F4') { e.preventDefault(); if (linhas.length) setPagando(true); }
       else if (e.key === 'F6') { e.preventDefault(); setLancando(true); }
-      else if (e.key === 'Escape') { e.preventDefault(); removerUltimo(); }
+      else if (e.key === 'Escape') {
+        // Quem está digitando só quer limpar o campo: nunca apaga item do carrinho por engano.
+        const el = document.activeElement;
+        if (el instanceof HTMLInputElement && el.value !== '') {
+          e.preventDefault();
+          if (el === codigoRef.current) setCodigo(''); else if (el === qtdRef.current) setQtd('1'); else el.blur();
+        } else { e.preventDefault(); removerUltimo(); }
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -93,6 +105,8 @@ export function PdvPage() {
   const catalogo = sessao.catalogo;
   const limiteDescontoPct = me ? toCents(me.limiteDesconto) / 100 : 0;
   const subtotal = subtotalCents(linhas);
+  /** Quanto da categoria já está no carrinho (linhas da mesma categoria somadas). */
+  const emCarrinho = (categoriaId: string) => linhas.filter((l) => l.categoriaId === categoriaId).reduce((s, l) => s + l.quantidade, 0);
 
   function feedback(tipo: 'ok' | 'erro', texto: string) { beep(tipo); setMsgLeitura({ tipo, texto }); }
 
@@ -103,14 +117,16 @@ export function PdvPage() {
     if (!c) return;
     if (linhas.some((l) => l.codigo === c)) { feedback('erro', `A peça ${c} já está no carrinho.`); return; }
     let item = catalogo.itensEtiquetados.find((i) => i.codigo === c);
+    let foraDoBazar = false;
     if (!item) {
       // Peça fora do catálogo carregado (cadastrada depois): confirma no servidor.
       try {
         const r = await estoqueApi.porCodigo(c);
         if (r.controle === 'ETIQUETADO' && r.saldoBazar > 0) item = { itemId: r.id, codigo: r.codigo!, descricao: r.descricao, preco: r.preco };
+        else if (r.saldoDoacoes > 0) foraDoBazar = true;
       } catch { /* trata abaixo como não encontrado */ }
     }
-    if (!item) { feedback('erro', `Código ${c} não encontrado ou sem saldo no Bazar.`); return; }
+    if (!item) { feedback('erro', foraDoBazar ? `A peça ${c} está no estoque de Doações e não pode ser vendida.` : `Código ${c} não encontrado ou sem saldo no Bazar.`); return; }
     const it = item;
     setLinhas((ls) => [...ls, { key: uuid(), tipo: 'codigo', codigo: it.codigo, descricao: it.descricao, precoCents: toCents(it.preco), quantidade: 1 }]);
     feedback('ok', `${it.descricao} — ${formatMoney(it.preco)}`);
@@ -119,6 +135,17 @@ export function PdvPage() {
   function adicionarCategoria(categoriaId: string) {
     const cat = catalogo.categorias.find((c) => c.id === categoriaId)!;
     const q = Math.max(1, Math.min(999, Number.parseInt(qtd, 10) || 1));
+    // O PDV não deixa vender mais do que há no estoque do Bazar: avisa a quantidade e bloqueia (o servidor confere de novo ao gravar).
+    const jaNoCarrinho = emCarrinho(categoriaId);
+    const restam = cat.saldoBazar - jaNoCarrinho;
+    if (q > restam) {
+      feedback('erro', restam <= 0
+        ? `Sem estoque de ${cat.nome} no Bazar: há ${cat.saldoBazar}${jaNoCarrinho ? ` e ${jaNoCarrinho} já estão no carrinho` : ''}.`
+        : `Só há ${cat.saldoBazar} de ${cat.nome} no Bazar${jaNoCarrinho ? ` (${jaNoCarrinho} já no carrinho)` : ''}: dá para adicionar no máximo ${restam}.`);
+      void sessao.recarregarCatalogo().catch(() => {}); // o estoque pode ter mudado desde que o PDV abriu
+      focarCodigo();
+      return;
+    }
     setLinhas((ls) => {
       const existente = ls.find((l) => l.categoriaId === categoriaId);
       if (existente) return ls.map((l) => (l === existente ? { ...l, quantidade: l.quantidade + q } : l));
@@ -129,8 +156,24 @@ export function PdvPage() {
     focarCodigo();
   }
 
-  function removerUltimo() { setLinhas((ls) => ls.slice(0, -1)); focarCodigo(); }
-  function remover(key: string) { setLinhas((ls) => ls.filter((l) => l.key !== key)); focarCodigo(); }
+  /** Esc: tira UMA unidade da última linha (a linha some quando chega a zero). */
+  function removerUltimo() {
+    setLinhas((ls) => {
+      const ultima = ls[ls.length - 1];
+      if (!ultima) return ls;
+      return ultima.quantidade > 1 ? [...ls.slice(0, -1), { ...ultima, quantidade: ultima.quantidade - 1 }] : ls.slice(0, -1);
+    });
+    focarCodigo();
+  }
+  /** ✕: peça única sai inteira; linha com várias unidades pergunta quantas tirar. */
+  function iniciarRemocao(l: LinhaCarrinho) {
+    if (l.tipo === 'codigo' || l.quantidade <= 1) { setLinhas((ls) => ls.filter((x) => x.key !== l.key)); focarCodigo(); }
+    else setRemovendo(l);
+  }
+  function tirarQuantidade(l: LinhaCarrinho, n: number) {
+    setLinhas((ls) => ls.flatMap((x) => (x.key !== l.key ? [x] : n >= x.quantidade ? [] : [{ ...x, quantidade: x.quantidade - n }])));
+    setRemovendo(null); focarCodigo();
+  }
 
   /** Finaliza: grava direto no servidor. O mesmo id é reaproveitado se a tentativa falhar e for repetida. */
   async function finalizar(pg: ResultadoPagamento) {
@@ -138,15 +181,33 @@ export function PdvPage() {
       vendaId.current = uuid();
       if (me) armazenamento.gravar(CHAVES.carrinho, { usuarioId: me.id, vendaId: vendaId.current, linhas } satisfies CarrinhoSalvo);
     }
-    const venda: Venda = await pdvApi.registrarVenda(vendaId.current, {
-      terminalId: caixa.terminalId, caixaId: caixa.id,
-      itens: paraItensRequest(linhas), pagamentos: pg.pagamentos,
-      ...(pg.descontoCents ? { desconto: fromCents(pg.descontoCents) } : {}),
-      ...(pg.clienteId ? { clienteId: pg.clienteId, vencimentoFiado: pg.vencimentoFiado } : {}),
-    } satisfies VendaRequest);
-    // Tira do catálogo carregado as peças vendidas para não vender a mesma peça duas vezes neste terminal.
+    let venda: Venda;
+    try {
+      venda = await pdvApi.registrarVenda(vendaId.current, {
+        terminalId: caixa.terminalId, caixaId: caixa.id,
+        itens: paraItensRequest(linhas), pagamentos: pg.pagamentos,
+        ...(pg.descontoCents ? { desconto: fromCents(pg.descontoCents) } : {}),
+        ...(pg.clienteId ? { clienteId: pg.clienteId, vencimentoFiado: pg.vencimentoFiado } : {}),
+      } satisfies VendaRequest);
+    } catch (e) {
+      // Outro caixa vendeu antes: o estoque mudou. Atualiza o catálogo, fecha o pagamento e deixa o operador ajustar o carrinho.
+      if (e instanceof ApiError && ['SALDO_INSUFICIENTE', 'ITEM_INDISPONIVEL', 'ITEM_EM_DOACOES'].includes(e.code ?? '')) {
+        void sessao.recarregarCatalogo().catch(() => {});
+        setPagando(false);
+        feedback('erro', `O estoque mudou e a venda não foi gravada: ${e.message}. Ajuste o carrinho (use o ✕) e tente de novo.`);
+        return;
+      }
+      throw e;
+    }
+    // Atualiza o catálogo carregado: tira as peças vendidas (não vender a mesma peça duas vezes) e baixa o saldo das categorias.
     const vendidos = new Set(linhas.filter((l) => l.codigo).map((l) => l.codigo));
-    sessao.atualizarCatalogo((c) => ({ ...c, itensEtiquetados: c.itensEtiquetados.filter((i) => !vendidos.has(i.codigo)) }));
+    const porCategoria = new Map<string, number>();
+    for (const l of linhas) if (l.categoriaId) porCategoria.set(l.categoriaId, (porCategoria.get(l.categoriaId) ?? 0) + l.quantidade);
+    sessao.atualizarCatalogo((c) => ({
+      ...c, itensEtiquetados: c.itensEtiquetados.filter((i) => !vendidos.has(i.codigo)),
+      categorias: c.categorias.map((cat) => ({ ...cat, saldoBazar: cat.saldoBazar - (porCategoria.get(cat.id) ?? 0) })),
+    }));
+    void sessao.recarregarCatalogo().catch(() => {}); // sincroniza com vendas de outros terminais
     setLinhas([]);
     setPagando(false);
     setComprovante(venda);
@@ -159,6 +220,7 @@ export function PdvPage() {
         <BrandMark subtitulo="PDV · Bazar" tamanho={34} />
         <span className="terminal"><strong>{caixa.terminalNome}</strong><small>{me?.nome}</small></span>
         <div className="spacer" />
+        <button className="btn" onClick={() => setResumindo(true)}>Total do caixa</button>
         <button className="btn" onClick={() => setLancando(true)}>Sangria/Suprimento (F6)</button>
         <button className="btn" onClick={() => nav('/pdv/fechar')}>Fechar caixa</button>
         {can('estoque.consultar', 'relatorios.consultar', 'entrada.registrar', 'contas_receber.receber') && <Link className="btn btn-ghost" to="/">Backoffice</Link>}
@@ -181,11 +243,15 @@ export function PdvPage() {
             </label>
           </div>
           <div className="cat-grid">
-            {catalogo.categorias.map((c) => (
-              <button key={c.id} className="btn cat-btn" onClick={() => adicionarCategoria(c.id)}>
-                <span>{c.nome}</span><strong>{formatMoney(c.precoPadrao)}</strong>
-              </button>
-            ))}
+            {catalogo.categorias.map((c) => {
+              const restam = c.saldoBazar - emCarrinho(c.id);
+              return (
+                <button key={c.id} className="btn cat-btn" onClick={() => adicionarCategoria(c.id)} disabled={restam <= 0} title={restam <= 0 ? 'Sem estoque no Bazar' : undefined}>
+                  <span>{c.nome}</span><strong>{formatMoney(c.precoPadrao)}</strong>
+                  <small>{restam <= 0 ? 'sem estoque' : `${restam} em estoque`}</small>
+                </button>
+              );
+            })}
           </div>
         </section>
 
@@ -198,7 +264,7 @@ export function PdvPage() {
                   <span className="qtd">{l.quantidade}×</span>
                   <span className="desc">{l.descricao}{l.codigo && <small> · {l.codigo}</small>}</span>
                   <span className="num">{formatMoney(l.precoCents * l.quantidade)}</span>
-                  <button className="btn btn-ghost" onClick={() => remover(l.key)} aria-label={`Remover ${l.descricao}`}>✕</button>
+                  <button className="btn btn-ghost" onClick={() => iniciarRemocao(l)} aria-label={`Tirar ${l.descricao} do carrinho`}>✕</button>
                 </li>
               ))}
             </ul>
@@ -219,6 +285,8 @@ export function PdvPage() {
         onConfirmar={finalizar}
         onFechar={() => setPagando(false)}
       />
+      <RemoverQuantidadeModal linha={removendo} onConfirmar={(n) => tirarQuantidade(removendo!, n)} onFechar={() => { setRemovendo(null); focarCodigo(); }} />
+      <ResumoCaixaModal aberto={resumindo} caixaId={caixa.id} onFechar={() => setResumindo(false)} />
       <LancamentoModal aberto={lancando} caixaId={caixa.id} onFechar={() => setLancando(false)} onOk={(m) => toast(m)} />
       <ComprovanteModal venda={comprovante} instituicao={sessao.instituicao} onFechar={() => setComprovante(null)} />
     </div>

@@ -76,6 +76,8 @@ export interface AuditoriaRegistro {
 
 // ---------- CAD ----------
 export interface Categoria { id: Uuid; nome: string; precoPadrao: Money; vendaPorCategoria: boolean; ativo: boolean }
+/** Categoria no catálogo do PDV: traz quanto há para vender por categoria no Bazar. */
+export interface CategoriaPdv extends Categoria { saldoBazar: number }
 export type TipoParceiro = 'EMPRESA' | 'LOJA' | 'PESSOA_FISICA' | 'OUTRO';
 export const TIPOS_PARCEIRO: { value: TipoParceiro; label: string }[] = [
   { value: 'EMPRESA', label: 'Empresa' }, { value: 'LOJA', label: 'Loja' },
@@ -156,7 +158,7 @@ export interface CargaInicialResultado { gravado: boolean; linhas: number; erros
 // ---------- PDV ----------
 export interface CatalogoPdv {
   versao: string;
-  categorias: Categoria[];
+  categorias: CategoriaPdv[];
   itensEtiquetados: { itemId: Uuid; codigo: string; descricao: string; preco: Money }[];
   /** RNF-19: só nome e telefone dos clientes do fiado. */
   clientesFiado: { id: Uuid; nome: string; telefone: string }[];
@@ -206,6 +208,18 @@ export interface PreviaFechamento {
   totaisPorForma: Record<FormaPagamento, Money>;
   esperadoDinheiro: Money; quantidadeVendas: number;
 }
+/** Cada coisa que aconteceu no caixa, da abertura ao fechamento. */
+export interface EventoCaixa {
+  quando: IsoDateTime;
+  tipo: 'ABERTURA' | 'VENDA' | 'VENDA_CANCELADA' | 'SANGRIA' | 'SUPRIMENTO' | 'RECEBIMENTO_FIADO' | 'RECEBIMENTO_ESTORNADO' | 'FECHAMENTO';
+  descricao: string; valor: Money;
+  /** dinheiro que o evento põe (+) ou tira (-) da gaveta */
+  efeitoDinheiro: Money;
+  /** dinheiro na gaveta depois do evento (ausente em evento posterior ao fechamento) */
+  gavetaApos?: Money;
+  aposFechamento?: boolean;
+}
+export interface LinhaDoTempo { gavetaAgora: Money; eventos: EventoCaixa[] }
 
 // ---------- FIN ----------
 export interface ContaPagar {

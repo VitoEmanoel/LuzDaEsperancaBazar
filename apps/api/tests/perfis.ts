@@ -53,13 +53,13 @@ const ACESSOS: [string, string, unknown, Perfil[], number[]?][] = [
   ['GET', '/contas-receber', undefined, ['admin', 'financeiro']],
   ['GET', '/financeiro/resumo?de=2026-01-01&ate=2026-12-31', undefined, ['admin', 'financeiro']],
   ['GET', '/caixas', undefined, ['admin', 'financeiro']],
-  ['GET', '/caixas/atual', undefined, ['vendedor'], [404]],
-  ['POST', '/caixas', {}, ['vendedor'], [400]],
-  // O Administrador (e os demais) não vendem nem mexem em caixa: só o Vendedor passa da permissão (o corpo vazio dá 400)
-  ['PUT', `/vendas/${uuid()}`, {}, ['vendedor'], [400]],
-  ['POST', `/caixas/${uuid()}/lancamentos`, {}, ['vendedor'], [400]],
-  ['POST', `/caixas/${uuid()}/fechar`, {}, ['vendedor'], [400]],
-  ['GET', '/pdv/catalogo', undefined, ['vendedor']],
+  // Caixa: só o Vendedor e o Administrador (o corpo vazio dá 400; o caixa pode ou não estar aberto)
+  ['GET', '/caixas/atual', undefined, ['vendedor', 'admin'], [200, 404]],
+  ['POST', '/caixas', {}, ['vendedor', 'admin'], [400]],
+  ['PUT', `/vendas/${uuid()}`, {}, ['vendedor', 'admin'], [400]],
+  ['POST', `/caixas/${uuid()}/lancamentos`, {}, ['vendedor', 'admin'], [400]],
+  ['POST', `/caixas/${uuid()}/fechar`, {}, ['vendedor', 'admin'], [400]],
+  ['GET', '/pdv/catalogo', undefined, ['vendedor', 'admin']],
   ['GET', '/vendas', undefined, ['admin', 'vendedor']],
   ['GET', '/terminais', undefined, ['admin', 'vendedor']],
   ['GET', '/relatorios/vendas?de=2026-01-01&ate=2026-12-31', undefined, ['admin', 'financeiro']],
@@ -71,7 +71,7 @@ const ACESSOS: [string, string, unknown, Perfil[], number[]?][] = [
 
 /** O que cada perfil padrão carrega (a migração 0005). */
 const PERMISSOES_ESPERADAS: Record<Perfil, string[]> = {
-  admin: [], // calculado: tudo menos caixa.operar
+  admin: [], // calculado: todas as permissões (inclusive abrir caixa)
   vendedor: ['caixa.operar', 'clientes.gerenciar'],
   estoquista: ['cadastros.consultar', 'entrada.registrar', 'estoque.consultar', 'estoque.transferir', 'relatorios.estoque'],
   financeiro: ['contas_pagar.gerenciar', 'contas_receber.lancar', 'contas_receber.receber', 'estoque.consultar', 'relatorios.consultar', 'relatorios.estoque'],
@@ -98,12 +98,13 @@ async function main() {
   check(Object.values(ids).every(Boolean), 'os 4 perfis padrão existem (Administrador, Estoquista, Vendedor, Financeiro)', perfis.map((p) => p.nome));
   check(!perfis.some((p) => p.nome === 'Caixa' || p.nome === 'Triagem'), 'perfis antigos (Caixa, Triagem) já foram renomeados');
   const todasPerms = ((await admin.get('/permissoes')).data as { codigo: string }[]).map((p) => p.codigo);
-  PERMISSOES_ESPERADAS.admin = todasPerms.filter((p) => p !== 'caixa.operar').sort();
+  PERMISSOES_ESPERADAS.admin = [...todasPerms].sort(); // o Administrador tem tudo, inclusive abrir caixa (migração 0006)
   for (const k of TODOS) {
     const reais = [...(porNome({ admin: 'Administrador', estoquista: 'Estoquista', vendedor: 'Vendedor', financeiro: 'Financeiro' }[k])?.permissoes ?? [])].sort();
     check(JSON.stringify(reais) === JSON.stringify([...PERMISSOES_ESPERADAS[k]].sort()), `permissões do perfil ${k} conferem com a matriz`, { reais, esperadas: PERMISSOES_ESPERADAS[k] });
   }
   check(!todasPerms.includes('sincronizacao.resolver'), 'permissão de sincronização não existe mais');
+  check(['caixa.operar', 'usuarios.gerenciar', 'perfis.gerenciar', 'venda.cancelar', 'fiscal.gerenciar', 'privacidade.gerenciar'].every((p) => porNome('Administrador').permissoes.includes(p)), 'Administrador tem as permissões essenciais, inclusive abrir caixa');
 
   console.log('Acesso por perfil (o servidor decide)');
   const clientes: Record<Perfil, Cliente> = { admin, estoquista: null as any, vendedor: null as any, financeiro: null as any };

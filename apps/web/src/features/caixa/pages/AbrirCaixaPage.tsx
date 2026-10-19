@@ -33,8 +33,8 @@ export function AbrirCaixaPage() {
     })();
   }, []);
 
-  // Campo vazio = R$ 0,00 (fundo de troco pode ser zero)
-  const fundoCents = fundo.trim() === '' ? 0 : tryCents(fundo);
+  // O saldo inicial (troco) é obrigatório: o operador digita o valor, e pode ser 0 se não houver troco. Campo vazio não abre o caixa.
+  const fundoCents = fundo.trim() === '' ? null : tryCents(fundo);
   const semTerminais = !erro && terminais.length === 0 && carregouTerminais;
   async function abrir(e: FormEvent) {
     e.preventDefault();
@@ -69,8 +69,8 @@ export function AbrirCaixaPage() {
             {terminais.map((t) => <option key={t.id} value={t.id}>{t.nome}</option>)}
           </select>
         </Field>
-        <Field label="Fundo de troco (R$)" erro={fundo && fundoCents === null ? 'Valor inválido' : null}>
-          <input inputMode="decimal" value={fundo} onChange={(e) => setFundo(e.target.value)} placeholder="0,00" autoFocus />
+        <Field label="Saldo inicial do caixa, o troco (R$)" hint="Conte o dinheiro da gaveta e digite. Se não houver troco, digite 0." erro={fundo && fundoCents === null ? 'Valor inválido' : null}>
+          <input inputMode="decimal" value={fundo} onChange={(e) => setFundo(e.target.value)} placeholder="Digite o saldo inicial" autoFocus required />
         </Field>
         <ErrorAlert erro={erro} />
         <button className="btn btn-primary btn-block btn-lg" disabled={enviando || !terminalId || fundoCents === null}>Abrir caixa</button>

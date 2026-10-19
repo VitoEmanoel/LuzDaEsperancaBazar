@@ -4,10 +4,14 @@ Sistema web do bazar beneficente (PDV, doações, estoque duplo, caixa, financei
 
 **Fase atual: protótipo.** Construímos e validamos com o grupo e o professor antes de escrever o documento oficial de cada tela. Não crie documentação oficial de telas antes da validação.
 
+## Regras do humano (valem acima de tudo; foram quebradas em 19/10/2026 e não podem se repetir)
+1. **Quem manda codar é o humano.** Não crie nem altere código, testes, migrações, configuração ou o banco sem a autorização **explícita** dele para aquela tarefa ("pode começar", "pode codar", "faça X"). Pergunta, dúvida, relato de problema, descrição de ideia ou "temos que consertar" **não são ordem**: responda, pergunte e **espere**. Se não tiver certeza de que é uma ordem, pergunte. A ordem de uma tarefa não vale para as seguintes. Se o humano pedir para esperar as respostas, espere.
+2. **Terceirize o trabalho com o `agy`; a palavra final é sua.** Delegue ao `agy` o que ele consegue fazer (análise das tarefas, QA, revisão e testes por leitura). Quem confere o resultado, decide o que aceitar e responde ao humano por ele é você, o Claude: nunca repasse o veredito do `agy` como se fosse o seu, e diga o que aceitou e o que recusou, com o motivo. Isso não substitui a regra 1: delegar o trabalho não dá licença para começar sem autorização.
+
 ## Antes de tudo
 1. Leia `memoria.md` (estado atual, armadilhas, ambiente).
 2. Leia `docs/PLANO-DE-SPRINTS.md`: decisões fechadas, sprint atual e tarefas. É a fonte do que fazer.
-3. **Só codifique quando o humano mandar** ("pode começar"). Analisar, ler e propor não precisa de ordem; alterar arquivos sim.
+3. Analisar, ler e propor não precisa de ordem. **Alterar arquivos do projeto só com a autorização do humano** (regra 1 acima).
 
 ## O que ler, e quando
 | Para quê | Leia |

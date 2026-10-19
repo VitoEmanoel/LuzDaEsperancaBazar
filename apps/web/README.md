@@ -75,7 +75,9 @@ Todas as cores ficam em `src/styles/tokens.css`; telas não usam cor fixa.
 
 - Campo de código sempre focado; leitor USB em modo teclado (Enter). Feedback sonoro e visual.
 - Atalhos: **F2** quantidade/categoria · **F4** pagamento · **Esc** remove último · **F6** sangria/suprimento.
-- Pagamento dividido, troco, fiado (cliente + vencimento), cadastro rápido de cliente com ciência LGPD, desconto limitado pelo perfil.
+- Pagamento: o operador digita quanto recebeu em cada forma; o sistema mostra o que falta e o troco (só em dinheiro) e só finaliza quando a conta fecha. Fiado (cliente + vencimento), cadastro rápido de cliente com ciência LGPD, desconto limitado pelo perfil.
+- O PDV bloqueia venda acima do estoque do Bazar e avisa a quantidade; o ✕ do carrinho pergunta quantas unidades tirar; Esc só tira item com o campo vazio.
+- **Total do caixa** (parcial), **sangria** com o dinheiro da gaveta e **fechamento** com linha do tempo e PDF.
 - A venda é gravada direto no servidor. O id da venda (UUID do cliente) é a chave de idempotência: se a resposta se perder
   e o operador repetir, a mesma venda é devolvida, sem duplicar. O carrinho é preservado no aparelho se a sessão expirar.
 - Sem modo offline: se faltar internet, o PDV mostra o erro e a venda não é registrada.

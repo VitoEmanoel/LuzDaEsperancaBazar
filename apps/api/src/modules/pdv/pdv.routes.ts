@@ -28,8 +28,12 @@ export async function rotasPdv(app: FastifyInstance) {
     const DIA = 86_400_000;
     const [categorias, etiquetadas, clientes, regras, prazo] = await Promise.all([
       // RN-30: categoria inativa continua vendável enquanto tiver saldo por categoria no bazar
-      prisma.$queryRaw<{ id: string; nome: string; preco_padrao: string | null; venda_por_categoria: boolean; ativa: boolean }[]>`
-        SELECT c.id::text, c.nome, c.preco_padrao::text, c.venda_por_categoria, c.ativa FROM categoria c
+      prisma.$queryRaw<{ id: string; nome: string; preco_padrao: string | null; venda_por_categoria: boolean; ativa: boolean; saldo_bazar: number }[]>`
+        SELECT c.id::text, c.nome, c.preco_padrao::text, c.venda_por_categoria, c.ativa,
+          -- quanto há para vender por categoria no Bazar (o PDV avisa e bloqueia acima disso; o servidor confere de novo ao gravar)
+          coalesce((SELECT sum(s.saldo) FROM item i JOIN vw_saldo_estoque s ON s.item_id = i.id AND s.local_id = 1
+            WHERE i.categoria_id = c.id AND i.tipo_controle = 'CATEGORIA'), 0)::int AS saldo_bazar
+        FROM categoria c
         WHERE (c.ativa AND c.venda_por_categoria) OR EXISTS (
           SELECT 1 FROM item i JOIN vw_saldo_estoque s ON s.item_id = i.id AND s.local_id = 1 AND s.saldo > 0
           WHERE i.categoria_id = c.id AND i.tipo_controle = 'CATEGORIA')
@@ -55,7 +59,7 @@ export async function rotasPdv(app: FastifyInstance) {
       paramNum(prisma, 'fiado.prazo_dias', 0),
     ]);
     const corpo = {
-      categorias: categorias.map((c) => ({ id: c.id, nome: c.nome, precoPadrao: c.preco_padrao ? Number(c.preco_padrao).toFixed(2) : '0.00', vendaPorCategoria: c.venda_por_categoria, ativo: c.ativa })),
+      categorias: categorias.map((c) => ({ id: c.id, nome: c.nome, precoPadrao: c.preco_padrao ? Number(c.preco_padrao).toFixed(2) : '0.00', vendaPorCategoria: c.venda_por_categoria, ativo: c.ativa, saldoBazar: c.saldo_bazar })),
       itensEtiquetados: etiquetadas.map((i) => ({ itemId: i.id, codigo: i.codigo_barras, descricao: i.descricao ?? '', preco: Number(i.preco_venda).toFixed(2) })),
       clientesFiado: clientes,
       regrasFiscais: regras.map(regraDto),

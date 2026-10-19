@@ -2,7 +2,7 @@
 
 **Fase:** protótipo. Construímos tudo primeiro, validamos com o grupo e o professor, e só depois escrevemos o documento oficial de cada tela.
 **Criado em:** 19/10/2026 · **Sprints:** semanais, de segunda a domingo. As datas são previstas e podem mudar.
-**Entrega final prevista:** fim de novembro / início de dezembro de 2026. Se o prazo apertar, os itens marcados com **(corte possível)** saem primeiro.
+**Entrega final prevista:** a meta era fim de novembro / início de dezembro de 2026. Com a Sprint 1B (regras de venda e caixa) e os três dashboards, o fim do plano passou para a semana de **14/12 a 20/12**. Se o prazo apertar, os itens marcados com **(corte possível)** saem primeiro.
 
 ## Como usar este arquivo
 - Cada tarefa começa com uma caixinha: `- [ ]` (a fazer) ou `- [x]` (feita e conferida).
@@ -24,11 +24,11 @@
 ## 1. O que vamos construir (decisões fechadas)
 
 ### Perfis
-Quatro perfis padrão: **Admin, Estoquista, Vendedor e Financeiro**. O Admin cria quantos perfis a mais precisar (um perfil é uma soma de permissões). Cada perfil vê **só o que é dele, nem mais, nem menos**; a API recusa o resto. O Admin vê tudo o que acontece, mas **não vende**.
+Quatro perfis padrão: **Admin, Estoquista, Vendedor e Financeiro**. O Admin cria quantos perfis a mais precisar (um perfil é uma soma de permissões). Cada perfil vê **só o que é dele, nem mais, nem menos**; a API recusa o resto. O Admin vê tudo o que acontece e **pode abrir caixa** (decisão de 19/10/2026: para pagar contas e receber fiado com o dinheiro da gaveta; na Sprint 1 ele tinha perdido essa função).
 
 | Área | Admin | Estoquista | Vendedor | Financeiro |
 |---|---|---|---|---|
-| PDV, abrir e fechar caixa, sangria e suprimento | — | — | sim (só o dele) | — |
+| PDV, abrir e fechar caixa, sangria e suprimento | sim (só o dele) | — | sim (só o dele) | — |
 | Caixas do dia (todos, com detalhe) | sim | — | — | sim |
 | Lotes e cadastro de produtos | ver | sim (doações) | — | ver; lança compra |
 | Aprovação de produtos | sim | — | — | — |
@@ -60,10 +60,14 @@ Quatro perfis padrão: **Admin, Estoquista, Vendedor e Financeiro**. O Admin cri
 
 ### PDV e caixa
 - Leitura por **bipador e por câmera**. Ao ler: produto, preço atual e "restam N".
-- Padrão `n*código`; alerta de estoque insuficiente.
+- Padrão `n*código`.
+- **O PDV não deixa vender mais do que há no estoque do Bazar:** avisa quantas unidades existem e bloqueia na hora de adicionar (o servidor confere de novo ao gravar).
+- **Excluir do carrinho por quantidade:** o ✕ da linha pergunta quantas unidades tirar. Peça única sai inteira.
+- **Pagamento com valor recebido obrigatório em todas as formas.** O operador informa quanto recebeu em cada forma (dinheiro, PIX, cartão, fiado) e o sistema faz a conta: se a venda é R$ 100 e a pessoa paga R$ 20 no PIX, sobram R$ 80, que o operador informa em outra forma (por exemplo dinheiro). A venda **só finaliza** quando a soma cobre o total. Em dinheiro o sistema calcula e mostra o **troco** (conta de R$ 20 paga com nota de R$ 100: troco de R$ 80). Em PIX e cartão não dá para receber mais do que falta.
+- **Sangria limitada ao dinheiro que de fato está no caixa:** o sistema calcula o dinheiro da gaveta (fundo de troco + dinheiro das vendas, já descontado o troco + fiado recebido em dinheiro + suprimentos − sangrias) e **bloqueia** sangria acima disso, na tela e no servidor.
 - O vendedor cancela só item do carrinho, antes de pagar. **Sem desconto para o vendedor.**
-- Abertura com **saldo inicial (troco)**. Sangria e suprimento no PDV.
-- Fechamento mostra **tudo o que aconteceu da abertura ao fechamento**, tem valor recebido obrigatório, fechamento parcial (ver o total sem fechar) e PDF.
+- Abertura com **saldo inicial (troco)** obrigatório. Sangria e suprimento no PDV.
+- Fechamento mostra **tudo o que aconteceu da abertura ao fechamento**, fechamento parcial (ver o total sem fechar) e PDF.
 - PDV responsivo.
 
 ### Desconto
@@ -117,7 +121,7 @@ Perfis e visibilidade
 - [x] S1-10 Migração nova: renomear Caixa para Vendedor, Triagem para Estoquista e criar o perfil Financeiro
 - [x] S1-11 Criar as permissões que a Sprint 1 exige (`relatorios.estoque`); as demais (aprovar produto, caixas do dia, desconto no produto, imprimir etiquetas, lançar compra, entre outras) entram com a funcionalidade, nas sprints 2 a 5
 - [x] S1-12 Semear as permissões de cada perfil conforme a matriz acima
-- [x] S1-13 Tirar do Admin a permissão de operar o PDV
+- [x] S1-13 Tirar do Admin a permissão de operar o PDV *(revertida na S1B-16: o humano decidiu em 19/10/2026 que o Admin pode abrir caixa)*
 - [x] S1-14 Trocar o termo "triagem" por "estoquista" na interface (o perfil; "triagem" como processo continua até a Sprint 2, quando a tela vira cadastro + aprovação)
 - [x] S1-15 Menu e rotas montados a partir das permissões; Início por perfil (esqueleto)
 - [x] S1-16 Vendedor enxerga só o próprio caixa e as próprias vendas
@@ -127,7 +131,32 @@ Perfis e visibilidade
 - [x] S1-20 Revisão pelo agy e correções (duas rodadas; achados conferidos nos arquivos, aceitos e corrigidos ou recusados com motivo)
 - [x] S1-21 Atualizar `README.md` e `docs/README_MVP.md` (sem PWA, novos perfis)
 
-### Sprint 2 — Produto, lote e cadastro (02/11 a 08/11)
+### Sprint 1B — PDV e caixa: regras de venda (02/11 a 08/11)
+**Objetivo:** o PDV não deixa vender o que não existe, não finaliza sem informar o que foi recebido, calcula o troco e não deixa tirar mais dinheiro do que há no caixa. Reúne as tarefas de PDV e caixa que estavam na Sprint 4 e os pedidos feitos depois da demonstração da Sprint 1. **Só começa com a ordem do humano.**
+
+- [x] S1B-01 Limite de estoque no PDV por categoria: o catálogo traz o saldo do Bazar, o botão mostra "N em estoque", o sistema bloqueia e avisa a quantidade ao passar (o servidor continua conferindo ao gravar). *A primeira versão foi escrita sem ordem do humano; ele mandou manter e ela passou pela análise e pelo QA do agy como as demais.*
+- [x] S1B-02 Avisar quando a peça lida está no estoque de Doações e não pode ser vendida
+- [x] S1B-03 Excluir do carrinho por quantidade: o ✕ da linha pergunta quantas unidades tirar (peça única sai inteira)
+- [x] S1B-04 Pagamento: o operador informa quanto recebeu em cada forma (dinheiro, PIX, cartão, fiado), sem preenchimento automático; a venda só finaliza quando a soma cobre o total e o sistema mostra o que ainda falta
+- [x] S1B-05 Troco: em dinheiro, o sistema calcula e mostra o troco (recebido − devido); em PIX e cartão não aceita receber mais do que falta
+- [x] S1B-06 Servidor: recusa venda sem valor recebido em qualquer forma e confere a soma e o troco (contrato `PagamentoRequest` e regras do banco)
+- [x] S1B-07 Sangria: o sistema calcula o dinheiro da gaveta, mostra na tela de sangria e bloqueia valor acima dele, no PDV e no servidor
+- [x] S1B-08 Abertura de caixa com saldo inicial (troco) obrigatório *(veio da S4-07)*
+- [x] S1B-09 Fechamento com a linha do tempo completa: cada venda, sangria e suprimento, da abertura ao fechamento *(veio da S4-15)*
+- [x] S1B-10 Fechamento parcial: ver o total do caixa sem fechar *(veio da S4-14)*
+- [x] S1B-11 PDF do fechamento de caixa *(veio da S4-16)*
+- [x] S1B-12 PDV responsivo: celular, tablet e computador *(veio da S4-17)*
+- [x] S1B-13 A tecla Esc não apaga item do carrinho quando a pessoa está digitando no campo do código ou da quantidade (achado do agy)
+- [x] S1B-14 Testes: estoque acima do saldo, valor recebido obrigatório em cada forma, troco, soma que não fecha, sangria acima do dinheiro da gaveta, exclusão por quantidade
+- [x] S1B-16 O Administrador volta a poder abrir caixa (`caixa.operar`): migração nova, testes de perfil e de pagar conta com dinheiro do caixa e receber fiado na gaveta pelo Admin, mocks e documentação. O reembolso em dinheiro continua como saída no financeiro (decisão já tomada)
+- [ ] S1B-17 **CPF na venda** (decidido pelo humano em 19/10/2026): o CPF aparece no comprovante e fica registrado na venda. *Aguarda a ordem do humano para começar.* Banco e API: tabela própria `venda_cpf` (a venda não guarda CPF), parâmetro do Admin com o limite mensal por CPF, rota que valida o CPF e devolve o saldo, venda recusada acima do limite, e **limpeza automática todo mês** (CPF e contagem zeram; roda no primeiro uso do mês, sem depender de agendador, e também no script de manutenção)
+- [ ] S1B-18 CPF no PDV: no **primeiro bip** de cada venda o sistema pergunta se a compra é com CPF (Sim / Não); em Sim a pessoa digita o CPF (validado pelos dígitos; sem validar não segue); o sistema mostra o **saldo do CPF** no mês e bloqueia o que passar do limite; em Não ignora. O CPF **não** fica guardado no aparelho (some se a página recarregar)
+- [ ] S1B-19 CPF **inteiro** no comprovante; em listas e relatórios o CPF não aparece
+- [ ] S1B-20 Admin: parâmetro "limite de compras por CPF no mês" em Parâmetros
+- [ ] S1B-21 Testes do CPF (validação dos dígitos, limite e saldo, soma entre vendas do mesmo CPF, virada do mês, venda cancelada devolve o saldo) e aviso de privacidade (LGPD) na tela
+- [x] S1B-15 Rodar a definição de pronto; análise das tarefas e QA pelo agy; atualizar a documentação *(feito: análise antes e revisão depois, duas rodadas; achados conferidos nos arquivos)*
+
+### Sprint 2 — Produto, lote e cadastro (09/11 a 15/11)
 **Objetivo:** o produto com código único e várias unidades, e o cadastro separado da aprovação, no banco e na API.
 
 - [ ] S2-01 Ler o `schema.prisma` completo e desenhar o modelo: produto, entradas por lote e estados do item
@@ -147,7 +176,7 @@ Perfis e visibilidade
 - [ ] S2-15 Testes: aprovação, devolução, PEPS por produto e duas vendas disputando a última unidade
 - [ ] S2-16 Rodar a definição de pronto; revisão pelo agy; atualizar a documentação
 
-### Sprint 3 — Aprovação, estoque unificado e desconto (09/11 a 15/11)
+### Sprint 3 — Aprovação, estoque unificado e desconto (16/11 a 22/11)
 **Objetivo:** o Admin aprova; o estoque vira uma tela só; desconto no produto.
 
 - [ ] S3-01 Tela **Aprovação de produtos** (Admin): fila, aprovar item a item ou lote inteiro, devolver com motivo
@@ -162,11 +191,12 @@ Perfis e visibilidade
 - [ ] S3-10 O PDV e as consultas passam a usar o preço efetivo (com desconto)
 - [ ] S3-11 Relatórios mostram o desconto concedido
 - [ ] S3-12 Financeiro: consulta de lotes e produtos em modo leitura
+- [ ] S3-15 Lista de Estoque com colunas claras: "Quantidade no Bazar" e "Quantidade em Doações" (hoje só "Bazar" e "Doações", o que confundiu) e uma coluna **Total** por produto *(proposta; o humano confirma)*
 - [ ] S3-13 Testes por perfil para as telas e ações novas
 - [ ] S3-14 Rodar a definição de pronto; revisão pelo agy; atualizar a documentação
 
-### Sprint 4 — Etiquetas, PDV e caixa (16/11 a 22/11)
-**Objetivo:** etiquetas em lote e um PDV completo.
+### Sprint 4 — Etiquetas e PDV com produto (23/11 a 29/11)
+**Objetivo:** etiquetas em lote e o PDV lendo o produto de código único. As regras de venda e caixa foram para a Sprint 1B.
 
 Etiquetas
 - [ ] S4-01 Parâmetro de tamanho do rolo (Admin)
@@ -177,21 +207,21 @@ Etiquetas
 - [ ] S4-06 Teste de impressão numa impressora real, quando houver
 
 PDV e caixa
-- [ ] S4-07 Abertura de caixa com **saldo inicial (troco)** obrigatório
+- S4-07 ~~Abertura de caixa com **saldo inicial (troco)** obrigatório~~ → movida para a S1B-08
 - [ ] S4-08 PDV: ao ler o código, mostrar produto, preço atual e "restam N"
 - [ ] S4-09 Padrão `n*código`; recusar quantidade maior que 1 em peça única
-- [ ] S4-10 Alerta de estoque insuficiente
-- [ ] S4-11 Cancelar item do carrinho antes de pagar; remover o desconto da tela do Vendedor
-- [ ] S4-12 Sangria e suprimento no PDV (conferir o que já existe)
-- [ ] S4-13 Valor recebido obrigatório (ver pendência sobre as formas de pagamento)
-- [ ] S4-14 Fechamento parcial: ver o total do caixa sem fechar
-- [ ] S4-15 Fechamento com a **linha do tempo completa**: cada venda, sangria e suprimento, da abertura ao fechamento
-- [ ] S4-16 PDF do fechamento de caixa
-- [ ] S4-17 PDV responsivo (celular, tablet e computador)
-- [ ] S4-18 Testes e rodar a definição de pronto; revisão pelo agy; atualizar a documentação
+- S4-10 ~~Alerta de estoque insuficiente~~ → movida para a S1B-01
+- S4-11 ~~Cancelar item do carrinho antes de pagar; remover o desconto da tela do Vendedor~~ → movida para a S1B-03
+- S4-12 ~~Sangria e suprimento no PDV (conferir o que já existe)~~ → movida para a S1B-07
+- S4-13 ~~Valor recebido obrigatório (ver pendência sobre as formas de pagamento)~~ → movida para a S1B-04 a S1B-06
+- S4-14 ~~Fechamento parcial: ver o total do caixa sem fechar~~ → movida para a S1B-10
+- S4-15 ~~Fechamento com a **linha do tempo completa**: cada venda, sangria e suprimento, da abertura ao fechamento~~ → movida para a S1B-09
+- S4-16 ~~PDF do fechamento de caixa~~ → movida para a S1B-11
+- S4-17 ~~PDV responsivo (celular, tablet e computador)~~ → movida para a S1B-12
+- [ ] S4-18 Testes e rodar a definição de pronto; análise das tarefas e QA pelo agy; atualizar a documentação
 
-### Sprint 5 — Importação, visões de Admin e Financeiro, câmera (23/11 a 29/11)
-**Objetivo:** importar lotes, dar ao Admin e ao Financeiro suas visões e ler pela câmera.
+### Sprint 5 — Importação, visões, dashboards e câmera (30/11 a 06/12)
+**Objetivo:** importar lotes, dar a cada perfil suas visões e dashboards com gráficos e filtros, e ler pela câmera.
 
 Importação
 - [ ] S5-01 Ticket 13: aceitar CNPJ alfanumérico (formato de 2026) no cadastro de parceiro
@@ -202,7 +232,11 @@ Importação
 
 Admin e Financeiro
 - [ ] S5-06 Tela **Caixas do dia** (Admin e Financeiro) com o detalhe de cada caixa
-- [ ] S5-07 Início do Admin como painel de acompanhamento (vendas do dia, caixas abertos, lotes aguardando aprovação)
+- [ ] S5-07 **Dashboard do Admin** como primeira tela, com visão geral do que está acontecendo, **gráficos e filtros** (período: hoje, 7 dias, 30 dias e personalizado; por operador e por forma de pagamento): vendas (total, quantidade, ticket médio e por forma), caixas abertos agora (quem, desde quando, dinheiro esperado), lotes aguardando conferência, estoque (itens e valor), contas vencidas e a vencer, fiado em aberto e os últimos eventos sensíveis (cancelamentos, estornos, reembolsos e diferenças de caixa)
+- [ ] S5-15 **Dashboard do Estoque**, com gráficos e filtros (período, categoria, parceiro): itens no estoque (Bazar e Doações, por categoria), lotes aguardando triagem, entradas do dia e da semana, descartes, itens com pouco saldo e as últimas movimentações
+- [ ] S5-16 **Dashboard do Financeiro**, com gráficos e filtros (período, forma de pagamento): entradas e saídas do dia e do mês, resultado, contas a pagar vencidas e dos próximos 7 dias, fiado a receber (total e vencido), caixas fechados com diferença e reembolsos
+- [ ] S5-17 Parâmetro de "pouco saldo" para o alerta do dashboard do Estoque (ver P-08)
+- [ ] S5-18 Gráficos acessíveis e legíveis nos dois temas (usar a skill `dataviz` do Claude Code): cores com contraste, texto alternativo e tabela equivalente
 - [ ] S5-08 Tela **Fluxo de caixa** (Financeiro)
 - [ ] S5-09 Tela **Fechamentos de caixa** (Financeiro)
 - [ ] S5-10 Resumo financeiro com impressão e PDF
@@ -213,7 +247,7 @@ Câmera
 - [ ] S5-13 Definir onde hospedar com HTTPS e testar a câmera no celular **(corte possível)**
 - [ ] S5-14 Testes e rodar a definição de pronto; revisão pelo agy; atualizar a documentação
 
-### Sprint 6 — Validação do protótipo (30/11 a 06/12)
+### Sprint 6 — Validação do protótipo (07/12 a 13/12)
 **Objetivo:** provar que o protótipo funciona inteiro e colher os ajustes.
 
 - [ ] S6-01 Roteiro de ponta a ponta por perfil (do lote doado até a venda e o fechamento) executado no sistema
@@ -225,7 +259,7 @@ Câmera
 - [ ] S6-07 Demonstração ao grupo e ao professor
 - [ ] S6-08 Registrar os ajustes pedidos e a decisão de validar o protótipo
 
-### Sprint 7 — Documentação oficial (07/12 a 13/12)
+### Sprint 7 — Documentação oficial (14/12 a 20/12)
 **Objetivo:** o documento oficial de cada tela, no padrão do projeto do personal. Só começa depois de S6-08.
 
 Documentos do projeto
@@ -257,13 +291,19 @@ Fechamento
 - [ ] P-01 Modelo do bipador (provavelmente 1D; o Code 128 funciona nos dois tipos)
 - [ ] P-02 Modelo da impressora e tamanho do rolo de etiqueta (bloqueia S4-06)
 - [ ] P-03 Onde hospedar com HTTPS e quem mantém (bloqueia S5-13; a câmera no celular só abre com HTTPS)
-- [ ] P-04 Valor recebido obrigatório: só em dinheiro ou em todas as formas de pagamento (S4-13)
+- [x] P-04 Valor recebido obrigatório: **em todas as formas de pagamento** (decidido pelo humano em 19/10/2026; vai para a S1B-04 a S1B-06)
 - [ ] P-05 Desconto: a validade é obrigatória ou opcional (S3-09)
 - [ ] P-06 Prefixo do código do produto e campos obrigatórios do cadastro (S2-03)
 - [ ] P-07 Financeiro e Admin com consulta de lotes: confirmar que é só leitura (S3-12)
+- [ ] P-08 "Pouco saldo" no dashboard do Estoque: um valor único (sugestão: 5 unidades, configurável pelo Admin em Parâmetros) ou um valor por categoria (S5-15, S5-17)
+- [ ] P-09 O Vendedor pode **ver** o limite da sangria? Para bloquear com uma mensagem útil ("só há R$ X em dinheiro no caixa"), o sistema mostra o dinheiro da gaveta; isso desfaz o fechamento "às cegas". Confirmar (S1B-07)
+- [x] P-10 Pagar conta "com dinheiro do caixa" e receber fiado na gaveta exigem caixa aberto de quem faz. Decidido em 19/10/2026: o **Administrador** pode abrir caixa (S1B-16). O Financeiro continua sem caixa; se ele precisar dessas duas operações na gaveta, o Admin ou um perfil personalizado as faz
+- [ ] P-11 Recebimento de fiado em dinheiro no caixa: informar o valor recebido e calcular o troco, como na venda? Hoje o recebimento só tem o valor (achado do QA do agy)
+- [ ] P-12 CPF e limite: o limite de "2 por CPF" conta **unidades de produto por mês** (no total ou por produto) ou **compras por mês**? E, com limite configurado, o CPF é **obrigatório** em toda venda (sem CPF o limite não vale)? (S1B-17)
+- [ ] P-13 Esc no PDV com o campo do código vazio tira uma unidade da última linha (é o atalho documentado); se isso atrapalhar, trocar por pedir confirmação
 
 ## 4. Riscos
-- **Prazo:** são 6 sprints de construção até a validação. Os itens marcados como corte possível saem primeiro.
+- **Prazo:** são 7 sprints de construção até a validação (a Sprint 1B e os dashboards acrescentaram uma semana; o plano termina na semana de 14/12 a 20/12). Os itens marcados como corte possível saem primeiro; se a Sprint 1B ficar grande, as tarefas S1B-09 a S1B-12 voltam para a Sprint 4.
 - **Modelo de produto (Sprint 2):** mexe no estoque, na venda e na prestação de contas. É a mudança de maior risco; os testes de concorrência e de PEPS são obrigatórios.
 - **Migrações:** as migrações 0001 a 0003 não podem ser editadas (o checksum quebra); toda mudança de banco entra em migração nova.
 - **Câmera no celular:** depende de HTTPS (P-03).

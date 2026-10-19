@@ -7,6 +7,9 @@ import { caixaApi } from '../caixa.api';
 import { errorMessage } from '../../../shared/api/http';
 import { FORMAS_PAGAMENTO, type CaixaSessao, type PreviaFechamento } from '../../../shared/api/types';
 import { ErrorAlert, Field, MoneyText } from '../../../shared/components/ui';
+import { useAsync } from '../../../shared/hooks/useAsync';
+import { downloadBlob } from '../../../shared/lib/download';
+import { LinhaDoTempoCaixa } from '../components/LinhaDoTempoCaixa';
 import { formatMoney, fromCents, toCents, tryCents } from '../../../shared/lib/money';
 import { armazenamento, CHAVES } from '../../../shared/lib/armazenamento';
 import { formatDateTime } from '../../../shared/lib/format';
@@ -21,6 +24,11 @@ export function FecharCaixaPage() {
   const [erro, setErro] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [fechado, setFechado] = useState<CaixaSessao | null>(null);
+  // Tudo o que aconteceu no caixa: para conferir antes de fechar e para mostrar depois de fechado
+  const tempo = useAsync(() => (fechado ?? caixa ? caixaApi.linhaDoTempo((fechado ?? caixa)!.id) : Promise.resolve(null)), [fechado?.id, caixa?.id]);
+  async function baixarPdf(id: string) {
+    try { downloadBlob(await caixaApi.pdfFechamento(id), 'fechamento-de-caixa.pdf'); } catch (e) { setErro(errorMessage(e)); }
+  }
 
   async function carregar() {
     setErro(null);
@@ -50,12 +58,19 @@ export function FecharCaixaPage() {
     return (
       <div className="center-page">
       <BrandMark />
-      <div className="card login-card">
+      <div className="card fechamento">
         <h1>Caixa fechado</h1>
-        <p>{fechado.terminalNome} · {formatDateTime(fechado.fechadoEm)}</p>
+        <p>{fechado.terminalNome} · aberto em {formatDateTime(fechado.abertoEm)} · fechado em {formatDateTime(fechado.fechadoEm)}</p>
         <p>Esperado: <MoneyText value={fechado.esperado} /> · Contado: <MoneyText value={fechado.contado} /></p>
         <p>Diferença: <strong className={fechado.diferenca !== '0.00' ? 'txt-erro' : 'txt-ok'}><MoneyText value={fechado.diferenca} /></strong></p>
-        <Link to="/" className="btn btn-primary btn-block">Ir para o início</Link>
+        <h2>O que aconteceu, da abertura ao fechamento</h2>
+        <ErrorAlert erro={tempo.erro ?? erro} />
+        {tempo.data ? <LinhaDoTempoCaixa eventos={tempo.data.eventos} /> : <p>Carregando…</p>}
+        <div className="row">
+          <button className="btn" onClick={() => baixarPdf(fechado.id)}>Baixar PDF</button>
+          <button className="btn" onClick={() => window.print()}>Imprimir</button>
+          <Link to="/" className="btn btn-primary grow">Ir para o início</Link>
+        </div>
       </div></div>
     );
   }
@@ -65,6 +80,7 @@ export function FecharCaixaPage() {
       <BrandMark />
       <div className="card fechamento">
         <h1>Fechamento de caixa</h1>
+        <form onSubmit={(e) => { e.preventDefault(); void fechar(); }}>
         {previa && (
           <>
             <table className="table">
@@ -77,6 +93,10 @@ export function FecharCaixaPage() {
               </tbody>
             </table>
             <p className="muted">{previa.quantidadeVendas} venda(s) neste caixa.</p>
+            <details>
+              <summary>Ver tudo o que aconteceu neste caixa</summary>
+              {tempo.data ? <LinhaDoTempoCaixa eventos={tempo.data.eventos} /> : <p>Carregando…</p>}
+            </details>
             <Field label="Dinheiro contado (R$)"><input inputMode="decimal" value={contado} onChange={(e) => setContado(e.target.value)} autoFocus /></Field>
             {difCents !== null && <p>Diferença: <strong className={difCents ? 'txt-erro' : 'txt-ok'}>{formatMoney(difCents)}</strong> {difCents > 0 ? '(sobra)' : difCents < 0 ? '(falta)' : ''}</p>}
             {precisaObs && <Field label="Justificativa da diferença (obrigatória)"><textarea value={obs} onChange={(e) => setObs(e.target.value)} rows={3} maxLength={500} /></Field>}
@@ -85,9 +105,10 @@ export function FecharCaixaPage() {
         <ErrorAlert erro={erro} />
         <div className="row">
           <Link to="/pdv" className="btn">Voltar ao PDV</Link>
-          <button className="btn btn-primary btn-lg grow" onClick={fechar} disabled={!pode || enviando}>{enviando ? 'Fechando…' : 'Fechar caixa'}</button>
+          <button type="submit" className="btn btn-primary btn-lg grow" disabled={!pode || enviando}>{enviando ? 'Fechando…' : 'Fechar caixa'}</button>
         </div>
-        <button className="btn btn-ghost" onClick={() => nav('/')}>Ir ao Backoffice sem fechar</button>
+        <button type="button" className="btn btn-ghost" onClick={() => nav('/')}>Ir ao Backoffice sem fechar</button>
+        </form>
       </div>
     </div>
   );

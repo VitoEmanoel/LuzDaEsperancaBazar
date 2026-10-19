@@ -35,7 +35,7 @@ export interface VendaDb extends Venda { caixaId: string; terminalId: string; op
 export interface CaixaDb extends CaixaSessao { operadorId: string; lancamentos: { id: string; tipo: 'SANGRIA' | 'SUPRIMENTO'; valor: number; motivo: string; em: string }[] }
 
 const PERFIL_ADMIN = sid('perfadm'), PERFIL_VENDEDOR = sid('perfcxa'), PERFIL_ESTOQUISTA = sid('perftri'), PERFIL_FINANCEIRO = sid('perffin');
-// Mesmas permissões dos perfis padrão da migração 0005 (o Administrador não opera o PDV).
+// Mesmas permissões dos perfis padrão (migrações 0005 e 0006: o Administrador tem tudo, inclusive abrir caixa).
 const vendedorPerms: Permissao[] = ['caixa.operar', 'clientes.gerenciar'];
 const estoquistaPerms: Permissao[] = ['entrada.registrar', 'estoque.consultar', 'estoque.transferir', 'cadastros.consultar', 'relatorios.estoque'];
 const financeiroPerms: Permissao[] = ['contas_pagar.gerenciar', 'contas_receber.receber', 'contas_receber.lancar', 'relatorios.consultar', 'relatorios.estoque', 'estoque.consultar'];
@@ -54,7 +54,7 @@ export const db = {
   seq: { lote: 2, venda: 1000 },
   instituicao: { nome: 'Associação Luz da Esperança', cnpj: '00.000.000/0001-00', endereco: 'Parnaíba – PI', telefone: '(86) 0000-0000' } as Instituicao,
   perfis: [
-    { id: PERFIL_ADMIN, nome: 'Administrador', padrao: true, permissoes: PERMISSOES.filter((p) => p !== 'caixa.operar'), limiteDesconto: '100.00' },
+    { id: PERFIL_ADMIN, nome: 'Administrador', padrao: true, permissoes: [...PERMISSOES], limiteDesconto: '100.00' },
     { id: PERFIL_VENDEDOR, nome: 'Vendedor', padrao: true, permissoes: vendedorPerms, limiteDesconto: '0.00' },
     { id: PERFIL_ESTOQUISTA, nome: 'Estoquista', padrao: true, permissoes: estoquistaPerms, limiteDesconto: '0.00' },
     { id: PERFIL_FINANCEIRO, nome: 'Financeiro', padrao: true, permissoes: financeiroPerms, limiteDesconto: '0.00' },

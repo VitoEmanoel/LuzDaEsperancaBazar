@@ -207,15 +207,28 @@ export async function processarVenda(tx: Tx, id: string, req: VendaRequest, op: 
     }
   }
   const total = subtotal - descVenda;
+  if (total <= 0) throw new AppError(400, 'Venda sem valor a pagar', 'VENDA_SEM_VALOR');
 
   // ----- pagamentos (RN-15) -----
   const pags = req.pagamentos.map((p) => ({ forma: p.forma, valor: toCents(p.valor), recebido: p.valorRecebido ? toCents(p.valorRecebido) : null }));
   if (pags.some((p) => p.valor <= 0)) throw new AppError(400, 'Pagamento com valor zero', 'VALIDACAO');
   const pago = pags.reduce((s, p) => s + p.valor, 0);
   if (pago !== total) throw new AppError(409, 'Pagamentos não fecham com o total recalculado', 'PAGAMENTO_DIVERGENTE', `Total ${fromCents(total)}, pago ${fromCents(pago)}`);
+  // Valor recebido OBRIGATÓRIO em dinheiro, PIX e cartão (decisão do humano, 19/10/2026): o operador informa o que recebeu em cada forma.
+  //  - dinheiro: recebido >= valor devido nessa forma; a diferença é o troco;
+  //  - PIX e cartão: recebido = valor (não há troco);
+  //  - fiado: o valor é o que fica na conta do cliente e não tem valor recebido.
   for (const p of pags) {
-    if (p.recebido !== null && p.forma !== 'DINHEIRO') throw new AppError(400, 'Troco só existe para pagamento em dinheiro', 'TROCO_INVALIDO');
-    if (p.recebido !== null && p.recebido < p.valor) throw new AppError(400, 'Valor recebido menor que o valor em dinheiro', 'RECEBIDO_INSUFICIENTE');
+    if (p.forma === 'FIADO') {
+      if (p.recebido !== null) throw new AppError(400, 'Fiado não tem valor recebido: o valor é o que fica na conta do cliente', 'FIADO_COM_RECEBIDO');
+      continue;
+    }
+    if (p.recebido === null) throw new AppError(400, 'Informe o valor recebido em cada forma de pagamento', 'RECEBIDO_OBRIGATORIO');
+    if (p.forma === 'DINHEIRO') {
+      if (p.recebido < p.valor) throw new AppError(400, 'Valor recebido menor que o valor em dinheiro', 'RECEBIDO_INSUFICIENTE');
+    } else if (p.recebido !== p.valor) {
+      throw new AppError(400, 'PIX e cartão não têm troco: o valor recebido deve ser igual ao valor da forma', 'TROCO_INVALIDO');
+    }
   }
   const fiados = pags.filter((p) => p.forma === 'FIADO');
   if (fiados.length > 1) throw new AppError(400, 'Apenas uma parcela de fiado por venda', 'VALIDACAO');
@@ -267,8 +280,9 @@ export async function processarVenda(tx: Tx, id: string, req: VendaRequest, op: 
     await tx.vendaPagamento.create({
       data: {
         vendaId: venda.id, forma: p.forma, valor: fromCents(p.valor),
-        valorRecebido: p.recebido !== null ? fromCents(p.recebido) : null,
-        troco: p.recebido !== null ? fromCents(p.recebido - p.valor) : '0.00',
+        // o banco só aceita valor recebido guardado para dinheiro (ck_pagamento_dinheiro); em PIX e cartão ele é igual ao valor
+        valorRecebido: p.forma === 'DINHEIRO' && p.recebido !== null ? fromCents(p.recebido) : null,
+        troco: p.forma === 'DINHEIRO' && p.recebido !== null ? fromCents(p.recebido - p.valor) : '0.00',
       },
     });
   }

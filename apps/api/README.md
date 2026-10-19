@@ -21,9 +21,10 @@ de refresh é `SameSite=Strict`, `Path=/api/v1/auth`).
 Testes ponta a ponta (banco de **teste** vazio + seed, API rodando):
 
 ```bash
-API_URL=http://localhost:3000/api/v1 ADMIN_INITIAL_PASSWORD=... npm run test:smoke        # 114 verificações
-API_URL=http://localhost:3000/api/v1 npm run test:concorrencia                            # dois caixas disputando estoque
-API_URL=http://localhost:3000/api/v1 npm run test:reteste                                 # 37 verificações dos tickets do QA (depois do smoke)
+API_URL=http://localhost:3000/api/v1 ADMIN_INITIAL_PASSWORD=... npm run test:smoke        # 144 verificações (o smoke vem primeiro: define a senha do admin e cria os usuários)
+API_URL=http://localhost:3000/api/v1 npm run test:concorrencia                            # dois caixas disputando peça, saldo e sangria (espere ~1 minuto depois do smoke: o login aceita 10 por minuto)
+API_URL=http://localhost:3000/api/v1 npm run test:reteste                                 # 36 verificações dos tickets do QA (depois do smoke)
+API_URL=http://localhost:3000/api/v1 npm run test:perfis                                  # 120 verificações de acesso por perfil (depois do smoke)
 npm run typecheck && npm run audit --prefix ../..                                                       # 0 erros, 0 vulnerabilidades
 ```
 
@@ -71,7 +72,7 @@ Scripts SQL do DBA ficam em `/database` na raiz do monorepo.
 | ENT/TRI | `GET,POST /lotes` · `GET /lotes/:id` · `POST,GET /lotes/:id/documento` · `POST /lotes/:id/{itens,descartes,encerrar,reabrir}` · `POST /descartes/:id/reverter` · `GET /etiquetas` | entrada.registrar / triagem.reabrir |
 | EST | `GET /estoque` · `GET /itens/codigo/:codigo` · `GET /itens/:id/historico` · `POST /transferencias` · `POST /baixas` · `POST /ajustes` · `PATCH /itens/:id/preco` · `PATCH /categorias/:id/preco` · `POST /carga-inicial` | estoque.* |
 | PDV | `GET /pdv/catalogo` (ETag) · `PUT /vendas/:id` · `GET /vendas` · `GET /vendas/:id/comprovante` · `POST /vendas/:id/cancelar` | caixa.operar / venda.cancelar |
-| CXA | `GET,POST /terminais` · `PATCH /terminais/:id` · `GET /caixas/atual` · `POST /caixas` · `POST /caixas/:id/lancamentos` · `GET /caixas/:id/previa-fechamento` · `POST /caixas/:id/fechar` · `GET /caixas` | terminais.gerenciar / caixa.operar / relatorios.consultar |
+| CXA | `GET,POST /terminais` · `PATCH /terminais/:id` · `GET /caixas/atual` · `POST /caixas` · `POST /caixas/:id/lancamentos` · `GET /caixas/:id/previa-fechamento` · `GET /caixas/:id/linha-do-tempo` · `GET /caixas/:id/fechamento.pdf` · `POST /caixas/:id/fechar` · `GET /caixas` | terminais.gerenciar / caixa.operar / relatorios.consultar |
 | FIN | `GET,POST /contas-pagar` · `PATCH /contas-pagar/:id` · `POST /contas-pagar/:id/{pagar,cancelar}` · `GET,POST /contas-receber` · `POST /contas-receber/:id/recebimentos` · `POST /recebimentos/:id/estornar` · `GET /clientes/:id/extrato` · `GET /financeiro/resumo` | contas_* / recebimento.estornar / relatorios.consultar |
 | FIS | `GET,POST /regras-fiscais` | fiscal.gerenciar |
 | REL | `GET /relatorios/{prestacao-contas,vendas,estoque,descartes,transferencias,fiado}?formato=json\|pdf\|csv\|xlsx` | relatorios.consultar |
@@ -89,7 +90,7 @@ Scripts SQL do DBA ficam em `/database` na raiz do monorepo.
 | RN-11/24 nada se apaga | sem DELETE na API | `fn_bloqueia_alteracao`, `fn_bloqueia_exclusao` |
 | RN-12/13 caixa aberto; 1 por terminal e por operador | `processarVenda`, `POST /caixas` | `ux_caixa_aberto_*`, `tg_valida_venda_caixa` |
 | RN-14 cancelamento com estorno automático | reembolso por sangria se o caixa da venda fechou | `tg_valida_alteracao_venda`, `tg_estorna_venda_cancelada` |
-| RN-15 pagamentos = total; troco só em dinheiro | servidor recalcula tudo | `ck_pagamento_*`, `ck_venda_totais` |
+| RN-15 pagamentos = total; valor recebido obrigatório em dinheiro, PIX e cartão; troco só em dinheiro; fiado sem valor recebido | servidor recalcula tudo (`RECEBIDO_OBRIGATORIO`, `RECEBIDO_INSUFICIENTE`, `TROCO_INVALIDO`, `FIADO_COM_RECEBIDO`); o banco guarda o recebido só para dinheiro | `ck_pagamento_*`, `ck_venda_totais` |
 | RN-17 regra fiscal versionada, cópia na venda | `fiscal.service.ts` | `tg_valida_regra_fiscal`, `ux_regra_vigente` |
 | RN-19 fechamento | `calcularPrevia()` | `ck_caixa_fechamento` |
 | RN-26 venda não duplica | id da venda gerado no cliente = chave de idempotência | PK da venda |

@@ -402,7 +402,9 @@ rota('POST', '/carga-inicial', ['estoque.ajustar'], ({ body }) => {
 rota('GET', '/pdv/catalogo', ['caixa.operar'], ({ headers }) => {
   const cat: CatalogoPdv = {
     versao: '',
-    categorias: db.categorias.filter((c) => c.ativo && c.vendaPorCategoria),
+    categorias: db.categorias.filter((c) => c.ativo && c.vendaPorCategoria).map((c) => ({
+      ...c, saldoBazar: db.itens.filter((i) => i.controle === 'CATEGORIA' && i.categoriaId === c.id).reduce((s, i) => s + i.saldo.BAZAR, 0),
+    })),
     itensEtiquetados: db.itens.filter((i) => i.controle === 'ETIQUETADO' && i.saldo.BAZAR > 0).map((i) => ({ itemId: i.id, codigo: i.codigo!, descricao: i.descricao, preco: fromCents(i.preco) })),
     clientesFiado: db.clientes.filter((c) => c.ativo && !c.anonimizado).map((c) => ({ id: c.id, nome: c.nome, telefone: c.telefone })),
     regrasFiscais: db.regrasFiscais.filter((r) => !r.vigenciaFim),
@@ -456,9 +458,14 @@ function processarVenda(id: string, req: VendaRequest, user: UsuarioDb): VendaDb
     const total = subtotal - desconto;
     const pagos = req.pagamentos.reduce((s, p) => s + toCents(p.valor), 0);
     if (pagos !== total) falha(409, 'Pagamentos não fecham com o total recalculado', 'PAGAMENTO_DIVERGENTE', `Total ${fromCents(total)}, pago ${fromCents(pagos)}`);
+    // Valor recebido obrigatório em dinheiro, PIX e cartão; troco só em dinheiro; fiado não tem valor recebido.
     let troco = 0;
     for (const p of req.pagamentos) {
-      if (p.forma === 'DINHEIRO' && p.valorRecebido) { const r = toCents(p.valorRecebido); if (r < toCents(p.valor)) falha(400, 'Valor recebido menor que o pago em dinheiro'); troco += r - toCents(p.valor); }
+      if (p.forma === 'FIADO') { if (p.valorRecebido) falha(400, 'Fiado não tem valor recebido: o valor é o que fica na conta do cliente', 'FIADO_COM_RECEBIDO'); continue; }
+      if (!p.valorRecebido) falha(400, 'Informe o valor recebido em cada forma de pagamento', 'RECEBIDO_OBRIGATORIO');
+      const r = toCents(p.valorRecebido), v = toCents(p.valor);
+      if (p.forma === 'DINHEIRO') { if (r < v) falha(400, 'Valor recebido menor que o valor em dinheiro', 'RECEBIDO_INSUFICIENTE'); troco += r - v; }
+      else if (r !== v) falha(400, 'PIX e cartão não têm troco: o valor recebido deve ser igual ao valor da forma', 'TROCO_INVALIDO');
     }
     const fiado = req.pagamentos.find((p) => p.forma === 'FIADO');
     const cliente = db.clientes.find((c) => c.id === req.clienteId);
@@ -540,6 +547,36 @@ function previa(c: CaixaDb) {
   const esperado = toCents(c.fundoTroco) + porForma.DINHEIRO + receb + sup - sang;
   return { fundoTroco: c.fundoTroco, suprimentos: fromCents(sup), sangrias: fromCents(sang), totaisPorForma: Object.fromEntries(FORMAS.map((f) => [f, fromCents(porForma[f])])) as Record<FormaPagamento, string>, esperadoDinheiro: fromCents(esperado), quantidadeVendas: vendas.length };
 }
+/** Caixa do próprio operador ou, para quem vê relatórios, qualquer caixa. */
+function caixaVisivel(user: UsuarioDb, id: string) {
+  const c = db.caixas.find((x) => x.id === id); if (!c) falha(404, 'Caixa não encontrado');
+  if (c!.operadorId !== user.id && !perfilDe(user).permissoes.includes('relatorios.consultar')) falha(403, 'Caixa não pertence a esta sessão', 'CAIXA_DE_OUTRO_OPERADOR');
+  return c!;
+}
+/** Tudo o que aconteceu no caixa, em ordem, com o dinheiro da gaveta depois de cada evento. */
+function linhaDoTempo(c: CaixaDb) {
+  type Ev = { em: string; tipo: string; descricao: string; valor: string; cents: number };
+  const ev: Ev[] = [{ em: c.abertoEm, tipo: 'ABERTURA', descricao: 'Abertura do caixa (fundo de troco)', valor: c.fundoTroco, cents: toCents(c.fundoTroco) }];
+  for (const v of db.vendas.filter((x) => x.caixaId === c.id)) {
+    const din = v.pagamentos.filter((p) => p.forma === 'DINHEIRO').reduce((s, p) => s + toCents(p.valor), 0);
+    const formas = v.pagamentos.map((p) => `${p.forma.toLowerCase()} ${p.valor}${p.forma === 'DINHEIRO' && p.valorRecebido ? ` (recebido ${p.valorRecebido}${toCents(v.troco) ? `, troco ${v.troco}` : ''})` : ''}`).join(' + ');
+    ev.push({ em: v.ocorridaEm, tipo: 'VENDA', descricao: `Venda nº ${v.numero}${v.clienteNome ? ` · ${v.clienteNome}` : ''} · ${formas}`, valor: v.total, cents: din });
+    if (v.status === 'CANCELADA') ev.push({ em: v.ocorridaEm, tipo: 'VENDA_CANCELADA', descricao: `Venda nº ${v.numero} cancelada`, valor: v.total, cents: -din });
+  }
+  for (const l of c.lancamentos) ev.push({ em: l.em, tipo: l.tipo, descricao: `${l.tipo === 'SANGRIA' ? 'Sangria' : 'Suprimento'}: ${l.motivo}`, valor: fromCents(l.valor), cents: l.tipo === 'SANGRIA' ? -l.valor : l.valor });
+  ev.sort((a, b) => a.em.localeCompare(b.em));
+  let gaveta = 0;
+  const eventos = ev.map(({ em, cents, ...e }) => { gaveta += cents; return { quando: em, efeitoDinheiro: fromCents(cents), gavetaApos: fromCents(gaveta), ...e }; });
+  if (c.status === 'FECHADO' && c.fechadoEm) eventos.push({ quando: c.fechadoEm, tipo: 'FECHAMENTO', descricao: `Fechamento do caixa (esperado ${c.esperado}, diferença ${c.diferenca})`, valor: c.contado ?? '0.00', efeitoDinheiro: '0.00', gavetaApos: c.contado ?? '0.00' });
+  return { gavetaAgora: fromCents(gaveta), eventos };
+}
+rota('GET', '/caixas/:id/linha-do-tempo', ['caixa.operar', 'relatorios.consultar'], ({ user, params }) => ok(linhaDoTempo(caixaVisivel(user, params.id!))));
+rota('GET', '/caixas/:id/fechamento.pdf', ['caixa.operar', 'relatorios.consultar'], ({ user, params }) => {
+  caixaVisivel(user, params.id!);
+  // Demonstração: um PDF mínimo. O sistema real gera o PDF completo no servidor.
+  const pdf = '%PDF-1.1\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 320 120]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n4 0 obj<</Length 60>>stream\nBT /F1 12 Tf 20 60 Td (Demonstracao: o PDF real vem do servidor) Tj ET\nendstream endobj\n5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\ntrailer<</Root 1 0 R/Size 6>>\n%%EOF';
+  return { status: 200, headers: { 'content-type': 'application/pdf' }, body: new Blob([pdf], { type: 'application/pdf' }) };
+});
 rota('GET', '/caixas/:id/previa-fechamento', ['caixa.operar'], ({ user, params }) => ok(previa(meuCaixa(user, params.id!))));
 rota('POST', '/caixas/:id/fechar', ['caixa.operar'], ({ user, params, body }) => {
   const c = meuCaixa(user, params.id!); const contado = toCents(body?.contado ?? '-1'); exigir(contado >= 0, 'contado');

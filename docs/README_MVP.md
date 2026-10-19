@@ -40,9 +40,10 @@ O MVP é hoje um **monolito single-tenant** (uma instituição por instalação:
 
 | Perfil | O que faz | Onde trabalha |
 |---|---|---|
-| **Administrador** | Tudo: cadastros, usuários, perfis, parâmetros, regra fiscal, relatórios, financeiro, cancelamentos, LGPD, auditoria | Backoffice |
-| **Caixa** | Abre/fecha caixa, vende, sangria/suprimento, cadastro rápido de cliente para fiado | PDV em tela cheia (entra direto nele) |
-| **Triagem** | Registra lotes de doação, aprova itens (com etiqueta) e descarta com motivo | Backoffice → Entradas |
+| **Administrador** | Tudo: cadastros, usuários, perfis, parâmetros, regra fiscal, relatórios, financeiro, cancelamentos, LGPD, auditoria, e abrir caixa (para pagar contas e receber fiado com o dinheiro da gaveta) | Backoffice |
+| **Vendedor** | Abre/fecha o próprio caixa, vende, sangria/suprimento, cadastro rápido de cliente para fiado | PDV em tela cheia (entra direto nele) |
+| **Estoquista** | Registra lotes de doação, cadastra itens (com etiqueta), transfere entre estoques, consulta estoque e relatórios de estoque | Backoffice → Entradas e Estoque |
+| **Financeiro** | Contas a pagar e a receber, resumo financeiro, relatórios, consulta de estoque | Backoffice → Financeiro |
 
 Os perfis são **compostos por 24 permissões** (ex.: `caixa.operar`, `estoque.transferir`, `relatorios.consultar`), e o administrador pode criar novos. O menu só esconde o que o usuário não usaria; **quem decide é sempre o servidor**.
 
@@ -129,7 +130,9 @@ Tela cheia, pensada para leitor de código e tablet de 10".
 - **Leitura de código:** campo sempre focado; leitor USB funciona como teclado (Enter); feedback sonoro e visual.
 - **Venda por categoria:** botões com preço para itens comuns, com quantidade (F2).
 - **Atalhos:** F2 quantidade · F4 pagamento · Esc remove o último · F6 sangria/suprimento.
-- **Pagamento** (F4): divide entre formas (dinheiro, PIX, débito, crédito, fiado), calcula troco (só em dinheiro — RN-15), desconto até o limite do perfil.
+- **Pagamento** (F4): o operador **digita quanto recebeu em cada forma** (dinheiro, PIX, débito, crédito) e o sistema faz a conta: mostra o que falta e, em dinheiro, o **troco** (conta de R$ 20 paga com nota de R$ 100: troco de R$ 80). A venda só finaliza quando a soma cobre o total. PIX e cartão não aceitam receber mais do que falta. No fiado o valor digitado é o que fica na conta do cliente (RN-15). Desconto só até o limite do perfil (o Vendedor padrão não dá desconto).
+- **Estoque no PDV:** o catálogo traz o saldo do Bazar por categoria; o botão mostra "N em estoque" e o sistema **bloqueia e avisa a quantidade** ao passar do que há (o servidor confere de novo ao gravar). Peça que está no estoque de Doações avisa que não pode ser vendida.
+- **Tirar do carrinho por quantidade:** o ✕ pergunta quantas unidades tirar (peça única sai inteira). Esc tira uma unidade da última linha, e só se o campo estiver vazio (com texto digitado, Esc só limpa o campo).
 - **Fiado:** exige cliente e vencimento; **cadastro rápido de cliente** com ciência do aviso de privacidade (LGPD); se o telefone já existe, pergunta "É a mesma pessoa?".
 - **Comprovante não fiscal** com nome, CNPJ e endereço da instituição (impressão 80 mm).
 - **O servidor recalcula tudo** (preço, subtotal, desconto, total, troco); a tela é só conferência.
@@ -148,7 +151,10 @@ e o carrinho em andamento (sem dado pessoal, token ou senha), e o logout apaga i
 **Fluxo:** abrir (terminal + fundo de troco) → vender / receber / sangria / suprimento → fechar (contado × esperado).
 
 - **Um caixa aberto por terminal e um por operador** (RN-12/13, garantido no banco).
-- **Sangria e suprimento** com motivo; sangria maior que o dinheiro em caixa é recusada.
+- **Sangria e suprimento** com motivo. A tela da sangria mostra o **dinheiro que há na gaveta agora** e bloqueia valor acima dele (o servidor também recusa, e duas sangrias simultâneas não passam juntas).
+- **Abertura** com saldo inicial (troco) obrigatório: o operador digita o valor (0 se não houver troco).
+- **Total do caixa** (fechamento parcial): no PDV, mostra o dinheiro da gaveta, as vendas por forma e tudo o que aconteceu desde a abertura, sem fechar o caixa, com PDF.
+- **Linha do tempo e PDF do fechamento:** ao fechar, o sistema mostra tudo o que aconteceu da abertura ao fechamento (cada venda com o recebido e o troco, cancelamentos, sangrias, suprimentos, fiado recebido) com o dinheiro da gaveta depois de cada evento, e gera o PDF do fechamento. O Vendedor vê só o próprio caixa; Administrador e Financeiro veem qualquer caixa.
 - **Fechamento** (RN-19): prévia com totais por forma e **dinheiro esperado** = fundo + vendas em dinheiro + fiado recebido em dinheiro + suprimentos − sangrias. O operador informa o contado; a diferença fica registrada com justificativa.
 - Fiado recebido em PIX ou cartão é gravado com a forma correta; só dinheiro entra no esperado da gaveta.
 
