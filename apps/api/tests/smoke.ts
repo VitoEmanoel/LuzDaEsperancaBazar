@@ -243,7 +243,8 @@ async function main() {
   check(compra.status === 201 && compra.data.pago === false, 'lote de compra');
   check((await admin.get('/contas-pagar?status=ABERTA')).data.items.some((c: any) => c.valor === '120.00' && c.loteId === compra.data.id), 'compra gera conta a pagar (RN-05)');
   const resumo = (await admin.get(`/financeiro/resumo?de=${hoje}&ate=${hoje}`)).data;
-  check(resumo.saidas === '0.00' && resumo.reembolsos === '103.00' && typeof resumo.resultado === 'string', 'resumo financeiro: reembolso aparece à parte e não deduz duas vezes', resumo);
+  check(resumo.saidas === '0.00' && resumo.reembolsos === '103.00' && /^-?\d+\.\d{2}$/.test(resumo.resultado), 'resumo financeiro: reembolso aparece à parte e não deduz duas vezes', resumo);
+  check(Number(resumo.resultado) > -103 && Number(resumo.resultado) >= 0, 'o reembolso não entra no resultado (o resultado não fica negativo por causa dele)', resumo);
 
   console.log('FIS — regra fiscal versionada');
   const geral = (await admin.get('/regras-fiscais')).data.find((r: any) => r.alvo === 'GERAL');
@@ -291,6 +292,10 @@ async function main() {
   // fundo 20 + venda 10 + suprimento 10 = 40
   const fV = (await vend.post(`/caixas/${cxV}/fechar`, { contado: '40.00' })).data;
   check(fV.status === 'FECHADO' && fV.diferenca === '0.00', 'Vendedor padrão fecha o caixa sem diferença', fV);
+  // Isolamento mútuo com os dois operadores já tendo vendido: cada um enxerga só a(s) sua(s) venda(s)
+  const vendasVend2 = (await vend.get('/vendas')).data, vendasCaixa2 = (await caixa.get('/vendas')).data;
+  check(vendasVend2.total === 1 && vendasVend2.items.every((v: any) => v.id === vV.data.id), 'Vendedor vê só a própria venda', vendasVend2.total);
+  check(vendasCaixa2.total >= vendasCaixa.total && !vendasCaixa2.items.some((v: any) => v.id === vV.data.id), 'outro operador não vê a venda do Vendedor', vendasCaixa2.total);
 
   console.log(`\n${oks} ok, ${falhas} falha(s)`);
   process.exit(falhas ? 1 : 0);

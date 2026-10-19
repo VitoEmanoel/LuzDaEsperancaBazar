@@ -123,8 +123,8 @@ Perfis e visibilidade
 - [x] S1-16 Vendedor enxerga só o próprio caixa e as próprias vendas
 - [x] S1-17 Perfis criados pelo Admin continuam funcionando; os 4 padrão continuam protegidos contra desativação
 - [x] S1-18 Bateria nova de testes: cada perfil tenta acessar o que não deveria e recebe 403
-- [ ] S1-19 Rodar a definição de pronto e percorrer o sistema logado em cada um dos 4 perfis
-- [ ] S1-20 Revisão pelo agy e correções
+- [ ] S1-19 Rodar a definição de pronto e percorrer o sistema logado em cada um dos 4 perfis *(definição de pronto cumprida e acesso por perfil provado pela API em `test:perfis`; falta a conferência das telas de cada perfil no navegador, que fica para o humano na revisão da Sprint 1)*
+- [x] S1-20 Revisão pelo agy e correções (duas rodadas; achados conferidos nos arquivos, aceitos e corrigidos ou recusados com motivo)
 - [x] S1-21 Atualizar `README.md` e `docs/README_MVP.md` (sem PWA, novos perfis)
 
 ### Sprint 2 — Produto, lote e cadastro (02/11 a 08/11)

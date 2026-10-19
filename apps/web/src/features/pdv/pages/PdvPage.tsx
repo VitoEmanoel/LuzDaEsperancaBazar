@@ -24,13 +24,26 @@ import { useToast } from '../../../shared/components/Toast';
 /** O que fica guardado no aparelho: o carrinho, de quem o montou, e o id da venda em andamento. */
 interface CarrinhoSalvo { usuarioId: string; vendaId?: string; linhas: LinhaCarrinho[] }
 
+/** Lê o carrinho guardado no aparelho; só vale se foi montado por este mesmo operador (senão é apagado). */
+function restaurarCarrinho(usuarioId?: string): CarrinhoSalvo {
+  const salvo = armazenamento.ler<CarrinhoSalvo>(CHAVES.carrinho);
+  if (salvo && usuarioId && salvo.usuarioId === usuarioId && Array.isArray(salvo.linhas) && salvo.linhas.length) return salvo;
+  if (salvo) armazenamento.apagar(CHAVES.carrinho);
+  return { usuarioId: usuarioId ?? '', linhas: [] };
+}
+
 export function PdvPage() {
   const { me, can } = useAuth();
   const sessao = usePdvSessao();
   const toast = useToast();
   const nav = useNavigate();
 
-  const [linhas, setLinhas] = useState<LinhaCarrinho[]>([]);
+  // Carrinho preservado no aparelho (sessão expirada / recarga da página), de QUEM o montou: outro operador não herda o carrinho.
+  // O id da venda em andamento também fica guardado: se a resposta se perder e a página recarregar, o reenvio não duplica a venda.
+  // A restauração é síncrona (estado inicial), não por efeito: efeito rodaria com o carrinho vazio e sobrescreveria o que está salvo.
+  const restaurado = useRef<CarrinhoSalvo | null>(null);
+  if (restaurado.current === null) restaurado.current = restaurarCarrinho(me?.id);
+  const [linhas, setLinhas] = useState<LinhaCarrinho[]>(restaurado.current.linhas);
   const [codigo, setCodigo] = useState('');
   const [qtd, setQtd] = useState('1');
   const [msgLeitura, setMsgLeitura] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null);
@@ -39,31 +52,19 @@ export function PdvPage() {
   const [comprovante, setComprovante] = useState<Venda | null>(null);
   const codigoRef = useRef<HTMLInputElement>(null);
   const qtdRef = useRef<HTMLInputElement>(null);
-  const carregouCarrinho = useRef(false);
   /** Id da venda em andamento: mantido entre tentativas para o reenvio não duplicar a venda. */
-  const vendaId = useRef<string | null>(null);
+  const vendaId = useRef<string | null>(restaurado.current.vendaId ?? null);
+  const linhasGravadas = useRef(restaurado.current.linhas);
 
   const modalAberto = pagando || lancando || !!comprovante;
   const focarCodigo = useCallback(() => { setTimeout(() => codigoRef.current?.focus(), 0); }, []);
 
-  // Carrinho preservado no aparelho (sessão expirada / recarga da página), de QUEM o montou: outro operador não herda o carrinho.
-  // O id da venda em andamento também fica guardado: se a resposta se perder e a página recarregar, o reenvio não duplica a venda.
-  const restaurou = useRef(false);
   useEffect(() => {
-    const salvo = armazenamento.ler<CarrinhoSalvo>(CHAVES.carrinho);
-    if (salvo && salvo.usuarioId === me?.id && salvo.linhas.length) {
-      vendaId.current = salvo.vendaId ?? null;
-      restaurou.current = true;
-      setLinhas(salvo.linhas);
-    } else if (salvo) armazenamento.apagar(CHAVES.carrinho);
-    carregouCarrinho.current = true;
-  }, [me?.id]);
-  useEffect(() => {
-    if (!carregouCarrinho.current || !me) return;
-    if (restaurou.current) restaurou.current = false; // carrinho acabou de voltar do aparelho: mantém o id da venda
-    else vendaId.current = null; // o operador mudou o carrinho: a próxima tentativa é uma venda nova
+    if (!me) return;
+    // Só uma troca de carrinho feita pelo operador (nova referência) zera o id da venda; remontar o efeito não zera.
+    if (linhasGravadas.current !== linhas) { vendaId.current = null; linhasGravadas.current = linhas; }
     armazenamento.gravar(CHAVES.carrinho, { usuarioId: me.id, vendaId: vendaId.current ?? undefined, linhas } satisfies CarrinhoSalvo);
-  }, [linhas, me]);
+  }, [linhas, me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Atalhos de teclado globais.
   useEffect(() => {

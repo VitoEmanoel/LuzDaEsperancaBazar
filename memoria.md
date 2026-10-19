@@ -6,7 +6,7 @@ Anotações de quem trabalha no código (Claude Code ou pessoa). Atualize ao ter
 - Fase: protótipo, em alinhamento. Sprint 0 concluída (19/10/2026). Sprint 1 em andamento (o humano mandou começar).
 - Plano e tarefas: `docs/PLANO-DE-SPRINTS.md`.
 - Branch: `sprint-1-sem-offline-e-perfis` (a partir de `main`; o `main` local está 1 commit à frente do `origin`, com o plano e estes arquivos).
-- Última tarefa feita: S1-18 (perfis, visibilidade e bateria `test:perfis`). Falta S1-19 (percorrer o sistema logado em cada perfil, no navegador) e S1-20 (revisão do agy); depois o humano revisa a Sprint 1 antes da Sprint 2.
+- Última tarefa feita: S1-20 (Sprint 1 pronta, com revisão do agy em duas rodadas). Falta só S1-19 na parte do navegador (conferir as telas de cada perfil); o humano revisa a Sprint 1 antes da Sprint 2.
 - Regra do humano: ao terminar a Sprint 1, **parar e mostrar tudo que foi feito e alterado**. Não começar a Sprint 2 sem ordem.
 - Regra do humano: o `agy` é sempre o QA (testar o que foi implementado e analisar as tarefas). Ver `CLAUDE.md`.
 
@@ -23,7 +23,7 @@ Rodado a partir do clone antigo, com o mesmo código:
 - `database/04_testes_0003.sql`: 23 de 23. `database/07_manutencao_rotina.sql`: zero divergência.
 - Ambiente: Node 26.11.1 (o projeto pede 20.19 ou mais) e PostgreSQL 18.6 (a documentação diz 16; funcionou).
 - Depois da remoção do offline (S1-09): `test:smoke` 109 ok, `test:reteste` 36 ok, `test:concorrencia` OK, SQL 04 23/23, SQL 07 zero divergência, 23 permissões.
-- Depois dos perfis (Sprint 1 completa): `test:smoke` 112 ok, `test:concorrencia` OK, `test:reteste` 36 ok, `test:perfis` 107 ok, 24 permissões (entrou `relatorios.estoque`).
+- Sprint 1 completa (referência): `test:smoke` 126 ok, `test:concorrencia` OK, `test:reteste` 36 ok, `test:perfis` 119 ok, SQL 04 23/23, SQL 07 sem divergência, `npm audit` 0, 24 permissões (entrou `relatorios.estoque`).
 
 ## Armadilhas já encontradas
 - `#` no valor de uma variável do `.env` vira comentário e trunca a senha. Evite o caractere ou use aspas.
@@ -38,6 +38,8 @@ Rodado a partir do clone antigo, com o mesmo código:
 - Os testes (`smoke`, `concorrencia`, `reteste`) leem `API_URL` e `ADMIN_INITIAL_PASSWORD` do ambiente; o padrão aponta para a porta 3999.
 
 ## Decisões técnicas
+- QA do agy na Sprint 1 (duas rodadas, três fatias em paralelo, 420 s de limite cada; a chamada única e grande estourou o tempo): aceitos e corrigidos o resumo financeiro que deduzia o reembolso duas vezes (agora `reembolsos` à parte e fora de `saidas`), a migração 0005 que quebraria com nome de perfil ou categoria repetido, o Financeiro com `cadastros.consultar` a mais, o carrinho sem dono e sem `vendaId` persistido (agora restaurado de forma síncrona e por usuário), o logout apagando o terminal fixo, o Vendedor caindo no Início, a rota `/admin` sem guarda e testes fracos. Recusados: preço pelo Estoquista e lotes para o Financeiro (são Sprint 3 e 5) e o Escape do PDV apagando item (já existia; vai para a Sprint 4).
+- Restaurar estado guardado no aparelho: fazer na criação do estado (inicializador), nunca por `useEffect`, porque o efeito roda com o estado vazio e sobrescreve o que está salvo (e o StrictMode roda o efeito duas vezes).
 - Perfis (migração `0005_perfis_e_reembolso`): Caixa virou **Vendedor** (`caixa.operar`, `clientes.gerenciar`), Triagem virou **Estoquista** (`entrada.registrar`, `estoque.consultar`, `estoque.transferir`, `cadastros.consultar`, `relatorios.estoque`) e nasceu **Financeiro** (`contas_pagar.gerenciar`, `contas_receber.receber`, `contas_receber.lancar`, `relatorios.consultar`, `relatorios.estoque`, `estoque.consultar`, `cadastros.consultar`). O **Administrador tem tudo menos `caixa.operar`**. Mesmos ids, usuários e histórico. Perfis personalizados (`padrao = false`) não são tocados.
 - Nova permissão `relatorios.estoque`: dá acesso aos relatórios de estoque, descartes e transferências. Receita, vendas, fiado e prestação de contas continuam exigindo `relatorios.consultar` (checado no servidor por tipo de relatório).
 - **Reembolso em dinheiro vira saída no financeiro** (decisão do humano em 19/10/2026): cancelar venda de caixa já fechado e estornar recebimento de fiado de caixa fechado criam uma conta a pagar já paga, fora do caixa, na categoria `Reembolso de venda` (`registrarReembolso` em `financeiro/reembolso.service.ts`). Isso evita exigir caixa aberto do Administrador. Caixa ainda aberto: a venda cancelada ou o recebimento estornado já saem do valor esperado, como antes.
@@ -63,6 +65,8 @@ Rodado a partir do clone antigo, com o mesmo código:
 - S1-01 feita em 19/10/2026: `npm install` e `.env` de teste criados nesta pasta (ignorados pelo git). Banco de teste `bazar_proto` no PostgreSQL temporário da porta 5544; API na 3100 e front na 5173, subidos desta pasta.
 
 ## Pendências e dúvidas
+- **Sprint 4 (PDV):** a tecla Esc remove o último item do carrinho mesmo quando a pessoa está digitando no campo do código ou da quantidade; o atalho deveria respeitar o foco.
+- **Conferir no navegador:** as telas de cada perfil e o PDV (venda, F5 com carrinho, outro operador no mesmo aparelho) ainda não foram exercitados clicando; só a API real, o build e a tela de login.
 - **Pagar conta "com dinheiro do caixa"** (sangria automática, RN-32) exige que quem paga tenha caixa aberto. Com o Financeiro e o Administrador sem `caixa.operar`, isso só funciona para um perfil personalizado que reúna as duas coisas. Decidir com o humano se a opção continua, se sai ou se muda de lugar.
 - **Receber fiado no caixa** (recebimento ligado ao caixa do vendedor) também depende de uma permissão que o Vendedor padrão não tem (`contas_receber.receber`). O Financeiro recebe fora do caixa. Confirmar se o Vendedor precisa receber fiado na gaveta.
 Estão na seção "Pendências abertas" de `docs/PLANO-DE-SPRINTS.md`. Anote aqui só o que surgir durante o código e ainda não estiver lá.

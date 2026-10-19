@@ -122,7 +122,7 @@ async function main() {
 
   console.log('Cada um vê só o seu');
   const vAdm = (await admin.get('/vendas')).data, vVend = (await clientes.vendedor.get('/vendas')).data;
-  check(vAdm.total > 0 && vVend.total === 0, 'vendedor que nunca vendeu não enxerga as vendas dos outros; o Administrador vê todas (o isolamento entre dois vendedores com vendas está no smoke)', { admin: vAdm.total, vendedor: vVend.total });
+  check(vAdm.total > 0 && vVend.total === 0, 'vendedor que nunca vendeu não enxerga as vendas dos outros; o Administrador vê todas (o isolamento entre dois operadores que já venderam é provado no smoke)', { admin: vAdm.total, vendedor: vVend.total });
   const mes = (await clientes.vendedor.get('/caixas/atual'));
   check(mes.status === 404, 'vendedor sem caixa aberto não recebe caixa de outro operador', mes.status);
 
