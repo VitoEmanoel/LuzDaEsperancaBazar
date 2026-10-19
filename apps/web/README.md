@@ -18,9 +18,10 @@ Usuários da API simulada (**somente dev**; o build de produção não inclui `s
 
 | Login | Senha | Perfil |
 |---|---|---|
-| `admin` | `Admin@123` | Administrador (24 permissões) |
-| `caixa` | `Caixa@123` | Caixa (vai direto ao PDV) |
-| `triagem` | `Triagem@123` | Triagem |
+| `admin` | `Admin@123` | Administrador (tudo, menos operar o PDV) |
+| `vendedor` | `Vendedor@123` | Vendedor (vai direto ao PDV) |
+| `estoquista` | `Estoquista@123` | Estoquista |
+| `financeiro` | `Financeiro@123` | Financeiro |
 
 Códigos de peças etiquetadas no seed: `BZ000001` a `BZ000005`. 
 A API simulada vive na memória da aba: recarregar a página (F5) zera os dados.

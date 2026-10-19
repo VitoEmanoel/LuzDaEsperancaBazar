@@ -6,8 +6,9 @@ Anotações de quem trabalha no código (Claude Code ou pessoa). Atualize ao ter
 - Fase: protótipo, em alinhamento. Sprint 0 concluída (19/10/2026). Sprint 1 em andamento (o humano mandou começar).
 - Plano e tarefas: `docs/PLANO-DE-SPRINTS.md`.
 - Branch: `sprint-1-sem-offline-e-perfis` (a partir de `main`; o `main` local está 1 commit à frente do `origin`, com o plano e estes arquivos).
-- Última tarefa feita: S1-09 (sem offline/PWA, migração `0004_remove_offline`, testes ajustados, READMEs e scripts SQL atualizados).
-- Próxima: S1-10 (migração de perfis).
+- Última tarefa feita: S1-18 (perfis, visibilidade e bateria `test:perfis`). Falta S1-19 (percorrer o sistema logado em cada perfil, no navegador) e S1-20 (revisão do agy); depois o humano revisa a Sprint 1 antes da Sprint 2.
+- Regra do humano: ao terminar a Sprint 1, **parar e mostrar tudo que foi feito e alterado**. Não começar a Sprint 2 sem ordem.
+- Regra do humano: o `agy` é sempre o QA (testar o que foi implementado e analisar as tarefas). Ver `CLAUDE.md`.
 
 ## Repositório e pastas
 - Repositório oficial: `VitoEmanoel/LuzDaEsperancaBazar` (remoto `origin`, via SSH).
@@ -21,7 +22,8 @@ Rodado a partir do clone antigo, com o mesmo código:
 - `test:smoke`: 114 ok. `test:reteste`: 37 ok. `test:concorrencia`: OK.
 - `database/04_testes_0003.sql`: 23 de 23. `database/07_manutencao_rotina.sql`: zero divergência.
 - Ambiente: Node 26.11.1 (o projeto pede 20.19 ou mais) e PostgreSQL 18.6 (a documentação diz 16; funcionou).
-- Depois da remoção do offline (S1-09): `test:smoke` 109 ok, `test:reteste` 36 ok, `test:concorrencia` OK, SQL 04 23/23, SQL 07 zero divergência, 23 permissões. Sem sincronização, esses são os números de referência.
+- Depois da remoção do offline (S1-09): `test:smoke` 109 ok, `test:reteste` 36 ok, `test:concorrencia` OK, SQL 04 23/23, SQL 07 zero divergência, 23 permissões.
+- Depois dos perfis (Sprint 1 completa): `test:smoke` 112 ok, `test:concorrencia` OK, `test:reteste` 36 ok, `test:perfis` 107 ok, 24 permissões (entrou `relatorios.estoque`).
 
 ## Armadilhas já encontradas
 - `#` no valor de uma variável do `.env` vira comentário e trunca a senha. Evite o caractere ou use aspas.
@@ -36,6 +38,11 @@ Rodado a partir do clone antigo, com o mesmo código:
 - Os testes (`smoke`, `concorrencia`, `reteste`) leem `API_URL` e `ADMIN_INITIAL_PASSWORD` do ambiente; o padrão aponta para a porta 3999.
 
 ## Decisões técnicas
+- Perfis (migração `0005_perfis_e_reembolso`): Caixa virou **Vendedor** (`caixa.operar`, `clientes.gerenciar`), Triagem virou **Estoquista** (`entrada.registrar`, `estoque.consultar`, `estoque.transferir`, `cadastros.consultar`, `relatorios.estoque`) e nasceu **Financeiro** (`contas_pagar.gerenciar`, `contas_receber.receber`, `contas_receber.lancar`, `relatorios.consultar`, `relatorios.estoque`, `estoque.consultar`, `cadastros.consultar`). O **Administrador tem tudo menos `caixa.operar`**. Mesmos ids, usuários e histórico. Perfis personalizados (`padrao = false`) não são tocados.
+- Nova permissão `relatorios.estoque`: dá acesso aos relatórios de estoque, descartes e transferências. Receita, vendas, fiado e prestação de contas continuam exigindo `relatorios.consultar` (checado no servidor por tipo de relatório).
+- **Reembolso em dinheiro vira saída no financeiro** (decisão do humano em 19/10/2026): cancelar venda de caixa já fechado e estornar recebimento de fiado de caixa fechado criam uma conta a pagar já paga, fora do caixa, na categoria `Reembolso de venda` (`registrarReembolso` em `financeiro/reembolso.service.ts`). Isso evita exigir caixa aberto do Administrador. Caixa ainda aberto: a venda cancelada ou o recebimento estornado já saem do valor esperado, como antes.
+- O menu do front esconde o item "Relatórios de estoque" de quem já tem "Relatórios" (campo `escondeSe`). A rota `/vendas` agora exige `venda.cancelar` (o Vendedor não vê "Vendas").
+- Só as permissões que a Sprint 1 exige foram criadas. As demais (aprovar produto, caixas do dia, desconto no produto, imprimir etiquetas, lançar compra, ver lotes só leitura, carga inicial só do Admin, criar parceiro) entram junto com a funcionalidade, nas sprints 2 a 5.
 - Migração `0004_remove_offline`: apaga a tabela `pendencia_sincronizacao`, o enum `StatusPendencia`, a permissão `sincronizacao.resolver` e o parâmetro `pdv.max_horas_sem_sync`. O trigger `tg_permissao_sem_exclusao` é desligado só dentro dessa migração para permitir o `DELETE`. As colunas `venda.numero_local` e `venda.origem_registro` e o valor `OFFLINE` do enum ficam, pelo histórico; toda venda nova é `ONLINE`.
 - A hora da venda é sempre a do servidor. `VendaRequest` não aceita mais `ocorridaEm`, `origem` nem `numeroLocal`.
 - `database/01_ddl_completo.sql` agora é a concatenação das migrações 0001 a 0004. `02_dml` e `03_seguranca_papeis` e `07_manutencao_rotina` foram ajustados e validados num banco criado do zero.
@@ -46,6 +53,8 @@ Rodado a partir do clone antigo, com o mesmo código:
 - Banco de teste limpo antes de cada rodada das baterias (a suíte troca a senha do admin): derrubar a API da porta 3100, `DROP/CREATE DATABASE bazar_proto OWNER bazar_owner`, `npm run db:deploy`, `psql -f database/03_seguranca_papeis.sql -v senha_api=...`, `npm run db:seed`, subir a API de novo.
 - Rodar as baterias: `API_URL=http://127.0.0.1:3100/api/v1 ADMIN_INITIAL_PASSWORD=<senha do .env> npm run test:smoke` (e `test:concorrencia`, `test:reteste`).
 - SQL de integridade: `psql -U postgres -d <banco> -f database/04_testes_0003.sql` e, como dono, `database/07_manutencao_rotina.sql`.
+- O login aceita 10 tentativas por minuto (por IP). As baterias fazem muitos logins: **espere uns 65 segundos entre `smoke`, `concorrencia`/`reteste` e `perfis`**, senão o login devolve 429 e a bateria acusa "Rode o smoke antes".
+- Ordem das baterias: `smoke` primeiro (define a senha do admin e cria os usuários), depois `concorrencia`, `reteste` e `perfis`.
 - Captura de tela sem navegador aberto: `firefox --headless --screenshot arquivo.png --window-size=1200,800 <url>`.
 - Instalar do zero sem Prisma (conferido): `01_ddl_completo.sql` (dono, banco vazio), `02_dml_dados_iniciais.sql`, `03_seguranca_papeis.sql`.
 
@@ -54,6 +63,8 @@ Rodado a partir do clone antigo, com o mesmo código:
 - S1-01 feita em 19/10/2026: `npm install` e `.env` de teste criados nesta pasta (ignorados pelo git). Banco de teste `bazar_proto` no PostgreSQL temporário da porta 5544; API na 3100 e front na 5173, subidos desta pasta.
 
 ## Pendências e dúvidas
+- **Pagar conta "com dinheiro do caixa"** (sangria automática, RN-32) exige que quem paga tenha caixa aberto. Com o Financeiro e o Administrador sem `caixa.operar`, isso só funciona para um perfil personalizado que reúna as duas coisas. Decidir com o humano se a opção continua, se sai ou se muda de lugar.
+- **Receber fiado no caixa** (recebimento ligado ao caixa do vendedor) também depende de uma permissão que o Vendedor padrão não tem (`contas_receber.receber`). O Financeiro recebe fora do caixa. Confirmar se o Vendedor precisa receber fiado na gaveta.
 Estão na seção "Pendências abertas" de `docs/PLANO-DE-SPRINTS.md`. Anote aqui só o que surgir durante o código e ainda não estiver lá.
 
 ## Registro de trabalho

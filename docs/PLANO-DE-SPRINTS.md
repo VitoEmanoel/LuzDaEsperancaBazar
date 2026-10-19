@@ -112,18 +112,18 @@ Remover offline e PWA
 - [x] S1-09 Ajustar a API simulada (mocks) e os testes que cobriam sincronização; registrar a nova contagem de testes
 
 Perfis e visibilidade
-- [ ] S1-10 Migração nova: renomear Caixa para Vendedor, Triagem para Estoquista e criar o perfil Financeiro
-- [ ] S1-11 Criar as permissões novas (aprovar produto, ver caixas do dia, aplicar desconto, imprimir etiquetas, lançar compra, entre outras)
-- [ ] S1-12 Semear as permissões de cada perfil conforme a matriz acima
-- [ ] S1-13 Tirar do Admin a permissão de operar o PDV
-- [ ] S1-14 Trocar o termo "triagem" por "estoquista" na interface
-- [ ] S1-15 Menu e rotas montados a partir das permissões; Início por perfil (esqueleto)
-- [ ] S1-16 Vendedor enxerga só o próprio caixa e as próprias vendas
-- [ ] S1-17 Perfis criados pelo Admin continuam funcionando; os 4 padrão continuam protegidos contra desativação
-- [ ] S1-18 Bateria nova de testes: cada perfil tenta acessar o que não deveria e recebe 403
+- [x] S1-10 Migração nova: renomear Caixa para Vendedor, Triagem para Estoquista e criar o perfil Financeiro
+- [x] S1-11 Criar as permissões que a Sprint 1 exige (`relatorios.estoque`); as demais (aprovar produto, caixas do dia, desconto no produto, imprimir etiquetas, lançar compra, entre outras) entram com a funcionalidade, nas sprints 2 a 5
+- [x] S1-12 Semear as permissões de cada perfil conforme a matriz acima
+- [x] S1-13 Tirar do Admin a permissão de operar o PDV
+- [x] S1-14 Trocar o termo "triagem" por "estoquista" na interface (o perfil; "triagem" como processo continua até a Sprint 2, quando a tela vira cadastro + aprovação)
+- [x] S1-15 Menu e rotas montados a partir das permissões; Início por perfil (esqueleto)
+- [x] S1-16 Vendedor enxerga só o próprio caixa e as próprias vendas
+- [x] S1-17 Perfis criados pelo Admin continuam funcionando; os 4 padrão continuam protegidos contra desativação
+- [x] S1-18 Bateria nova de testes: cada perfil tenta acessar o que não deveria e recebe 403
 - [ ] S1-19 Rodar a definição de pronto e percorrer o sistema logado em cada um dos 4 perfis
 - [ ] S1-20 Revisão pelo agy e correções
-- [ ] S1-21 Atualizar `README.md` e `docs/README_MVP.md` (sem PWA, novos perfis)
+- [x] S1-21 Atualizar `README.md` e `docs/README_MVP.md` (sem PWA, novos perfis)
 
 ### Sprint 2 — Produto, lote e cadastro (02/11 a 08/11)
 **Objetivo:** o produto com código único e várias unidades, e o cadastro separado da aprovação, no banco e na API.

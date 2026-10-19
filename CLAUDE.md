@@ -59,7 +59,7 @@ Sistema web do bazar beneficente (PDV, doações, estoque duplo, caixa, financei
 - Commits pequenos, um por tarefa ou grupo coeso, com mensagem clara. **Não inclua `Co-Authored-By: Claude` nem "Generated with Claude Code"** em commits ou PRs.
 - Não faça `push`, `--force`, apagar branch ou arquivo sem o humano pedir. Não use `--dangerously-skip-permissions`.
 - Banco de produção ou de dados reais: nunca. Teste só em banco de teste.
-- Ao fim de cada sprint, peça revisão crítica a outra IA (o `agy`, conforme a skill `orquestracao-de-agentes` do cérebro) e confira cada achado antes de aceitar.
+- **O `agy` é sempre o QA** (regra do humano, 19/10/2026): depois de implementar uma funcionalidade, peça ao `agy` para testá-la e revisá-la; antes de começar uma sprint ou tarefa, peça a ele para analisar as tarefas. Chame como a skill `orquestracao-de-agentes` do cérebro manda: modo `plan` (só leitura), prompt em **uma linha**, dizendo que ele **não deve executar comandos de terminal**, com `--add-dir` do projeto, e informando os resultados dos testes que você já rodou. Faça commit local antes da chamada. O que o `agy` disser é opinião: confira cada achado nos arquivos antes de aceitar e diga ao humano o que aceitou e o que recusou.
 - Em dúvida de produto, pergunte ao humano; não decida regra de negócio sozinho.
 
 ## Memória
