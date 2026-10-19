@@ -13,6 +13,7 @@ import { fromCents, money, toCents } from '../../shared/money.js';
 import { fromDbDate, inicioDoDia, fimDoDiaExclusivo, toDbDate } from '../../shared/dates.js';
 import { exigirUsuario } from '../../plugins/auth.js';
 import { caixaAbertoDoOperador, registrarSangria, FORMAS, type Forma } from '../caixa/caixa.service.js';
+import { registrarReembolso } from './reembolso.service.js';
 import { obterClienteAtivo } from '../cadastros/clientes.routes.js';
 
 const zValor = zMoney.refine((v) => toCents(v) > 0, 'valor maior que zero');
@@ -220,16 +221,14 @@ export async function rotasFinanceiro(app: FastifyInstance) {
       const r = await tx.recebimento.findUnique({ where: { id }, include: { sessao: { select: { status: true } } } });
       if (!r) naoEncontrado('Recebimento');
       if (r!.estornadoEm) conflito('ESTORNO_DUPLICADO', 'Recebimento já estornado');
-      let sangriaId: string | undefined;
-      // RN-27: estorno de dinheiro de caixa JÁ FECHADO sai como sangria do caixa aberto.
+      let reembolsoId: string | undefined;
+      // RN-27: estorno de dinheiro de caixa JÁ FECHADO vira uma saída paga no financeiro.
       // Caixa ainda aberto: o recebimento estornado já sai do valor esperado.
       if (r!.forma === 'DINHEIRO' && r!.sessao && r!.sessao.status === 'FECHADO') {
-        const cx = await caixaAbertoDoOperador(tx, u.id);
-        if (!cx) conflito('SEM_CAIXA_ABERTO', 'O dinheiro entrou num caixa já fechado: abra um caixa para registrar a sangria');
-        sangriaId = (await registrarSangria(tx, cx!.id, u.id, toCents(r!.valor), 'Estorno de recebimento de fiado')).id;
+        reembolsoId = (await registrarReembolso(tx, u.id, toCents(r!.valor), 'Estorno de recebimento de fiado')).id;
       }
       await tx.recebimento.update({ where: { id }, data: { estornadoEm: new Date(), estornadoPorId: u.id, motivoEstorno: motivo } });
-      await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'RECEBIMENTO_ESTORNADO', 'recebimento', id, undefined, { motivo, sangriaId });
+      await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'RECEBIMENTO_ESTORNADO', 'recebimento', id, undefined, { motivo, reembolsoId });
     });
     return reply.code(204).send();
   });

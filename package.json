@@ -20,7 +20,8 @@
     "test:smoke": "npm run test:smoke -w @bazar/api",
     "test:concorrencia": "npm run test:concorrencia -w @bazar/api",
     "audit": "npm audit --audit-level=high",
-    "test:reteste": "npm run test:reteste -w @bazar/api"
+    "test:reteste": "npm run test:reteste -w @bazar/api",
+    "test:perfis": "npm run test:perfis -w @bazar/api"
   },
   "overrides": {
     "mysql2": "^3.24.5",

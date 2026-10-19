@@ -496,8 +496,11 @@ rota('POST', '/vendas/:id/cancelar', ['venda.cancelar'], ({ user, params, body }
   v.alocacoes.forEach((a) => mover(db.itens.find((i) => i.id === a.itemId)!, 'BAZAR', a.quantidade, 'ESTORNO_VENDA', user.nome, `Estorno da venda ${v.numero}`));
   v.status = 'CANCELADA';
   const dinheiro = v.pagamentos.filter((p) => p.forma === 'DINHEIRO').reduce((s, p) => s + toCents(p.valor), 0);
-  const cx = db.caixas.find((c) => c.status === 'ABERTO' && c.operadorId === user.id);
-  if (dinheiro && cx) cx.lancamentos.push({ id: uid(), tipo: 'SANGRIA', valor: dinheiro, motivo: `Reembolso venda ${v.numero}`, em: now() });
+  // Caixa já fechado: o reembolso em dinheiro vira uma saída paga no financeiro (o Administrador não opera caixa).
+  if (dinheiro && db.caixas.find((c) => c.id === v.caixaId)?.status === 'FECHADO') {
+    const cat = db.categoriasDespesa.find((c) => c.nome === 'Reembolso de venda')!;
+    db.contasPagar.push({ id: uid(), descricao: `Reembolso da venda nº ${v.numero}`, categoriaDespesaId: cat.id, categoriaDespesaNome: cat.nome, valor: fromCents(dinheiro), vencimento: now().slice(0, 10), status: 'PAGA', pagaEm: now(), saiuDoCaixa: false, formaPagamento: 'DINHEIRO' });
+  }
   db.contasReceber.filter((c) => c.vendaNumero === v.numero).forEach((c) => { c.status = 'CANCELADA'; c.saldo = '0.00'; });
   auditar(user, 'VENDA_CANCELADA', 'venda', v.id); return ok(vendaDto(v));
 });
@@ -694,7 +697,8 @@ function relatorio(tipo: string, q: URLSearchParams): RelatorioResposta {
     default: return falha(404, 'Relatório inexistente');
   }
 }
-rota('GET', '/relatorios/:tipo', ['relatorios.consultar'], ({ params, query }) => {
+rota('GET', '/relatorios/:tipo', ['relatorios.consultar', 'relatorios.estoque'], ({ user, params, query }) => {
+  if (!['estoque', 'descartes', 'transferencias'].includes(params.tipo!) && !perfilDe(user).permissoes.includes('relatorios.consultar')) return problem(403, 'Você não tem permissão para esta ação', 'SEM_PERMISSAO');
   const r = relatorio(params.tipo!, query); const fmt = query.get('formato') ?? 'json';
   if (fmt === 'json') return ok(r);
   const secao = (x: typeof r) => [x.colunas.map((c) => c.rotulo).join(';'), ...x.linhas.map((l) => x.colunas.map((c) => `"${String(l[c.chave] ?? '').replace(/"/g, '""')}"`).join(';'))];

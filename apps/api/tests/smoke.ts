@@ -81,19 +81,25 @@ async function main() {
   const term1 = (await admin.post('/terminais', { id: uuid(), nome: 'Caixa 1' })).data;
   const term2 = (await admin.post('/terminais', { id: uuid(), nome: 'Caixa 2' })).data;
   const perfis = (await admin.get('/perfis')).data;
-  const perfilCaixa = perfis.find((p: any) => p.nome === 'Caixa');
-  const perfilTri = perfis.find((p: any) => p.nome === 'Triagem');
-  await admin.patch(`/perfis/${perfilCaixa.id}`, { limiteDesconto: '10.00' });
+  const perfilCaixa = perfis.find((p: any) => p.nome === 'Vendedor');
+  const perfilTri = perfis.find((p: any) => p.nome === 'Estoquista');
+  // O Administrador não opera caixa. O operador `caixa1` deste teste tem um perfil PERSONALIZADO (Vendedor + financeiro),
+  // criado pelo Admin, para exercitar sangria automática e recebimento de fiado no caixa. O Vendedor puro é `vend1`.
+  const perfilMista = (await admin.post('/perfis', { nome: 'Vendedor com financeiro (teste)', limiteDesconto: '10.00', permissoes: ['caixa.operar', 'clientes.gerenciar', 'contas_receber.receber', 'contas_receber.lancar', 'contas_pagar.gerenciar', 'cadastros.consultar', 'estoque.consultar'] })).data;
+  check(perfilMista?.id && perfilMista.padrao === false, 'Admin cria perfil personalizado');
   const adm = perfis.find((p: any) => p.nome === 'Administrador');
   check((await admin.patch(`/perfis/${adm.id}`, { permissoes: ['caixa.operar'] })).data?.code === 'PERFIL_ADMIN_PROTEGIDO', 'admin não perde permissões essenciais');
-  const ucx = (await admin.post('/usuarios', { id: uuid(), nome: 'Operadora Teste', login: 'caixa1', perfilId: perfilCaixa.id })).data;
+  const ucx = (await admin.post('/usuarios', { id: uuid(), nome: 'Operadora Teste', login: 'caixa1', perfilId: perfilMista.id })).data;
+  const uvend = (await admin.post('/usuarios', { id: uuid(), nome: 'Vendedora Pura', login: 'vend1', perfilId: perfilCaixa.id })).data;
   const utri = (await admin.post('/usuarios', { id: uuid(), nome: 'Triador Teste', login: 'triagem1', perfilId: perfilTri.id })).data;
   check(ucx.senhaProvisoria && utri.senhaProvisoria, 'usuários com senha provisória');
   const caixa = new Cliente(); await caixa.login('caixa1', ucx.senhaProvisoria); await caixa.put('/auth/senha', { senhaAtual: ucx.senhaProvisoria, novaSenha: 'Caixa-Senha-2026' });
+  const vend = new Cliente(); await vend.login('vend1', uvend.senhaProvisoria); await vend.put('/auth/senha', { senhaAtual: uvend.senhaProvisoria, novaSenha: 'Vend-Senha-2026' });
   const tri = new Cliente(); await tri.login('triagem1', utri.senhaProvisoria); await tri.put('/auth/senha', { senhaAtual: utri.senhaProvisoria, novaSenha: 'Triagem-Senha-2026' });
 
   console.log('ACS — autorização (servidor decide)');
   check((await caixa.get('/usuarios')).status === 403, 'caixa não lista usuários');
+  check((await vend.get('/contas-pagar')).status === 403 && (await vend.get('/estoque')).status === 403 && (await vend.get('/lotes')).status === 403, 'Vendedor não vê financeiro, estoque nem lotes');
   check((await tri.put(`/vendas/${uuid()}`, {})).status === 403, 'triagem não vende');
   check((await caixa.get('/relatorios/vendas?de=2026-01-01&ate=2026-12-31')).status === 403, 'caixa não vê relatórios');
   const cli = (await caixa.post('/clientes', { id: uuid(), nome: 'Maria Exemplo', telefone: '(86) 90000-0001', cienciaAviso: true })).data;
@@ -148,7 +154,8 @@ async function main() {
   const cxId = uuid();
   const cx = (await caixa.post('/caixas', { id: cxId, terminalId: term1.id, fundoTroco: '50.00' })).data;
   check(cx.status === 'ABERTO', 'caixa aberto', cx);
-  check((await admin.post('/caixas', { id: uuid(), terminalId: term1.id, fundoTroco: '0.00' })).data?.code === 'CAIXA_JA_ABERTO', 'um caixa por terminal (RN-13)');
+  check((await vend.post('/caixas', { id: uuid(), terminalId: term1.id, fundoTroco: '0.00' })).data?.code === 'CAIXA_JA_ABERTO', 'um caixa por terminal (RN-13)');
+  check((await admin.post('/caixas', { id: uuid(), terminalId: term1.id, fundoTroco: '0.00' })).status === 403, 'Administrador não opera caixa');
   check((await caixa.get('/caixas/atual')).data.id === cxId, 'caixa atual');
   const cat = await caixa.req('GET', '/pdv/catalogo');
   check(cat.status === 200 && cat.data.itensEtiquetados.length === 2 && cat.data.clientesFiado.length === 1, 'catálogo do PDV', cat.data);
@@ -183,7 +190,7 @@ async function main() {
   const prev = (await caixa.get(`/caixas/${cxId}/previa-fechamento`)).data;
   // 50 fundo + 95 venda dinheiro + 8 fiado recebido + 20 suprimento = 173
   check(prev.esperadoDinheiro === '173.00' && prev.totaisPorForma.FIADO === '20.00', 'prévia RN-19', prev);
-  check((await admin.get(`/caixas/${cxId}/previa-fechamento`)).status === 403, 'prévia de caixa alheio => 403 (anti-IDOR)');
+  check((await vend.get(`/caixas/${cxId}/previa-fechamento`)).status === 403, 'prévia de caixa alheio => 403 (anti-IDOR)');
   check((await caixa.post(`/caixas/${cxId}/fechar`, { contado: '170.00' })).data?.code === 'OBSERVACAO_OBRIGATORIA', 'diferença exige observação');
   const fech = (await caixa.post(`/caixas/${cxId}/fechar`, { contado: '170.00', observacao: 'Faltou troco de moedas' })).data;
   check(fech.status === 'FECHADO' && fech.diferenca === '-3.00', 'caixa fechado com diferença', fech);
@@ -191,18 +198,16 @@ async function main() {
 
   console.log('PDV — cancelamento e estornos (admin)');
   check((await admin.post(`/vendas/${vFiado}/cancelar`, { motivo: 'Cliente desistiu' })).data?.code === 'FIADO_COM_RECEBIMENTO', 'cancelar fiado com recebimento ativo => 409');
-  check((await admin.post(`/recebimentos/${rec.id}/estornar`, { motivo: 'Lançado errado' })).data?.code === 'SEM_CAIXA_ABERTO', 'estorno de dinheiro de caixa fechado exige caixa aberto');
-  const cxAdm = uuid();
-  await admin.post('/caixas', { id: cxAdm, terminalId: term2.id, fundoTroco: '200.00' });
-  check((await admin.post(`/recebimentos/${rec.id}/estornar`, { motivo: 'Lançado errado' })).status === 204, 'estorno com sangria no caixa aberto');
+  check((await admin.post(`/recebimentos/${rec.id}/estornar`, { motivo: 'Lançado errado' })).status === 204, 'estorno de dinheiro de caixa fechado vira saída no financeiro (sem caixa aberto)');
   check((await admin.post(`/recebimentos/${rec.id}/estornar`, { motivo: 'De novo aqui' })).data?.code === 'ESTORNO_DUPLICADO', 'estorno só uma vez');
   const canc = await admin.post(`/vendas/${vFiado}/cancelar`, { motivo: 'Cliente desistiu' });
   check(canc.status === 200 && canc.data.status === 'CANCELADA', 'venda fiada cancelada', canc.data);
   check((await caixa.get(`/contas-receber?clienteId=${cli.id}`)).data.items[0].status === 'CANCELADA', 'conta a receber cancelada pelo banco');
   const cv1 = await admin.post(`/vendas/${v1}/cancelar`, { motivo: 'Venda de teste' });
-  check(cv1.status === 200, 'venda em dinheiro de caixa fechado cancelada (reembolso por sangria)', cv1.data);
-  const prevAdm = (await admin.get(`/caixas/${cxAdm}/previa-fechamento`)).data;
-  check(prevAdm.sangrias === '103.00', 'sangrias de estorno (8) e reembolso (95)', prevAdm);
+  check(cv1.status === 200, 'venda em dinheiro de caixa fechado cancelada (reembolso vira saída no financeiro)', cv1.data);
+  const reembolsos = (await admin.get('/contas-pagar?status=PAGA')).data.items.filter((c: any) => c.categoriaDespesaNome === 'Reembolso de venda');
+  const totalReembolsos = reembolsos.reduce((s: number, c: any) => s + Math.round(Number(c.valor) * 100), 0);
+  check(reembolsos.length === 2 && totalReembolsos === 10300 && reembolsos.every((c: any) => c.saiuDoCaixa === false), 'saídas de reembolso: estorno (8) e venda (95), fora do caixa', reembolsos);
   check((await tri.get(`/itens/${pec1.id}/historico`)).data.item.saldoBazar === 1, 'peça voltou ao bazar pelo estorno');
   check((await tri.get(`/vendas/${v1}/comprovante`)).status === 403, 'triagem não vê comprovante');
   const cx3 = uuid(); await caixa.post('/caixas', { id: cx3, terminalId: term1.id, fundoTroco: '0.00' });
@@ -213,15 +218,17 @@ async function main() {
 
   console.log('FIN — contas a pagar e compra');
   const cp = (await admin.post('/contas-pagar', { id: uuid(), descricao: 'Energia (fictícia)', valor: '30.00', vencimento: hoje })).data;
-  const pg = (await admin.post(`/contas-pagar/${cp.id}/pagar`, { saiuDoCaixa: true })).data;
+  check((await admin.post(`/contas-pagar/${cp.id}/pagar`, { saiuDoCaixa: true })).data?.code === 'SEM_CAIXA_ABERTO', 'pagar com dinheiro do caixa exige caixa aberto de quem paga');
+  await caixa.post(`/caixas/${cx3}/lancamentos`, { id: uuid(), tipo: 'SUPRIMENTO', valor: '50.00', motivo: 'Reforço de troco (teste)' });
+  const pg = (await caixa.post(`/contas-pagar/${cp.id}/pagar`, { saiuDoCaixa: true })).data;
   check(pg.status === 'PAGA' && pg.saiuDoCaixa === true, 'conta paga do caixa (sangria automática)', pg);
   check((await admin.patch(`/contas-pagar/${cp.id}`, { valor: '1.00' })).data?.code === 'CONTA_NAO_ABERTA', 'conta paga não é editada (RN-32)');
-  check((await admin.post(`/contas-pagar/${cp.id}/cancelar`, { motivo: 'Paguei errado' })).data.status === 'CANCELADA', 'cancelamento de conta paga gera suprimento');
+  check((await caixa.post(`/contas-pagar/${cp.id}/cancelar`, { motivo: 'Paguei errado' })).data.status === 'CANCELADA', 'cancelamento de conta paga gera suprimento');
   const compra = await admin.post('/lotes', { id: uuid(), tipo: 'COMPRA', parceiroId: fornecedor.id, valorCompra: '120.00', pago: false, vencimento: hoje });
   check(compra.status === 201 && compra.data.pago === false, 'lote de compra');
   check((await admin.get('/contas-pagar?status=ABERTA')).data.items.some((c: any) => c.valor === '120.00' && c.loteId === compra.data.id), 'compra gera conta a pagar (RN-05)');
   const resumo = (await admin.get(`/financeiro/resumo?de=${hoje}&ate=${hoje}`)).data;
-  check(resumo.saidas === '0.00' && typeof resumo.resultado === 'string', 'resumo financeiro', resumo);
+  check(resumo.saidas === '103.00' && typeof resumo.resultado === 'string', 'resumo financeiro (as saídas são os dois reembolsos pagos fora do caixa)', resumo);
 
   console.log('FIS — regra fiscal versionada');
   const geral = (await admin.get('/regras-fiscais')).data.find((r: any) => r.alvo === 'GERAL');

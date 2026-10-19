@@ -34,9 +34,11 @@ export interface DescarteDb { id: string; loteId: string; categoriaId: string; m
 export interface VendaDb extends Venda { caixaId: string; terminalId: string; operadorId: string; alocacoes: { itemId: string; quantidade: number; precoUnit: number }[]; clienteId?: string }
 export interface CaixaDb extends CaixaSessao { operadorId: string; lancamentos: { id: string; tipo: 'SANGRIA' | 'SUPRIMENTO'; valor: number; motivo: string; em: string }[] }
 
-const PERFIL_ADMIN = sid('perfadm'), PERFIL_CAIXA = sid('perfcxa'), PERFIL_TRIAGEM = sid('perftri');
-const caixaPerms: Permissao[] = ['caixa.operar', 'clientes.gerenciar', 'contas_receber.receber', 'cadastros.consultar', 'estoque.consultar'];
-const triagemPerms: Permissao[] = ['entrada.registrar', 'estoque.consultar', 'estoque.transferir', 'cadastros.consultar'];
+const PERFIL_ADMIN = sid('perfadm'), PERFIL_VENDEDOR = sid('perfcxa'), PERFIL_ESTOQUISTA = sid('perftri'), PERFIL_FINANCEIRO = sid('perffin');
+// Mesmas permissões dos perfis padrão da migração 0005 (o Administrador não opera o PDV).
+const vendedorPerms: Permissao[] = ['caixa.operar', 'clientes.gerenciar'];
+const estoquistaPerms: Permissao[] = ['entrada.registrar', 'estoque.consultar', 'estoque.transferir', 'cadastros.consultar', 'relatorios.estoque'];
+const financeiroPerms: Permissao[] = ['contas_pagar.gerenciar', 'contas_receber.receber', 'contas_receber.lancar', 'relatorios.consultar', 'relatorios.estoque', 'estoque.consultar', 'cadastros.consultar'];
 
 const catRoupaAd = sid('catroup'), catRoupaInf = sid('catinf'), catCalc = sid('catcalc'), catLivro = sid('catliv'), catUtens = sid('catute'), catPeca = sid('catpeca');
 const parcNI = sid('parcni'), parcA = sid('parca'), parcB = sid('parcb');
@@ -46,21 +48,23 @@ const mbAvaria = sid('mbava'), mbPerda = sid('mbper'), mbDoacao = sid('mbdoa');
 const lote1 = sid('lote1'), lote2 = sid('lote2');
 const term1 = sid('term1'), term2 = sid('term2');
 const cli1 = sid('cli1'), cli2 = sid('cli2'), cli3 = sid('cli3');
-const despEnergia = sid('desen'), despMaterial = sid('desmat');
+const despEnergia = sid('desen'), despMaterial = sid('desmat'), despReembolso = sid('desreemb');
 
 export const db = {
   seq: { lote: 2, venda: 1000 },
   instituicao: { nome: 'Associação Luz da Esperança', cnpj: '00.000.000/0001-00', endereco: 'Parnaíba – PI', telefone: '(86) 0000-0000' } as Instituicao,
   perfis: [
-    { id: PERFIL_ADMIN, nome: 'Administrador', padrao: true, permissoes: [...PERMISSOES], limiteDesconto: '100.00' },
-    { id: PERFIL_CAIXA, nome: 'Caixa', padrao: true, permissoes: caixaPerms, limiteDesconto: '10.00' },
-    { id: PERFIL_TRIAGEM, nome: 'Triagem', padrao: true, permissoes: triagemPerms, limiteDesconto: '0.00' },
+    { id: PERFIL_ADMIN, nome: 'Administrador', padrao: true, permissoes: PERMISSOES.filter((p) => p !== 'caixa.operar'), limiteDesconto: '100.00' },
+    { id: PERFIL_VENDEDOR, nome: 'Vendedor', padrao: true, permissoes: vendedorPerms, limiteDesconto: '0.00' },
+    { id: PERFIL_ESTOQUISTA, nome: 'Estoquista', padrao: true, permissoes: estoquistaPerms, limiteDesconto: '0.00' },
+    { id: PERFIL_FINANCEIRO, nome: 'Financeiro', padrao: true, permissoes: financeiroPerms, limiteDesconto: '0.00' },
   ] as Perfil[],
   // Senhas em texto puro APENAS no mock. O servidor real usa argon2id (RNF-07).
   usuarios: [
     { id: sid('usradm'), nome: 'Ana Administradora', login: 'admin', senha: 'Admin@123', perfilId: PERFIL_ADMIN, ativo: true, trocarSenha: false },
-    { id: sid('usrcxa'), nome: 'Carlos do Caixa', login: 'caixa', senha: 'Caixa@123', perfilId: PERFIL_CAIXA, ativo: true, trocarSenha: false },
-    { id: sid('usrtri'), nome: 'Teresa da Triagem', login: 'triagem', senha: 'Triagem@123', perfilId: PERFIL_TRIAGEM, ativo: true, trocarSenha: false },
+    { id: sid('usrcxa'), nome: 'Carlos Vendedor', login: 'vendedor', senha: 'Vendedor@123', perfilId: PERFIL_VENDEDOR, ativo: true, trocarSenha: false },
+    { id: sid('usrtri'), nome: 'Teresa Estoquista', login: 'estoquista', senha: 'Estoquista@123', perfilId: PERFIL_ESTOQUISTA, ativo: true, trocarSenha: false },
+    { id: sid('usrfin'), nome: 'Fabio Financeiro', login: 'financeiro', senha: 'Financeiro@123', perfilId: PERFIL_FINANCEIRO, ativo: true, trocarSenha: false },
   ] as UsuarioDb[],
   categorias: [
     { id: catRoupaAd, nome: 'Roupa adulto', precoPadrao: '10.00', vendaPorCategoria: true, ativo: true },
@@ -87,6 +91,7 @@ export const db = {
   ] as Motivo[],
   categoriasDespesa: [
     { id: despEnergia, nome: 'Energia', ativo: true }, { id: despMaterial, nome: 'Material de consumo', ativo: true },
+    { id: despReembolso, nome: 'Reembolso de venda', ativo: true },
   ] as CategoriaDespesa[],
   clientes: [
     { id: cli1, nome: 'Maria Exemplo', telefone: '(86) 90000-0001', ativo: true, cienciaAviso: true },

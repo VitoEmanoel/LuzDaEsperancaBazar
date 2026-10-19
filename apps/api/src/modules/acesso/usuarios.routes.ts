@@ -25,7 +25,7 @@ const DESCRICOES: Record<Permissao, string> = {
   'terminais.gerenciar': 'Pontos de caixa',
   'contas_pagar.gerenciar': 'Contas a pagar e lote de compra', 'contas_receber.receber': 'Receber fiado, extrato do cliente',
   'contas_receber.lancar': 'Conta a receber manual', 'recebimento.estornar': 'Estornar recebimento',
-  'relatorios.consultar': 'Relatórios, prestação de contas, histórico de caixas', 'fiscal.gerenciar': 'Regra de imposto',
+  'relatorios.consultar': 'Relatórios, prestação de contas, histórico de caixas', 'relatorios.estoque': 'Relatórios de estoque, descartes e transferências', 'fiscal.gerenciar': 'Regra de imposto',
   'privacidade.gerenciar': 'Exportar e anonimizar titulares',
 };
 

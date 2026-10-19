@@ -7,7 +7,7 @@ const adm = await login('admin', 'Nova-Senha-Forte-1');
 const cx = await login('caixa1', 'Caixa-Senha-2026');
 // segundo operador e terminal
 const perfis = await (await fetch(B + '/perfis', { headers: j(adm) })).json();
-const pc = perfis.find((p: any) => p.nome === 'Caixa');
+const pc = perfis.find((p: any) => p.nome === 'Vendedor');
 const u2 = await (await fetch(B + '/usuarios', { method: 'POST', headers: j(adm), body: JSON.stringify({ id: uuid(), nome: 'Op2', login: 'caixa2', perfilId: pc.id }) })).json();
 let t2 = await login('caixa2', u2.senhaProvisoria);
 await fetch(B + '/auth/senha', { method: 'PUT', headers: j(t2), body: JSON.stringify({ senhaAtual: u2.senhaProvisoria, novaSenha: 'Outra-Senha-Forte-77' }) });

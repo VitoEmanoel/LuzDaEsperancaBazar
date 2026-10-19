@@ -44,7 +44,7 @@ export function App() {
             {/* Backoffice */}
             <Route element={<RequireAuth><AppLayout /></RequireAuth>}>
               <Route index element={<HomePage />} />
-              <Route path="vendas" element={P(['caixa.operar', 'venda.cancelar'], <VendasPage />)} />
+              <Route path="vendas" element={P(['venda.cancelar'], <VendasPage />)} />
               <Route path="entradas" element={P(['entrada.registrar'], <LotesPage />)} />
               <Route path="entradas/novo" element={P(['entrada.registrar'], <NovoLotePage />)} />
               <Route path="entradas/:id/triagem" element={P(['entrada.registrar'], <TriagemPage />)} />
@@ -55,8 +55,8 @@ export function App() {
               <Route path="financeiro/pagar" element={P(['contas_pagar.gerenciar'], <ContasPagarPage />)} />
               <Route path="financeiro/receber" element={P(['contas_receber.receber'], <ContasReceberPage />)} />
               <Route path="financeiro/resumo" element={P(['relatorios.consultar'], <ResumoFinanceiroPage />)} />
-              <Route path="relatorios/:tipo" element={P(['relatorios.consultar'], <RelatoriosPage />)} />
-              <Route path="cadastros/:tipo" element={P(['cadastros.gerenciar', 'cadastros.consultar', 'clientes.gerenciar'], <CadastrosPage />)} />
+              <Route path="relatorios/:tipo" element={P(['relatorios.consultar', 'relatorios.estoque'], <RelatoriosPage />)} />
+              <Route path="cadastros/:tipo" element={P(['cadastros.gerenciar', 'cadastros.consultar'], <CadastrosPage />)} />
               <Route path="admin/*" element={<AdminPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

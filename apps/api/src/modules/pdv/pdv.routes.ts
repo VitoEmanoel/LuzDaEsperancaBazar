@@ -14,7 +14,7 @@ import { localDate, periodo } from '../../shared/dates.js';
 import { paramNum } from '../../shared/parametros.js';
 import { exigirUsuario, tem, type UsuarioCtx } from '../../plugins/auth.js';
 import { regraDto, regrasVigentes } from '../fiscal/fiscal.service.js';
-import { caixaAbertoDoOperador, registrarSangria } from '../caixa/caixa.service.js';
+import { registrarReembolso } from '../financeiro/reembolso.service.js';
 import { carregarVenda, emTransacao, processarVenda, zVendaRequest, type Operador } from './vendas.service.js';
 
 const opDe = (u: UsuarioCtx): Operador => ({ id: u.id, nome: u.nome, permissoes: u.permissoes, limiteDescontoPct: u.limiteDescontoPct });
@@ -123,19 +123,17 @@ export async function rotasPdv(app: FastifyInstance) {
       if (!v) naoEncontrado('Venda');
       if (v!.status === 'CANCELADA') conflito('VENDA_CANCELADA', 'Venda já cancelada');
       const dinheiro = v!.pagamentos.filter((p) => p.forma === 'DINHEIRO').reduce((s, p) => s + toCents(p.valor), 0);
-      let sangriaId: string | undefined;
-      // Caixa da venda fechado não reabre: reembolso em dinheiro sai do caixa aberto (RN-14).
-      // Caixa ainda aberto: a venda cancelada já sai do valor esperado, sem sangria.
+      let reembolsoId: string | undefined;
+      // Caixa da venda fechado não reabre: o reembolso em dinheiro vira uma saída paga no financeiro (RN-14).
+      // Caixa ainda aberto: a venda cancelada já sai do valor esperado, sem reembolso à parte.
       if (dinheiro > 0 && v!.sessao.status === 'FECHADO') {
-        const cx = await caixaAbertoDoOperador(tx, u.id);
-        if (!cx) conflito('SEM_CAIXA_ABERTO', 'Reembolso em dinheiro exige um caixa aberto', 'Abra um caixa antes de cancelar esta venda');
-        sangriaId = (await registrarSangria(tx, cx!.id, u.id, dinheiro, `Reembolso da venda nº ${v!.numero}`)).id;
+        reembolsoId = (await registrarReembolso(tx, u.id, dinheiro, `Reembolso da venda nº ${v!.numero}`)).id;
       }
       // O banco devolve os itens ao estoque de origem e cancela a conta a receber (tg_estorna_venda_cancelada);
       // recusa se houver recebimento de fiado ativo (FIADO_COM_RECEBIMENTO).
       await tx.venda.update({ where: { id }, data: { status: 'CANCELADA', canceladaPorId: u.id, canceladaEm: new Date(), motivoCancelamento: motivo } });
       await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'VENDA_CANCELADA', 'venda', id, { status: 'FINALIZADA' },
-        { status: 'CANCELADA', motivo, reembolsoDinheiro: fromCents(dinheiro), sangriaId });
+        { status: 'CANCELADA', motivo, reembolsoDinheiro: fromCents(dinheiro), reembolsoId });
     });
     return (await carregarVenda(prisma, id))!.dto;
   });

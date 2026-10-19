@@ -27,8 +27,10 @@ export function HomePage() {
     can('caixa.operar') && { to: '/pdv', titulo: 'Vender', desc: 'Abrir o PDV', cor: 'coral' },
     can('entrada.registrar') && { to: '/entradas/novo', titulo: 'Nova entrada', desc: 'Registrar lote de doação', cor: 'laranja' },
     can('estoque.consultar') && { to: '/estoque', titulo: 'Estoque', desc: 'Consultar posição', cor: 'laranja' },
+    can('contas_pagar.gerenciar') && { to: '/financeiro/pagar', titulo: 'Contas a pagar', desc: 'Vencimentos e pagamentos', cor: 'sol' },
     can('contas_receber.receber') && { to: '/financeiro/receber', titulo: 'Fiado', desc: 'Receber de clientes', cor: 'sol' },
     can('relatorios.consultar') && { to: '/relatorios/prestacao-contas', titulo: 'Prestação de contas', desc: 'Por parceiro ou campanha', cor: 'ceu' },
+    !can('relatorios.consultar') && can('relatorios.estoque') && { to: '/relatorios/estoque', titulo: 'Relatórios de estoque', desc: 'Estoque, descartes e transferências', cor: 'ceu' },
   ].filter(Boolean) as { to: string; titulo: string; desc: string; cor: string }[];
 
   return (

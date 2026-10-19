@@ -96,23 +96,25 @@ async function main() {
 
   console.log('Ticket 1 — forma de pagamento no fiado e nas contas');
   const term = (await admin.post('/terminais', { id: uuid(), nome: `Reteste ${uuid().slice(0, 4)}` })).data;
-  let cx = await admin.get('/caixas/atual');
-  if (cx.status === 404) cx = await admin.post('/caixas', { id: uuid(), terminalId: term.id, fundoTroco: '50.00' });
+  // O Admin não opera caixa: este bloco usa o operador caixa1 (perfil personalizado, Vendedor + financeiro, criado pelo smoke).
+  const mista = new Cliente(); await mista.login('caixa1', 'Caixa-Senha-2026');
+  let cx = await mista.get('/caixas/atual');
+  if (cx.status === 404) cx = await mista.post('/caixas', { id: uuid(), terminalId: term.id, fundoTroco: '50.00' });
   check(cx.data?.operadorId, 'caixa traz operadorId', cx.data);
   const caixaId = cx.data.id;
   const cliente = (await admin.post('/clientes', { id: uuid(), nome: 'Cliente Reteste', telefone: `8699${String(Date.now()).slice(-7)}`, cienciaAviso: true })).data;
-  const conta = (await admin.post('/contas-receber', { id: uuid(), clienteId: cliente.id, descricao: 'Fiado reteste', valor: '30.00', vencimento: hoje })).data;
-  const antes = (await admin.get(`/caixas/${caixaId}/previa-fechamento`)).data;
-  r = await admin.post(`/contas-receber/${conta.id}/recebimentos`, { id: uuid(), valor: '10.00', caixaId, forma: 'PIX' });
+  const conta = (await mista.post('/contas-receber', { id: uuid(), clienteId: cliente.id, descricao: 'Fiado reteste', valor: '30.00', vencimento: hoje })).data;
+  const antes = (await mista.get(`/caixas/${caixaId}/previa-fechamento`)).data;
+  r = await mista.post(`/contas-receber/${conta.id}/recebimentos`, { id: uuid(), valor: '10.00', caixaId, forma: 'PIX' });
   check(r.status === 201 && r.data.forma === 'PIX', 'recebimento PIX no caixa gravado como PIX', r.data);
-  const depoisPix = (await admin.get(`/caixas/${caixaId}/previa-fechamento`)).data;
+  const depoisPix = (await mista.get(`/caixas/${caixaId}/previa-fechamento`)).data;
   check(depoisPix.esperadoDinheiro === antes.esperadoDinheiro, 'PIX não entra no dinheiro esperado', { antes: antes.esperadoDinheiro, depois: depoisPix.esperadoDinheiro });
-  await admin.post(`/contas-receber/${conta.id}/recebimentos`, { id: uuid(), valor: '5.00', caixaId, forma: 'DINHEIRO' });
-  const depoisDin = (await admin.get(`/caixas/${caixaId}/previa-fechamento`)).data;
+  await mista.post(`/contas-receber/${conta.id}/recebimentos`, { id: uuid(), valor: '5.00', caixaId, forma: 'DINHEIRO' });
+  const depoisDin = (await mista.get(`/caixas/${caixaId}/previa-fechamento`)).data;
   check(cents(depoisDin.esperadoDinheiro) - cents(antes.esperadoDinheiro) === 500, 'dinheiro entra no esperado (+5,00)', depoisDin);
-  const catDesp = (await admin.get('/categorias-despesa')).data[0] ?? (await admin.post('/categorias-despesa', { id: uuid(), nome: 'Despesas gerais (reteste)' })).data;
-  const cp = (await admin.post('/contas-pagar', { id: uuid(), descricao: 'Conta reteste', categoriaDespesaId: catDesp.id, valor: '12.00', vencimento: hoje })).data;
-  r = await admin.post(`/contas-pagar/${cp.id}/pagar`, { saiuDoCaixa: false, formaPagamento: 'CARTAO_DEBITO' });
+  const catDesp = (await mista.get('/categorias-despesa')).data[0] ?? (await admin.post('/categorias-despesa', { id: uuid(), nome: 'Despesas gerais (reteste)' })).data;
+  const cp = (await mista.post('/contas-pagar', { id: uuid(), descricao: 'Conta reteste', categoriaDespesaId: catDesp.id, valor: '12.00', vencimento: hoje })).data;
+  r = await mista.post(`/contas-pagar/${cp.id}/pagar`, { saiuDoCaixa: false, formaPagamento: 'CARTAO_DEBITO' });
   check(r.data?.formaPagamento === 'CARTAO_DEBITO', 'conta paga fora do caixa grava a forma escolhida', r.data);
 
   console.log('Ticket 2 — instituição para o comprovante');
