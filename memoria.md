@@ -12,10 +12,10 @@ Anotações de quem trabalha no código (Claude Code ou pessoa). Atualize ao ter
 - **Não afirmar que uma tela funciona sem tê-la usado num navegador de verdade** (ver "Teste de tela" na seção 5). Teste de API verde não prova a tela.
 
 ## 2. Estado atual (19/10/2026)
-- Fase: protótipo. Sprint 0, Sprint 1 (sem offline, perfis) e Sprint 1B (regras de venda e caixa, mais o CPF) **concluídas e mergeadas no `main`** (pull request nº 1, merge `f64cdd9`). A branch antiga foi apagada.
-- **Nada em andamento.** A correção do foco das janelas (bug do CPF) foi mergeada no `main` (PR nº 2, merge `5b1cb34`, 19/10/2026), junto com os testes de tela em `apps/web/tests-ui/`; a branch foi apagada. O `main` local e o `origin/main` estão iguais. Aguardando a ordem do humano para a Sprint 2.
-- Próxima: **Sprint 2** (produto, lote e cadastro), só com a ordem do humano.
-- Pendente do humano: conferir no navegador as telas de cada perfil (S1-19) e decidir os pontos da seção 8.
+- Fase: protótipo. Sprint 0, Sprint 1 (sem offline, perfis) e Sprint 1B (regras de venda e caixa, mais o CPF) **concluídas e mergeadas no `main`** (PR nº 1 `f64cdd9`; correção do foco no PR nº 2 `5b1cb34`).
+- **Em andamento: Sprint 2** (produto, lote e cadastro), autorizada pelo humano em 19/10/2026, na branch `sprint-2-produto-lote-cadastro`. Decisões de produto tomadas (P-06, P-13 a P-15 no plano). O `agy` já analisou as tarefas (desenho: tabela nova `produto`; `item` vira a entrada por lote do produto, com estado; a `ENTRADA` em `movimentacao` só nasce na aprovação; tudo na migração nova 0009).
+- Verificação de 19/10/2026 nesta máquina (banco novo): números iguais aos da seção 4; QA do `agy` sobre a cobertura dos testes conferido (lacunas pequenas foram para a S2-15).
+- Pendente do humano: conferir no navegador as telas de cada perfil (S1-19).
 
 ## 3. Repositório, pastas e ambiente
 - Repositório oficial: `VitoEmanoel/LuzDaEsperancaBazar`, remoto `origin` **via SSH** (`git@github.com:...`); o HTTPS não tem credenciais.
@@ -23,6 +23,12 @@ Anotações de quem trabalha no código (Claude Code ou pessoa). Atualize ao ter
 - Ambiente: Node 26.11 (o projeto pede 20.19 ou mais), PostgreSQL 18.6 (a documentação diz 16; funcionou).
 - Portas desta máquina: **3000 e 5433 são de outro projeto do humano** (Docker). O sistema usa: API real na **3100**, front real na **5173**, **demonstração com API simulada na 5174**, PostgreSQL de teste na **5544** (banco `bazar_proto`, subido por TCP, fora do projeto). Os usuários da demonstração estão em `apps/web/README.md`.
 - Segredos e senhas de teste ficam só no `.env` local (o git ignora). Nunca no repositório (conferido: nenhum no `main`).
+- **Máquina atual (19/10/2026, usuário `VT`, pasta `/home/VT/Documentos/LuzDaEsperancaBazar/`; cérebro em `/home/VT/Documentos/AI-brain`)** é diferente da descrita acima:
+  - Um **Node 20.17 em `~/.local/bin` vem antes no PATH** e o Prisma 7 recusa. Usar o do sistema: `export PATH=/usr/bin:$PATH` (Node 26.11, npm 12) em todo comando.
+  - O **npm 12 bloqueia scripts de instalação** (Prisma, argon2, esbuild): depois do `npm install`, rodar `npx prisma generate` em `apps/api`. O argon2 e o esbuild funcionaram assim mesmo.
+  - **PostgreSQL na 5432** (não há 5544). Banco de teste `bazar_proto`; existe também um banco `bazar` antigo (só até a 0003), que não é usado. Os papéis `bazar_owner` e `bazar_api` valem para o servidor inteiro: as senhas foram trocadas com autorização e ficam só no `apps/api/.env`.
+  - **O proxy do Vite aponta por padrão para a 3000** (outro projeto): subir o front real com `VITE_USE_MOCK=false VITE_API_PROXY=http://127.0.0.1:3100 npx vite --port 5173`.
+  - Sem o Chromium do Playwright: os testes de tela usam `/usr/bin/google-chrome-stable` (trocar o `executablePath` só na cópia, fora do projeto).
 
 ## 4. Referência de testes (Sprint 1B + CPF, banco novo)
 `typecheck` e `build` sem erros, `npm audit` 0 vulnerabilidades, `test:smoke` 151, `test:concorrencia` 5, `test:reteste` 36, `test:perfis` 120, `test:cpf` 37, SQL `04_testes_0003` 23 de 23, `07_manutencao_rotina` sem divergência, 24 permissões. Testes de tela no navegador (`apps/web/tests-ui/`): CPF 11 de 11 e janelas do PDV 14 de 14 (seção 5).
@@ -77,8 +83,8 @@ Anotações de quem trabalha no código (Claude Code ou pessoa). Atualize ao ter
 
 ## 8. Pendências e dúvidas
 - **Conferir no navegador as telas de cada perfil** (S1-19): a janela do CPF já foi testada de verdade; falta o resto (pagamento, sangria, fechamento, perfis).
-- **Admin sem freio:** pode vender, dar desconto e cancelar as próprias vendas. Perguntar ao humano de novo antes da Sprint 2.
-- Esc com o campo vazio tirar uma unidade (P-13 do plano): trocar por confirmação se atrapalhar.
+- **Admin sem freio:** decidido (P-15): basta o motivo no cancelamento, que já é obrigatório para todos.
+- Esc com o campo vazio: o humano decidiu pedir confirmação (S4-19).
 - Limite do CPF só em reais inteiros (R$ 2.000, R$ 5.000), por escolha.
 - Sprint 2 em diante: ver `docs/PLANO-DE-SPRINTS.md` (produto de código único, aprovação pelo Admin, estoque unificado, desconto no produto, etiquetas, importação, dashboards).
 
@@ -91,3 +97,4 @@ Uma linha por dia de trabalho ou por tarefa: `AAAA-MM-DD | tarefa | o que foi fe
 - 2026-10-19 | S1B-17 a S1B-21 | CPF na venda (migração 0008, `test:cpf`, janela no PDV, limite em reais e obrigatoriedade decididos pelo Admin); bug de trava (`void`) achado pelo próprio teste e corrigido | —
 - 2026-10-19 | merge | humano fez o merge no `main` (PR nº 1, `f64cdd9`); branch antiga apagada; verificado: conteúdo idêntico ao testado, sem segredos | —
 - 2026-10-19 | correção do foco do CPF | humano relatou que o foco saía do campo para o ✕ e o "Sim" não respondia; causa: `onFechar` no efeito do `Modal` e `autoFocus` ignorado; corrigido na branch `correcao-foco-do-cpf`; provado no navegador (6 falhas no código antigo, 11 de 11 no novo) | — (mergeado no PR nº 2, `5b1cb34`; branch apagada)
+- 2026-10-19 | verificação em máquina nova | ambiente montado (Node do sistema, `bazar_proto` na 5432, `.env` local); todas as baterias, SQL e testes de tela verdes; QA do agy (cobertura dos testes e análise da Sprint 2) conferido; decisões P-06, P-13 a P-15 | Sprint 2 começando
