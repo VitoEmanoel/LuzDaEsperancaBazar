@@ -20,7 +20,7 @@ export function RemoverQuantidadeModal({ linha, onConfirmar, onFechar }: { linha
       <form onSubmit={(e) => { e.preventDefault(); if (valido) onConfirmar(n); }}>
         <p><strong>{linha.descricao}</strong>: há {linha.quantidade} no carrinho. Quantas unidades tirar?</p>
         <Field label="Quantidade a tirar" erro={qtd !== '' && !valido ? `Digite de 1 a ${linha.quantidade}` : null}>
-          <input inputMode="numeric" value={qtd} onChange={(e) => setQtd(e.target.value.replace(/\D/g, '').slice(0, 4))} autoFocus />
+          <input inputMode="numeric" value={qtd} onChange={(e) => setQtd(e.target.value.replace(/\D/g, '').slice(0, 4))} onFocus={(e) => e.target.select()} autoFocus />
         </Field>
         <button type="submit" hidden />
       </form>

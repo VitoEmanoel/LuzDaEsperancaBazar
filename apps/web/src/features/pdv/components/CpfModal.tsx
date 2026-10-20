@@ -66,8 +66,8 @@ export function CpfModal({ aberto, obrigatorio, carrinhoCents, onDecidir, onCanc
     <Modal titulo="CPF na compra" aberto={aberto} onFechar={() => { if (etapa === 'digitar') { setEtapa('pergunta'); setErro(null); } else onCancelar(); }} largura="sm" fechavel={!consultando}
       rodape={etapa === 'pergunta' ? (<>
         <button className="btn" onClick={onCancelar}>Cancelar (Esc)</button>
-        {!obrigatorio && <button className="btn" onClick={() => onDecidir({ tipo: 'sem' })}><u>N</u>ão</button>}
-        <button className="btn btn-primary btn-lg" onClick={() => setEtapa('digitar')} autoFocus><u>S</u>im, informar o CPF</button>
+        {!obrigatorio && <button className="btn" onClick={() => onDecidir({ tipo: 'sem' })}><span><u>N</u>ão</span></button>}
+        <button className="btn btn-primary btn-lg" onClick={() => setEtapa('digitar')} autoFocus><span><u>S</u>im, informar o CPF</span></button>
       </>) : (<>
         <button className="btn" onClick={() => { setEtapa('pergunta'); setErro(null); }}>Voltar</button>
         <button className="btn btn-primary btn-lg" onClick={confirmar} disabled={!valido || consultando}>{consultando ? 'Conferindo…' : 'Confirmar CPF (Enter)'}</button>
