@@ -132,7 +132,9 @@ async function main() {
   check((await tri.post(`/lotes/${lote1.id}/itens`, { id: uuid(), categoriaId: catRoupa.id, controle: 'CATEGORIA', quantidade: 1, preco: '10.00', localDestino: 'BAZAR' })).data?.code === 'LOTE_TRIADO', 'lote triado não aceita item');
   await tri.post(`/lotes/${lote2.id}/itens`, { id: uuid(), categoriaId: catRoupa.id, controle: 'CATEGORIA', quantidade: 10, preco: '10.00', localDestino: 'BAZAR' });
   check((await tri.get(`/estoque?categoriaId=${catRoupa.id}`)).data.total === 0, 'cadastrado não entra no estoque antes da aprovação');
-  check((await tri.post(`/lotes/${lote1.id}/aprovar`)).status === 403, 'estoquista não aprova');
+  // S3-22: o Estoquista aprova, mas não o que ele mesmo cadastrou (fica para outra pessoa)
+  const triAprova = await tri.post(`/lotes/${lote1.id}/aprovar`);
+  check(triAprova.status === 200 && triAprova.data.aprovadosAgora === 0 && triAprova.data.deixadosParaOutraPessoa > 0, 'estoquista não aprova o que ele mesmo cadastrou', triAprova.data);
   check((await admin.post(`/lotes/${lote1.id}/aprovar`)).data?.aprovadosAgora === 4, 'Admin aprova o lote inteiro (mesmo encerrado)');
   check((await admin.post(`/lotes/${lote2.id}/aprovar`)).data?.aprovadosAgora === 1, 'Admin aprova o segundo lote');
   const det = (await tri.get(`/lotes/${lote1.id}`)).data;
@@ -156,10 +158,12 @@ async function main() {
   check((await tri.post('/transferencias', { id: uuid(), itemId: itRoupa1.id, quantidade: 99, origem: 'BAZAR', destino: 'DOACOES' })).data?.code === 'SALDO_INSUFICIENTE', 'saldo nunca negativo (banco)');
   check((await tri.post('/baixas', { id: uuid(), itemId: itRoupa1.id, quantidade: 1, local: 'DOACOES', motivoId: motivoBaixa.id })).status === 403, 'triagem não dá baixa');
   check((await admin.post('/baixas', { id: uuid(), itemId: itRoupa1.id, quantidade: 1, local: 'DOACOES', motivoId: motivoBaixa.id })).status === 204, 'baixa com motivo');
-  check((await admin.post('/ajustes', { id: uuid(), itemId: itRoupa1.id, local: 'BAZAR', tipo: 'AJUSTE_ENTRADA', quantidade: 1, motivo: 'Contagem física' })).status === 204, 'ajuste de inventário');
+  // S3-03: o ajuste de inventário é só de saída; o estoque só sobe por entrada aprovada
+  check((await admin.post('/ajustes', { id: uuid(), itemId: itRoupa1.id, local: 'BAZAR', tipo: 'AJUSTE_ENTRADA', quantidade: 1, motivo: 'Contagem física' })).status === 400, 'ajuste de entrada recusado (S3-03)');
+  check((await tri.post('/transferencias', { id: uuid(), itemId: itRoupa1.id, quantidade: 1, origem: 'DOACOES', destino: 'BAZAR' })).status === 204, 'transferência doações → bazar');
   check((await admin.patch(`/itens/${pec2.id}/preco`, { preco: '55.00', motivo: 'Reajuste de vitrine' })).status === 204, 'preço da peça');
   h = (await tri.get(`/itens/${itRoupa1.id}/historico`)).data;
-  check(h.item.saldoBazar === 4 && h.item.saldoDoacoes === 1 && h.eventos.length >= 5, 'histórico do item', h);
+  check(h.item.saldoBazar === 4 && h.item.saldoDoacoes === 0 && h.eventos.length >= 5, 'histórico do item', h);
 
   console.log('PDV/CXA — caixa e venda online');
   const cxId = uuid();

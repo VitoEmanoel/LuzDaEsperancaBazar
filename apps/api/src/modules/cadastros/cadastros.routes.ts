@@ -187,7 +187,14 @@ export async function rotasCadastros(app: FastifyInstance) {
       if (nome && (await def.nomeDuplicado(nome, id))) conflito('NOME_DUPLICADO', 'Já existe um cadastro com este nome');
       const r = await prisma.$transaction(async (tx) => {
         const novo = await def.atualizar(tx, id, req.body, atual!);
-        await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'CADASTRO_ALTERADO', def.entidade, id, def.dto(atual!) as AnyRow, def.dto(novo) as AnyRow);
+        // parceiro pode ser pessoa física: só quais campos mudaram, sem os valores (RN-29, S3-16)
+        if (tipo === 'parceiros') {
+          const de = def.dto(atual!) as AnyRow, para = def.dto(novo) as AnyRow;
+          const alterados = Object.keys(para).filter((k) => JSON.stringify(de[k]) !== JSON.stringify(para[k]));
+          await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'CADASTRO_ALTERADO', def.entidade, id, undefined, { camposAlterados: alterados, ativo: (novo as AnyRow).ativo });
+        } else {
+          await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'CADASTRO_ALTERADO', def.entidade, id, def.dto(atual!) as AnyRow, def.dto(novo) as AnyRow);
+        }
         return novo;
       });
       return def.dto(r);

@@ -19,7 +19,9 @@ import { money, moneyOpt, toCents, fromCents } from '../../shared/money.js';
 import { localDate, periodo, toDbDate } from '../../shared/dates.js';
 import { paramNum } from '../../shared/parametros.js';
 import { env } from '../../config/env.js';
-import { exigirUsuario, tem } from '../../plugins/auth.js';
+import { exigirUsuario, tem, type UsuarioCtx } from '../../plugins/auth.js';
+import { PERFIL_ADMIN_ID } from '../../shared/permissoes.js';
+import { mudarPrecoProduto } from '../estoque/produtos.routes.js';
 
 export const LOCAL_ID = { BAZAR: 1, DOACOES: 2 } as const;
 export const LOCAL_COD: Record<number, 'BAZAR' | 'DOACOES'> = { 1: 'BAZAR', 2: 'DOACOES' };
@@ -85,9 +87,21 @@ const itemTriagemDto = (i: ItemRow) => ({
   descricao: i.descricao ?? i.produto?.nome ?? i.categoria.nome, categoriaId: i.categoriaId, categoriaNome: i.categoria.nome,
   quantidade: i.quantidadeInicial, preco: money(i.produto?.precoVenda ?? i.precoVenda ?? i.valorAtribuido), valorAtribuido: money(i.valorAtribuido),
   localDestino: LOCAL_COD[i.localDestinoId] ?? 'BAZAR',
-  status: i.status, motivoDevolucao: i.motivoDevolucao ?? undefined,
+  status: i.status, motivoDevolucao: i.motivoDevolucao ?? undefined, criadoPorId: i.criadoPorId,
   produto: i.produto ? produtoDto(i.produto) : undefined,
 });
+
+/** Sem a permissão de ver custo (S3-05), o valor atribuído e o valor da compra não saem da API. */
+export function semCusto<T extends Record<string, unknown>>(u: UsuarioCtx, o: T): T {
+  if (tem(u, 'custo.consultar')) return o;
+  const { valorAtribuido: _v, valorCompra: _c, ...resto } = o;
+  return resto as T;
+}
+
+/** Quem cadastrou não aprova nem devolve o próprio item; só o perfil Administrador pode (S3-22, P-16; o banco confere de novo). */
+function confereOutraPessoa(u: UsuarioCtx, criadoPorId: string) {
+  if (criadoPorId === u.id && u.perfilId !== PERFIL_ADMIN_ID) conflito('AUTO_APROVACAO', 'Quem cadastrou o item não aprova nem devolve o próprio cadastro: outra pessoa confere');
+}
 
 type DescRow = { id: string; registradoEm: Date; revertidoEm: Date | null; categoria: { nome: string }; motivo: { nome: string } };
 const descarteDto = (d: DescRow) => ({ id: d.id, categoriaNome: d.categoria.nome, motivoNome: d.motivo.nome, registradoEm: d.registradoEm.toISOString(), revertido: !!d.revertidoEm });
@@ -184,7 +198,9 @@ const zCorrecao = z.object({
 const zDescarte = z.object({ id: zUuid, categoriaId: zUuid, motivoId: zUuid, observacao: z.string().trim().max(500).optional(), descricao: z.string().trim().max(120).optional() });
 
 export async function rotasLotes(app: FastifyInstance) {
-  app.get('/lotes', { config: { acesso: ['entrada.registrar'] } }, async (req) => {
+  // leitura dos lotes: quem registra, quem aprova e quem consulta o estoque (Financeiro, só leitura: S3-12, P-07)
+  app.get('/lotes', { config: { acesso: ['entrada.registrar', 'produtos.aprovar', 'estoque.consultar'] } }, async (req) => {
+    const u = exigirUsuario(req);
     const q = parse(zPage.merge(zPeriodo).extend({ parceiroId: zUuid.optional(), campanhaId: zUuid.optional(), status: z.enum(['ABERTO', 'TRIADO']).optional() }), req.query);
     const where = {
       ...(q.parceiroId ? { parceiroId: q.parceiroId } : {}),
@@ -197,24 +213,25 @@ export async function rotasLotes(app: FastifyInstance) {
       prisma.loteEntrada.count({ where }),
     ]);
     const rs = await resumos(prisma, rows.map((l) => l.id));
-    return page(rows.map((l) => loteDto(l, rs.get(l.id)!)), q, total);
+    return page(rows.map((l) => semCusto(u, loteDto(l, rs.get(l.id)!))), q, total);
   });
 
-  app.get('/lotes/:id', { config: { acesso: ['entrada.registrar'] } }, async (req) => {
+  app.get('/lotes/:id', { config: { acesso: ['entrada.registrar', 'produtos.aprovar', 'estoque.consultar'] } }, async (req) => {
+    const u = exigirUsuario(req);
     const { id } = parse(zIdParam, req.params);
     const base = await obterLoteDto(prisma, id);
     const [itens, descartes] = await Promise.all([
       prisma.item.findMany({ where: { loteId: id }, include: itemTriagemInclude, orderBy: { criadoEm: 'asc' } }),
       prisma.descarte.findMany({ where: { loteId: id }, include: descInclude, orderBy: { registradoEm: 'asc' } }),
     ]);
-    return { ...base, itens: itens.map(itemTriagemDto), descartes: descartes.map(descarteDto) };
+    return { ...semCusto(u, base), itens: itens.map((i) => semCusto(u, itemTriagemDto(i))), descartes: descartes.map(descarteDto) };
   });
 
   app.post('/lotes', { config: { acesso: ['entrada.registrar'] } }, async (req, reply) => {
     const u = exigirUsuario(req);
     const b = parse(zNovoLote, req.body);
     const existente = await prisma.loteEntrada.findUnique({ where: { id: b.id }, select: { id: true } });
-    if (existente) return reply.code(200).send(await obterLoteDto(prisma, b.id)); // reenvio idempotente
+    if (existente) return reply.code(200).send(semCusto(u, await obterLoteDto(prisma, b.id))); // reenvio idempotente
 
     if (b.tipo === 'SALDO_INICIAL' && !tem(u, 'estoque.ajustar')) proibido('Lote de saldo inicial é criado pela carga inicial');
     // RN-04 (S2-06): doação exige o parceiro; a campanha é opcional. Sem saber quem doou: "Doador não identificado".
@@ -248,7 +265,7 @@ export async function rotasLotes(app: FastifyInstance) {
       }
       await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'LOTE_CRIADO', 'lote_entrada', lote.id, undefined, { tipo: b.tipo, parceiroId: b.parceiroId, campanhaId: b.campanhaId });
     });
-    return reply.code(201).send(await obterLoteDto(prisma, b.id));
+    return reply.code(201).send(semCusto(u, await obterLoteDto(prisma, b.id)));
   });
 
   // ---------------- anexo (RF-ENT-02, RNF-18) ----------------
@@ -278,7 +295,7 @@ export async function rotasLotes(app: FastifyInstance) {
     return reply.code(204).send();
   });
 
-  app.get('/lotes/:id/documento', { config: { acesso: ['entrada.registrar'] } }, async (req, reply) => {
+  app.get('/lotes/:id/documento', { config: { acesso: ['entrada.registrar', 'produtos.aprovar', 'estoque.consultar'] } }, async (req, reply) => {
     const { id } = parse(zIdParam, req.params);
     const l = await prisma.loteEntrada.findUnique({ where: { id }, select: { numero: true, documentoArquivo: true } });
     if (!l || !l.documentoArquivo) naoEncontrado('Documento');
@@ -301,7 +318,7 @@ export async function rotasLotes(app: FastifyInstance) {
     const ja = await prisma.item.findUnique({ where: { id: b.id }, include: itemTriagemInclude });
     if (ja) {
       if (ja.loteId !== loteId) conflito('ID_EM_USO', 'Identificador já usado em outro lote');
-      return reply.code(200).send(itemTriagemDto(ja)); // reenvio idempotente
+      return reply.code(200).send(semCusto(u, itemTriagemDto(ja))); // reenvio idempotente
     }
     const lote = await prisma.loteEntrada.findUnique({ where: { id: loteId }, select: { numero: true, status: true, tipo: true } });
     if (!lote) naoEncontrado('Lote');
@@ -349,7 +366,7 @@ export async function rotasLotes(app: FastifyInstance) {
       await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'ITEM_CADASTRADO', 'item', b.id, undefined, { loteId, produtoId, quantidade: b.quantidade, local: b.localDestino });
       return tx.item.findUniqueOrThrow({ where: { id: b.id }, include: itemTriagemInclude });
     });
-    return reply.code(201).send(itemTriagemDto(item));
+    return reply.code(201).send(semCusto(u, itemTriagemDto(item)));
   });
 
   // Correção pelo estoquista enquanto o item não foi aprovado. Item devolvido volta a CADASTRADO (reenvio, P-14).
@@ -380,7 +397,6 @@ export async function rotasLotes(app: FastifyInstance) {
           where: { id: i!.produtoId! },
           data: {
             ...(p.tituloEtiqueta !== undefined ? { tituloEtiqueta: p.tituloEtiqueta } : {}), ...(p.nome !== undefined ? { nome: p.nome } : {}),
-            ...(p.preco !== undefined ? { precoVenda: p.preco } : {}),
             ...(p.modelo !== undefined ? { modelo: p.modelo ?? null } : {}), ...(p.marca !== undefined ? { marca: p.marca ?? null } : {}),
             ...(p.ano !== undefined ? { ano: p.ano } : {}), ...(p.tipo !== undefined ? { tipo: p.tipo ?? null } : {}),
             ...(p.tamanho !== undefined ? { tamanho: p.tamanho ?? null } : {}), ...(p.cor !== undefined ? { cor: p.cor ?? null } : {}),
@@ -389,6 +405,10 @@ export async function rotasLotes(app: FastifyInstance) {
             ...(p.pecaUnica === false ? { pecaUnica: false } : {}),
           },
         });
+        // o preço passa pela mesma regra da tela do produto: desconto promocional que não fica abaixo do preço novo acaba junto
+        if (p.preco !== undefined && toCents(p.preco) !== toCents(i!.produto!.precoVenda)) {
+          await mudarPrecoProduto(tx, i!.produtoId!, p.preco, 'Correção do cadastro na triagem', { usuarioId: u.id, ip: req.ip }, itemId);
+        }
       } else if (b.produto) {
         throw new AppError(400, 'Item por categoria não tem produto', 'VALIDACAO');
       }
@@ -413,7 +433,7 @@ export async function rotasLotes(app: FastifyInstance) {
       await auditar(tx, { usuarioId: u.id, ip: req.ip }, reenvio ? 'ITEM_REENVIADO' : 'ITEM_CORRIGIDO', 'item', itemId, antes, { ...b, status: 'CADASTRADO' });
       return tx.item.findUniqueOrThrow({ where: { id: itemId }, include: itemTriagemInclude });
     });
-    return itemTriagemDto(item);
+    return semCusto(u, itemTriagemDto(item));
   });
 
   // ---------------- aprovação pelo Administrador (S2-09) ----------------
@@ -422,13 +442,14 @@ export async function rotasLotes(app: FastifyInstance) {
     const { id } = parse(zIdParam, req.params);
     const item = await prisma.$transaction(async (tx) => {
       await travarItens(tx, [id]);
-      const i = await tx.item.findUnique({ where: { id }, select: { status: true } });
+      const i = await tx.item.findUnique({ where: { id }, select: { status: true, criadoPorId: true } });
       if (!i) naoEncontrado('Item');
       if (i!.status === 'DEVOLVIDO') conflito('ITEM_DEVOLVIDO', 'Item devolvido: o estoquista corrige e reenvia antes da aprovação');
+      if (i!.status === 'CADASTRADO') confereOutraPessoa(u, i!.criadoPorId);
       if (i!.status === 'CADASTRADO') await aprovarItem(tx, id, u.id, req.ip); // aprovado de novo: nada a fazer (reenvio)
       return tx.item.findUniqueOrThrow({ where: { id }, include: itemTriagemInclude });
     });
-    return itemTriagemDto(item);
+    return semCusto(u, itemTriagemDto(item));
   });
 
   app.post('/lotes/:id/aprovar', { config: { acesso: ['produtos.aprovar'] } }, async (req) => {
@@ -436,14 +457,17 @@ export async function rotasLotes(app: FastifyInstance) {
     const { id } = parse(zIdParam, req.params);
     const n = await prisma.$transaction(async (tx) => {
       if (!(await tx.loteEntrada.findUnique({ where: { id }, select: { id: true } }))) naoEncontrado('Lote');
-      const ids = (await tx.item.findMany({ where: { loteId: id, status: 'CADASTRADO' }, select: { id: true } })).map((i) => i.id);
+      const pendentes = await tx.item.findMany({ where: { loteId: id, status: 'CADASTRADO' }, select: { id: true, criadoPorId: true } });
+      // fora do Administrador, os itens que a própria pessoa cadastrou ficam para outra conferir (S3-22)
+      const proprios = u.perfilId === PERFIL_ADMIN_ID ? 0 : pendentes.filter((i) => i.criadoPorId === u.id).length;
+      const ids = pendentes.filter((i) => u.perfilId === PERFIL_ADMIN_ID || i.criadoPorId !== u.id).map((i) => i.id);
       // trava na ordem do id (a mesma da venda e do estorno) e confere de novo o estado depois da trava
       let aprovados = 0;
       for (const r of await travarItens(tx, ids)) if (r.status === 'CADASTRADO') { await aprovarItem(tx, r.id, u.id, req.ip); aprovados++; }
-      await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'LOTE_APROVADO', 'lote_entrada', id, undefined, { itens: aprovados });
-      return aprovados;
+      await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'LOTE_APROVADO', 'lote_entrada', id, undefined, { itens: aprovados, deixadosParaOutraPessoa: proprios });
+      return { aprovados, proprios };
     }, { timeout: 60_000 });
-    return { ...(await obterLoteDto(prisma, id)), aprovadosAgora: n };
+    return { ...semCusto(u, await obterLoteDto(prisma, id)), aprovadosAgora: n.aprovados, deixadosParaOutraPessoa: n.proprios };
   });
 
   app.post('/itens/:id/devolver', { config: { acesso: ['produtos.aprovar'] } }, async (req) => {
@@ -452,16 +476,34 @@ export async function rotasLotes(app: FastifyInstance) {
     const { motivo } = parse(z.object({ motivo: zMotivo }), req.body);
     const item = await prisma.$transaction(async (tx) => {
       await travarItens(tx, [id]);
-      const i = await tx.item.findUnique({ where: { id }, select: { status: true } });
+      const i = await tx.item.findUnique({ where: { id }, select: { status: true, criadoPorId: true } });
       if (!i) naoEncontrado('Item');
       if (i!.status === 'APROVADO') conflito('ITEM_APROVADO', 'Item já aprovado não é devolvido');
       if (i!.status === 'CADASTRADO') {
-        await tx.item.update({ where: { id }, data: { status: 'DEVOLVIDO', motivoDevolucao: motivo } });
+        confereOutraPessoa(u, i!.criadoPorId);
+        await tx.item.update({ where: { id }, data: { status: 'DEVOLVIDO', motivoDevolucao: motivo, devolvidoPorId: u.id } });
         await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'ITEM_DEVOLVIDO', 'item', id, { status: 'CADASTRADO' }, { status: 'DEVOLVIDO', motivo });
       }
       return tx.item.findUniqueOrThrow({ where: { id }, include: itemTriagemInclude });
     });
-    return itemTriagemDto(item);
+    return semCusto(u, itemTriagemDto(item));
+  });
+
+  // ---------------- fila de aprovação (S3-01): o que espera conferência, de todos os lotes ----------------
+  app.get('/aprovacoes', { config: { acesso: ['produtos.aprovar'] } }, async (req) => {
+    const u = exigirUsuario(req);
+    const q = parse(z.object({ status: z.enum(['CADASTRADO', 'DEVOLVIDO']).default('CADASTRADO') }), req.query);
+    const itens = await prisma.item.findMany({
+      where: { status: q.status }, take: 500,
+      include: { ...itemTriagemInclude, lote: { select: { id: true, numero: true, tipo: true, parceiro: { select: { nome: true } }, campanha: { select: { nome: true } } } }, criadoPor: { select: { nome: true } } },
+      orderBy: [{ lote: { numero: 'asc' } }, { criadoEm: 'asc' }],
+    });
+    return itens.map((i) => ({
+      ...semCusto(u, itemTriagemDto(i)), criadoPorNome: i.criadoPor.nome, criadoEm: i.criadoEm.toISOString(),
+      loteId: i.lote.id, loteNumero: i.lote.numero, loteTipo: i.lote.tipo, parceiroNome: i.lote.parceiro?.nome, campanhaNome: i.lote.campanha?.nome,
+      // o próprio cadastro só o Administrador aprova (S3-22): a tela mostra quem precisa conferir
+      podeConferir: u.perfilId === PERFIL_ADMIN_ID || i.criadoPorId !== u.id,
+    }));
   });
 
   // ---------------- produtos: busca para a nova entrada ----------------
@@ -512,7 +554,7 @@ export async function rotasLotes(app: FastifyInstance) {
       await tx.loteEntrada.update({ where: { id }, data: { status: 'TRIADO' } });
       await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'LOTE_ENCERRADO', 'lote_entrada', id, { status: l!.status }, { status: 'TRIADO' });
     });
-    return obterLoteDto(prisma, id);
+    return semCusto(u, await obterLoteDto(prisma, id));
   });
 
   app.post('/lotes/:id/reabrir', { config: { acesso: ['triagem.reabrir'] } }, async (req) => {
@@ -526,7 +568,7 @@ export async function rotasLotes(app: FastifyInstance) {
       await tx.loteEntrada.update({ where: { id }, data: { status: 'EM_TRIAGEM' } });
       await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'LOTE_REABERTO', 'lote_entrada', id, { status: 'TRIADO' }, { status: 'EM_TRIAGEM', motivo });
     });
-    return obterLoteDto(prisma, id);
+    return semCusto(u, await obterLoteDto(prisma, id));
   });
 
   app.post('/descartes/:id/reverter', { config: { acesso: ['triagem.reabrir'] } }, async (req, reply) => {

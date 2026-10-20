@@ -4,7 +4,7 @@
  */
 import type { Db } from './prisma.js';
 
-const PESSOAIS = new Set(['nome', 'telefone', 'documento', 'email', 'senha', 'senhaHash', 'senha_hash', 'login', 'observacao', 'cpf', 'cnpj', 'endereco']);
+const PESSOAIS = new Set(['nome', 'telefone', 'documento', 'email', 'senha', 'senhaHash', 'senha_hash', 'login', 'observacao', 'cpf', 'cnpj', 'endereco', 'documentoExibicao', 'cidade']);
 
 function limpar(o: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
   if (!o) return undefined;

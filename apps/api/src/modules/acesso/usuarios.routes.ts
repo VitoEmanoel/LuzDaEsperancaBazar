@@ -7,11 +7,10 @@ import { page, parse, skipTake, zIdParam, zMoney, zPage, zPeriodo, zTexto, zUuid
 import { auditar } from '../../shared/audit.js';
 import { money } from '../../shared/money.js';
 import { periodo } from '../../shared/dates.js';
-import { PERMISSOES, type Permissao } from '../../shared/permissoes.js';
+import { PERFIL_ADMIN_ID, PERMISSOES, type Permissao } from '../../shared/permissoes.js';
 import { exigirUsuario } from '../../plugins/auth.js';
 import { hashSenha, senhaProvisoria } from './senhas.service.js';
 
-const PERFIL_ADMIN_ID = '00000000-0000-4000-8000-0000000000a1';
 const ESSENCIAIS_ADMIN: Permissao[] = ['usuarios.gerenciar', 'perfis.gerenciar'];
 
 const DESCRICOES: Record<Permissao, string> = {
@@ -20,8 +19,10 @@ const DESCRICOES: Record<Permissao, string> = {
   'cadastros.consultar': 'Consultar cadastros', 'clientes.gerenciar': 'Clientes', 'parametros.gerenciar': 'Parâmetros e dados da instituição',
   'entrada.registrar': 'Lotes, cadastro dos produtos do lote, descartes, etiquetas, encerrar o lote', 'triagem.reabrir': 'Reabrir lote, reverter descarte',
   'produtos.aprovar': 'Aprovar ou devolver os produtos cadastrados nos lotes', 'parceiros.criar': 'Criar parceiro (doador) ao registrar o lote',
-  'estoque.consultar': 'Estoque e histórico do item', 'estoque.transferir': 'Transferir entre bazar e doações',
-  'estoque.ajustar': 'Baixa, ajuste, preço, carga inicial', 'caixa.operar': 'Abrir/fechar caixa, vender, sangria, suprimento',
+  'estoque.consultar': 'Estoque, produtos e lotes (só leitura)', 'estoque.transferir': 'Transferir entre bazar e doações',
+  'estoque.ajustar': 'Baixa, ajuste de saída, preço da categoria, carga inicial',
+  'custo.consultar': 'Ver o custo (valor atribuído) dos produtos e do estoque', 'produtos.preco': 'Alterar o preço de venda do produto',
+  'produtos.desconto': 'Dar e encerrar desconto no produto', 'caixa.operar': 'Abrir/fechar caixa, vender, sangria, suprimento',
   'venda.cancelar': 'Cancelar venda', 'venda.desconto_autorizar': 'Desconto acima do limite do perfil',
   'terminais.gerenciar': 'Pontos de caixa',
   'contas_pagar.gerenciar': 'Contas a pagar e lote de compra', 'contas_receber.receber': 'Receber fiado, extrato do cliente',
@@ -30,20 +31,38 @@ const DESCRICOES: Record<Permissao, string> = {
   'privacidade.gerenciar': 'Exportar e anonimizar titulares',
 };
 
+/** Área de cada permissão, para a tela de perfis agrupar (S3-18). */
+const GRUPOS: Record<Permissao, string> = {
+  'caixa.operar': 'Vendas e caixa', 'venda.cancelar': 'Vendas e caixa', 'venda.desconto_autorizar': 'Vendas e caixa', 'clientes.gerenciar': 'Vendas e caixa',
+  'entrada.registrar': 'Entradas e estoque', 'triagem.reabrir': 'Entradas e estoque', 'produtos.aprovar': 'Entradas e estoque', 'parceiros.criar': 'Entradas e estoque',
+  'estoque.consultar': 'Entradas e estoque', 'estoque.transferir': 'Entradas e estoque', 'estoque.ajustar': 'Entradas e estoque', 'custo.consultar': 'Entradas e estoque',
+  'produtos.preco': 'Entradas e estoque', 'produtos.desconto': 'Entradas e estoque', 'cadastros.consultar': 'Entradas e estoque',
+  'contas_pagar.gerenciar': 'Financeiro', 'contas_receber.receber': 'Financeiro', 'contas_receber.lancar': 'Financeiro', 'recebimento.estornar': 'Financeiro',
+  'relatorios.consultar': 'Relatórios', 'relatorios.estoque': 'Relatórios',
+  'usuarios.gerenciar': 'Administração', 'perfis.gerenciar': 'Administração', 'auditoria.consultar': 'Administração', 'cadastros.gerenciar': 'Administração',
+  'parametros.gerenciar': 'Administração', 'terminais.gerenciar': 'Administração', 'fiscal.gerenciar': 'Administração', 'privacidade.gerenciar': 'Administração',
+};
+
 const usuarioSelect = { id: true, nome: true, login: true, perfilId: true, ativo: true, perfil: { select: { nome: true } } } as const;
 type UsuarioRow = { id: string; nome: string; login: string; perfilId: string; ativo: boolean; perfil: { nome: string } };
 const usuarioDto = (u: UsuarioRow) => ({ id: u.id, nome: u.nome, login: u.login, perfilId: u.perfilId, perfilNome: u.perfil.nome, ativo: u.ativo });
 
 const perfilInclude = { permissoes: { select: { permissaoCodigo: true } } } as const;
-type PerfilRow = { id: string; nome: string; padrao: boolean; limiteDescontoPct: { toFixed(n: number): string } | null; permissoes: { permissaoCodigo: string }[] };
+type PerfilRow = { id: string; nome: string; padrao: boolean; ativo: boolean; limiteDescontoPct: { toFixed(n: number): string } | null; permissoes: { permissaoCodigo: string }[] };
 const perfilDto = (p: PerfilRow) => ({
-  id: p.id, nome: p.nome, padrao: p.padrao, limiteDesconto: money(p.limiteDescontoPct),
+  id: p.id, nome: p.nome, padrao: p.padrao, ativo: p.ativo, limiteDesconto: money(p.limiteDescontoPct),
   permissoes: p.permissoes.map((x) => x.permissaoCodigo).sort(),
 });
 
 const zLogin = z.string().trim().toLowerCase().min(3).max(50).regex(/^[a-z0-9._-]+$/, 'use letras, números, ponto, hífen ou sublinhado');
 const zPermissoes = z.array(z.enum(PERMISSOES)).max(PERMISSOES.length).transform((a) => [...new Set(a)]);
 const zPct = zMoney.refine((v) => Number(v) <= 100, 'limite em % de 0 a 100');
+
+/** Nome de perfil é único entre os ativos, sem diferença de maiúsculas (o desativado libera o nome). */
+async function nomePerfilLivre(nome: string, ignorar?: string) {
+  const ja = await prisma.perfil.findFirst({ where: { ativo: true, nome: { equals: nome, mode: 'insensitive' }, ...(ignorar ? { NOT: { id: ignorar } } : {}) }, select: { id: true } });
+  if (ja) conflito('NOME_DUPLICADO', 'Já existe um perfil com este nome');
+}
 
 export async function rotasUsuarios(app: FastifyInstance) {
   // ---------------- usuários ----------------
@@ -121,11 +140,12 @@ export async function rotasUsuarios(app: FastifyInstance) {
   });
 
   app.get('/permissoes', { config: { acesso: ['perfis.gerenciar'] } }, async () =>
-    PERMISSOES.map((codigo) => ({ codigo, descricao: DESCRICOES[codigo] })));
+    PERMISSOES.map((codigo) => ({ codigo, descricao: DESCRICOES[codigo], grupo: GRUPOS[codigo] })));
 
   app.post('/perfis', { config: { acesso: ['perfis.gerenciar'] } }, async (req, reply) => {
     const ator = exigirUsuario(req);
     const b = parse(z.object({ id: zUuid.optional(), nome: zTexto(60), permissoes: zPermissoes, limiteDesconto: zPct.default('0.00') }), req.body);
+    await nomePerfilLivre(b.nome);
     const p = await prisma.$transaction(async (tx) => {
       const novo = await tx.perfil.create({
         data: {
@@ -146,7 +166,9 @@ export async function rotasUsuarios(app: FastifyInstance) {
     const b = parse(z.object({ nome: zTexto(60).optional(), permissoes: zPermissoes.optional(), limiteDesconto: zPct.optional() }).strict(), req.body);
     const antes = await prisma.perfil.findUnique({ where: { id }, include: perfilInclude });
     if (!antes) naoEncontrado('Perfil');
+    if (!antes!.ativo) conflito('PERFIL_INATIVO', 'O perfil está desativado e não se edita');
     if (antes!.padrao && b.nome && b.nome !== antes!.nome) conflito('PERFIL_PADRAO', 'Perfis padrão não podem ser renomeados');
+    if (b.nome && b.nome.toLowerCase() !== antes!.nome.toLowerCase()) await nomePerfilLivre(b.nome, id);
     if (id === PERFIL_ADMIN_ID && b.permissoes && !ESSENCIAIS_ADMIN.every((p) => b.permissoes!.includes(p))) {
       conflito('PERFIL_ADMIN_PROTEGIDO', 'O perfil Administrador precisa manter usuarios.gerenciar e perfis.gerenciar');
     }
@@ -163,6 +185,23 @@ export async function rotasUsuarios(app: FastifyInstance) {
       await auditar(tx, { usuarioId: ator.id, ip: req.ip }, 'PERFIL_ALTERADO', 'perfil', id,
         { permissoes: antes!.permissoes.map((x) => x.permissaoCodigo), limiteDesconto: money(antes!.limiteDescontoPct) },
         { permissoes: novo.permissoes.map((x) => x.permissaoCodigo), limiteDesconto: money(novo.limiteDescontoPct) });
+      return novo;
+    });
+    return perfilDto(p);
+  });
+
+  // Desativar o perfil criado por engano (S3-20): padrão não; com usuário ativo não (o banco confere de novo, 0010).
+  app.post('/perfis/:id/desativar', { config: { acesso: ['perfis.gerenciar'] } }, async (req) => {
+    const ator = exigirUsuario(req);
+    const { id } = parse(zIdParam, req.params);
+    const p = await prisma.$transaction(async (tx) => {
+      const [antes] = await tx.$queryRaw<{ padrao: boolean; ativo: boolean }[]>`SELECT padrao, ativo FROM perfil WHERE id = ${id}::uuid FOR UPDATE`;
+      if (!antes) naoEncontrado('Perfil');
+      if (antes!.padrao) conflito('PERFIL_PADRAO', 'Perfis padrão não são desativados');
+      if (!antes!.ativo) conflito('PERFIL_INATIVO', 'O perfil já está desativado');
+      if (await tx.usuario.count({ where: { perfilId: id, ativo: true } })) conflito('PERFIL_EM_USO', 'Há usuário ativo com este perfil: troque o perfil dele antes de desativar');
+      const novo = await tx.perfil.update({ where: { id }, data: { ativo: false }, include: perfilInclude });
+      await auditar(tx, { usuarioId: ator.id, ip: req.ip }, 'PERFIL_DESATIVADO', 'perfil', id, { ativo: true }, { ativo: false });
       return novo;
     });
     return perfilDto(p);

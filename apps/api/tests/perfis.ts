@@ -46,11 +46,24 @@ const ACESSOS: [string, string, unknown, Perfil[], number[]?][] = [
   ['GET', '/parametros', undefined, ['admin']],
   ['GET', '/regras-fiscais', undefined, ['admin']],
   ['POST', '/categorias', {}, ['admin'], [400]],
-  ['GET', '/lotes', undefined, ['admin', 'estoquista']],
-  // Sprint 2 (0009): só o Administrador aprova e devolve; o Estoquista cria parceiro (sem editar); produtos para quem cadastra ou consulta
-  ['POST', `/lotes/${uuid()}/aprovar`, {}, ['admin'], [404]],
-  ['POST', `/itens/${uuid()}/aprovar`, {}, ['admin'], [404]],
-  ['POST', `/itens/${uuid()}/devolver`, { motivo: 'Faltou a foto' }, ['admin'], [404]],
+  // Sprint 3: o Financeiro lê os lotes (só leitura, P-07); o Estoquista também aprova e devolve (P-16)
+  ['GET', '/lotes', undefined, ['admin', 'estoquista', 'financeiro']],
+  ['POST', '/lotes', {}, ['admin', 'estoquista'], [400]],
+  ['GET', '/aprovacoes', undefined, ['admin', 'estoquista']],
+  ['POST', `/lotes/${uuid()}/aprovar`, {}, ['admin', 'estoquista'], [404]],
+  ['POST', `/itens/${uuid()}/aprovar`, {}, ['admin', 'estoquista'], [404]],
+  ['POST', `/itens/${uuid()}/devolver`, { motivo: 'Faltou a foto' }, ['admin', 'estoquista'], [404]],
+  // Produto (S3-04): todos que consultam o estoque leem; quem cadastra edita; preço: Admin e Estoquista; desconto: Admin e Financeiro
+  ['GET', `/produtos/${uuid()}`, undefined, ['admin', 'estoquista', 'financeiro'], [404]],
+  ['PATCH', `/produtos/${uuid()}`, { nome: 'Outro nome' }, ['admin', 'estoquista'], [404]],
+  ['PATCH', `/produtos/${uuid()}/preco`, { preco: '10.00', motivo: 'Reajuste de teste' }, ['admin', 'estoquista'], [404]],
+  ['PATCH', `/itens/${uuid()}/preco`, { preco: '10.00', motivo: 'Reajuste de teste' }, ['admin', 'estoquista'], [404]],
+  ['PUT', `/produtos/${uuid()}/desconto`, { tipo: 'PERCENTUAL', valor: '10.00', motivo: 'Promoção de teste' }, ['admin', 'financeiro'], [404]],
+  ['POST', `/produtos/${uuid()}/desconto/encerrar`, { motivo: 'Fim da promoção' }, ['admin', 'financeiro'], [404]],
+  // baixa, ajuste (só de saída) e carga inicial continuam só com o Administrador
+  ['POST', '/baixas', {}, ['admin'], [400]],
+  ['POST', '/ajustes', {}, ['admin'], [400]],
+  ['POST', `/perfis/${uuid()}/desativar`, {}, ['admin'], [404]],
   ['POST', '/parceiros', {}, ['admin', 'estoquista'], [400]],
   ['PATCH', `/parceiros/${uuid()}`, {}, ['admin'], [404]],
   ['GET', '/produtos', undefined, ['admin', 'estoquista', 'financeiro']],
@@ -80,8 +93,9 @@ const ACESSOS: [string, string, unknown, Perfil[], number[]?][] = [
 const PERMISSOES_ESPERADAS: Record<Perfil, string[]> = {
   admin: [], // calculado: todas as permissões (inclusive abrir caixa)
   vendedor: ['caixa.operar', 'clientes.gerenciar'],
-  estoquista: ['cadastros.consultar', 'entrada.registrar', 'estoque.consultar', 'estoque.transferir', 'parceiros.criar', 'relatorios.estoque'], // parceiros.criar: 0009
-  financeiro: ['contas_pagar.gerenciar', 'contas_receber.lancar', 'contas_receber.receber', 'estoque.consultar', 'relatorios.consultar', 'relatorios.estoque'],
+  // parceiros.criar: 0009; custo, preço e aprovação: 0010
+  estoquista: ['cadastros.consultar', 'custo.consultar', 'entrada.registrar', 'estoque.consultar', 'estoque.transferir', 'parceiros.criar', 'produtos.aprovar', 'produtos.preco', 'relatorios.estoque'],
+  financeiro: ['contas_pagar.gerenciar', 'contas_receber.lancar', 'contas_receber.receber', 'custo.consultar', 'estoque.consultar', 'produtos.desconto', 'relatorios.consultar', 'relatorios.estoque'],
 };
 
 async function novoUsuario(admin: Cliente, login: string, perfilId: string) {
@@ -139,9 +153,34 @@ async function main() {
   check(novo?.id && novo.padrao === false, 'Admin cria um perfil personalizado', novo);
   const conf = (await novoUsuario(admin, `p_conf_${sufixo}`, novo.id)).cliente;
   check((await conf.get('/estoque')).status !== 403, 'perfil personalizado acessa só o que recebeu (estoque)');
-  check((await conf.get('/lotes')).status === 403 && (await conf.get('/contas-pagar')).status === 403, 'perfil personalizado não acessa o que não recebeu');
+  check((await conf.get('/aprovacoes')).status === 403 && (await conf.get('/contas-pagar')).status === 403, 'perfil personalizado não acessa o que não recebeu');
+  const estConf = (await conf.get('/estoque')).data?.items ?? [];
+  const estAdm = (await admin.get('/estoque')).data?.items ?? [];
+  check(estConf.length > 0 && estConf.every((i: Record<string, unknown>) => !('valorAtribuido' in i)) && estAdm.some((i: Record<string, unknown>) => 'valorAtribuido' in i),
+    'sem a permissão "ver custo", o estoque não traz o valor atribuído; com ela, traz (S3-05)', { conf: estConf[0], admin: estAdm[0] });
+  const relConf = (await admin.post('/perfis', { nome: `Rel estoque ${sufixo}`, permissoes: ['relatorios.estoque'] })).data;
+  const rc = (await novoUsuario(admin, `p_rel_${sufixo}`, relConf.id)).cliente;
+  const rel = (await rc.get('/relatorios/estoque?de=2026-01-01&ate=2026-12-31')).data;
+  check(rel?.colunas && !rel.colunas.some((c: { chave: string }) => c.chave === 'valorAtribuido'), 'relatório de estoque sem a coluna de custo para quem não pode ver custo', rel?.colunas);
   check((await admin.patch(`/perfis/${ids.vendedor}`, { nome: 'Outro nome' })).data?.code === 'PERFIL_PADRAO', 'perfil padrão não pode ser renomeado');
   check((await admin.patch(`/perfis/${novo.id}`, { permissoes: ['estoque.consultar', 'lotes.inexistente'] })).status === 400, 'permissão desconhecida é recusada');
+
+  console.log('Nome único, grupos e desativação de perfil (S3-18 a S3-20)');
+  const perms = (await admin.get('/permissoes')).data as { codigo: string; descricao: string; grupo: string }[];
+  check(perms.every((p) => p.descricao && p.grupo), 'cada permissão vem com descrição em português e grupo', perms.filter((p) => !p.descricao || !p.grupo));
+  check((await admin.post('/perfis', { nome: `conferente ${sufixo}`.toUpperCase(), permissoes: [] })).data?.code === 'NOME_DUPLICADO', 'nome de perfil repetido (sem diferença de maiúsculas) é recusado');
+  check((await admin.post(`/perfis/${ids.vendedor}/desativar`, {})).data?.code === 'PERFIL_PADRAO', 'perfil padrão não se desativa');
+  check((await admin.post(`/perfis/${novo.id}/desativar`, {})).data?.code === 'PERFIL_EM_USO', 'perfil com usuário ativo não se desativa');
+  const uConf = ((await admin.get(`/usuarios?busca=p_conf_${sufixo}`)).data.items as { id: string; login: string }[]).find((x) => x.login === `p_conf_${sufixo}`)!;
+  check((await admin.patch(`/usuarios/${uConf.id}`, { ativo: false })).status === 200, 'usuário do perfil desativado primeiro');
+  const desat = await admin.post(`/perfis/${novo.id}/desativar`, {});
+  check(desat.status === 200 && desat.data?.ativo === false, 'perfil sem usuário ativo é desativado', desat.data);
+  check(!((await admin.get('/perfis')).data as { id: string }[]).some((p) => p.id === novo.id), 'perfil desativado sai da lista');
+  check((await admin.post('/usuarios', { id: uuid(), nome: 'Teste inativo', login: `p_in_${sufixo}`, perfilId: novo.id })).status >= 400, 'usuário não entra em perfil desativado');
+  const denovo = await admin.post('/perfis', { nome: `Conferente ${sufixo}`, permissoes: ['estoque.consultar'] });
+  check(denovo.status === 201, 'o nome do perfil desativado fica livre para um perfil novo', denovo.data);
+  const aud = (await admin.get(`/auditoria?entidade=perfil&acao=PERFIL_DESATIVADO`)).data;
+  check(aud?.items?.some((a: { entidadeId: string }) => a.entidadeId === novo.id), 'a desativação vai para a auditoria');
 
   console.log(`\n${oks} ok, ${falhas} falha(s)`);
   process.exit(falhas ? 1 : 0);
