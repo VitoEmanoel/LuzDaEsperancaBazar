@@ -1,6 +1,6 @@
 -- =====================================================================================
 -- Sistema de Bazar — Luz da Esperança · DDL COMPLETA (instalação do zero, PostgreSQL 11+; testado no 16)
--- Gerado pela concatenação das migrações oficiais (0001 a 0011) — a fonte da verdade continua sendo
+-- Gerado pela concatenação das migrações oficiais (0001 a 0013) — a fonte da verdade continua sendo
 -- prisma/migrations/* aplicadas com `prisma migrate deploy`. Use este arquivo para revisão,
 -- ambientes sem Node/Prisma ou para recriar um banco de teste:
 --   createdb -O bazar_owner bazar_teste
@@ -2331,3 +2331,44 @@ INSERT INTO "parametro" ("chave", "valor", "descricao") VALUES
   ('etiqueta.largura_mm', '50', 'Largura da etiqueta do rolo, em milímetros'),
   ('etiqueta.altura_mm', '30', 'Altura da etiqueta do rolo, em milímetros')
 ON CONFLICT ("chave") DO NOTHING;
+
+-- #####################################################################################
+-- ## 0012_cnpj_alfanumerico_e_pouco_saldo — CNPJ com letras e o parâmetro de pouco saldo
+-- #####################################################################################
+-- Sprint 5: CNPJ alfanumérico (S5-01, ticket 13), o parâmetro de pouco saldo (S5-17, P-08) e o Financeiro cadastrando o
+-- fornecedor da compra (S5-11). Decisões do humano (20/10/2026).
+
+-- ------------------------------------------------------------------ CNPJ alfanumérico (IN RFB 2.229/2024)
+-- Desde julho de 2026 a Receita emite CNPJ com letras: 12 caracteres de 0-9 ou A-Z e 2 dígitos verificadores.
+-- O CPF continua só com dígitos. A API guarda sem pontuação e em maiúsculas; o dígito verificador é conferido por ela.
+ALTER TABLE parceiro DROP CONSTRAINT ck_parceiro_documento;
+ALTER TABLE parceiro ADD CONSTRAINT ck_parceiro_documento CHECK (documento IS NULL OR documento ~ '^([0-9]{11}|[0-9A-Z]{12}[0-9]{2})$');
+ALTER TABLE instituicao DROP CONSTRAINT ck_instituicao_cnpj;
+ALTER TABLE instituicao ADD CONSTRAINT ck_instituicao_cnpj CHECK (cnpj IS NULL OR cnpj ~ '^[0-9A-Z]{12}[0-9]{2}$');
+
+-- ------------------------------------------------------------------ pouco saldo (S5-17)
+-- P-08: um valor único para todos os produtos; o dashboard do Estoque avisa quem tiver este saldo ou menos.
+INSERT INTO "parametro" ("chave", "valor", "descricao") VALUES
+  ('estoque.pouco_saldo', '5', 'Pouco saldo: o dashboard do Estoque avisa o produto com esta quantidade ou menos')
+ON CONFLICT ("chave") DO NOTHING;
+
+-- ------------------------------------------------------------------ Financeiro cadastra fornecedor (S5-11)
+-- Quem lança a compra cria o fornecedor na hora, como o Estoquista cria o doador; editar continua só com o Admin.
+UPDATE "permissao" SET "descricao" = 'Criar parceiro (doador ou fornecedor) ao registrar o lote ou a compra' WHERE "codigo" = 'parceiros.criar';
+INSERT INTO "perfil_permissao" ("perfil_id", "permissao_codigo") VALUES
+  ('00000000-0000-4000-8000-0000000000a4', 'parceiros.criar')
+ON CONFLICT DO NOTHING;
+
+-- #####################################################################################
+-- ## 0013_nfe_chave_de_acesso — chave de acesso única da NF-e importada
+-- #####################################################################################
+-- Sprint 5: importação da NF-e (S5-04). A nota vira lote de COMPRA com a conta a pagar; a chave de acesso não se repete,
+-- para a mesma nota não entrar duas vezes (nem com dois envios ao mesmo tempo). Decisões em P-19 e P-20 do plano.
+
+-- ------------------------------------------------------------------ chave de acesso da NF-e
+-- 44 caracteres: com o CNPJ alfanumérico (NT 2025.001) as posições 7 a 20 (o CNPJ do emitente) podem ter letras.
+ALTER TABLE lote_entrada ADD COLUMN nfe_chave char(44);
+ALTER TABLE lote_entrada ADD CONSTRAINT ck_lote_nfe_chave CHECK (nfe_chave IS NULL OR nfe_chave ~ '^[0-9]{6}[0-9A-Z]{14}[0-9]{24}$');
+-- só lote de compra tem nota importada
+ALTER TABLE lote_entrada ADD CONSTRAINT ck_lote_nfe_compra CHECK (nfe_chave IS NULL OR tipo = 'COMPRA');
+CREATE UNIQUE INDEX uq_lote_nfe_chave ON lote_entrada (nfe_chave) WHERE nfe_chave IS NOT NULL;

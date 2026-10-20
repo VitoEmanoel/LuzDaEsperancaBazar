@@ -423,6 +423,7 @@ model LoteEntrada {
   documentoNumero  String?              @map("documento_numero")
   documentoArquivo String?              @map("documento_arquivo")
   valorCompra      Decimal?             @map("valor_compra") @db.Decimal(10, 2)
+  nfeChave         String?              @unique @map("nfe_chave") @db.Char(44) // S5-04: a mesma NF-e não entra duas vezes
   observacao       String?
   criadoEm         DateTime             @default(now()) @map("criado_em") @db.Timestamptz(3)
 
