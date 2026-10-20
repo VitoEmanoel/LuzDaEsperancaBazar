@@ -3,7 +3,7 @@ import { useState, type FormEvent } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
 import { ApiError, errorMessage } from '../../../shared/api/http';
-import { ErrorAlert, Field } from '../../../shared/components/ui';
+import { CampoSenha, ErrorAlert, Field } from '../../../shared/components/ui';
 import type { Me } from '../../../shared/api/types';
 import { FlorMarca, PontosMarca } from '../../../shared/components/BrandMark';
 
@@ -58,7 +58,7 @@ export function LoginPage() {
           <input value={usuario} onChange={(e) => setUsuario(e.target.value)} autoComplete="username" autoFocus required maxLength={60} />
         </Field>
         <Field label="Senha">
-          <input type="password" value={senha} onChange={(e) => setSenha(e.target.value)} autoComplete="current-password" required maxLength={128} />
+          <CampoSenha value={senha} onChange={(e) => setSenha(e.target.value)} autoComplete="current-password" required maxLength={128} />
         </Field>
         <ErrorAlert erro={erro} />
         <button className="btn btn-primary btn-block btn-lg" disabled={enviando || !usuario || !senha}>{enviando ? 'Entrando…' : 'Entrar'}</button>

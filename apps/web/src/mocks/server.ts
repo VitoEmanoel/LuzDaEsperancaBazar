@@ -17,6 +17,7 @@ import type {
 import { PERMISSOES } from '../shared/api/types';
 import { fromCents, toCents } from '../shared/lib/money';
 import { cpfValido, soDigitos } from '../shared/lib/cpf';
+import { uuid } from '../shared/lib/uuid';
 import { db, FORMAS, type CaixaDb, type ItemDb, type ProdutoDb, type UsuarioDb, type VendaDb } from './db';
 
 // ---------------- infraestrutura ----------------
@@ -30,7 +31,7 @@ function rota(method: string, path: string, regra: Regra, h: Handler) {
   const re = new RegExp('^' + path.replace(/:(\w+)/g, (_, k) => { keys.push(k); return '([^/]+)'; }) + '$');
   rotas.push({ method, re, keys, regra, h });
 }
-const uid = (): string => crypto.randomUUID();
+const uid = (): string => uuid(); // não crypto.randomUUID direto: ele não existe fora de https/localhost (celular pelo IP da rede)
 const now = () => new Date().toISOString();
 const ok = (body: unknown, status = 200, headers: Record<string, string> = {}): TransportResponse =>
   ({ status, headers: { 'content-type': 'application/json', ...headers }, body });
