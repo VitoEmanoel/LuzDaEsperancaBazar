@@ -1,4 +1,4 @@
-/** UUID v4 gerado no cliente: chave de idempotência e id de venda/cliente offline (seção 5/6). */
+/** UUID v4 gerado no cliente: chave de idempotência e id de venda, cliente e lançamentos. */
 export function uuid(): string {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
   // Fallback com CSPRNG (nunca Math.random para ids).

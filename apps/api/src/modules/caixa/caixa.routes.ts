@@ -5,10 +5,11 @@ import { prisma, type Db } from '../../shared/prisma.js';
 import { AppError, conflito, naoEncontrado } from '../../shared/errors.js';
 import { page, parse, skipTake, zBoolQuery, zIdParam, zMoney, zPage, zPeriodo, zTexto, zUuid } from '../../shared/http.js';
 import { auditar } from '../../shared/audit.js';
-import { fromCents, toCents } from '../../shared/money.js';
+import { fromCents, money, toCents } from '../../shared/money.js';
 import { periodo } from '../../shared/dates.js';
 import { exigirUsuario, tem, type UsuarioCtx } from '../../plugins/auth.js';
-import { caixaDto, calcularPrevia, registrarSangria } from './caixa.service.js';
+import { caixaDto, calcularPrevia, linhaDoTempo, registrarSangria } from './caixa.service.js';
+import { gerarPdfFechamento } from './fechamento.pdf.js';
 
 const incTerminal = { terminal: { select: { nome: true } } } as const;
 
@@ -18,6 +19,14 @@ async function meuCaixaAberto(db: Db, u: UsuarioCtx, id: string) {
   if (!c) naoEncontrado('Caixa');
   if (c!.abertoPorId !== u.id) throw new AppError(403, 'Caixa não pertence a esta sessão', 'CAIXA_DE_OUTRO_OPERADOR');
   if (c!.status !== 'ABERTO') conflito('CAIXA_FECHADO', 'Caixa fechado');
+  return c!;
+}
+
+/** Caixa do próprio operador (aberto ou fechado) ou, para quem pode ver relatórios, qualquer caixa. */
+async function caixaVisivel(db: Db, u: UsuarioCtx, id: string) {
+  const c = await db.caixaSessao.findUnique({ where: { id }, include: incTerminal });
+  if (!c) naoEncontrado('Caixa');
+  if (c!.abertoPorId !== u.id && !tem(u, 'relatorios.consultar')) throw new AppError(403, 'Caixa não pertence a esta sessão', 'CAIXA_DE_OUTRO_OPERADOR');
   return c!;
 }
 
@@ -118,6 +127,36 @@ export async function rotasCaixa(app: FastifyInstance) {
     const { id } = parse(zIdParam, req.params);
     await meuCaixaAberto(prisma, u, id);
     return (await calcularPrevia(prisma, id)).dto;
+  });
+
+  // Tudo o que aconteceu no caixa, da abertura ao fechamento (ou até agora, se ainda estiver aberto)
+  app.get('/caixas/:id/linha-do-tempo', { config: { acesso: ['caixa.operar', 'relatorios.consultar'] } }, async (req) => {
+    const u = exigirUsuario(req);
+    const { id } = parse(zIdParam, req.params);
+    await caixaVisivel(prisma, u, id);
+    const r = await linhaDoTempo(prisma, id);
+    return { gavetaAgora: r.gavetaAgora, eventos: r.eventos };
+  });
+
+  // PDF do fechamento (ou da parcial, se o caixa ainda estiver aberto)
+  app.get('/caixas/:id/fechamento.pdf', { config: { acesso: ['caixa.operar', 'relatorios.consultar'], rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const u = exigirUsuario(req);
+    const { id } = parse(zIdParam, req.params);
+    const c = await caixaVisivel(prisma, u, id);
+    const [previa, tempo, inst, operador] = await Promise.all([
+      calcularPrevia(prisma, id), linhaDoTempo(prisma, id), prisma.instituicao.findFirst(),
+      prisma.usuario.findUnique({ where: { id: c.abertoPorId }, select: { nome: true } }),
+    ]);
+    const pdf = await gerarPdfFechamento({
+      instituicao: { nome: inst?.nome ?? 'Bazar Luz da Esperança', cnpj: inst?.cnpj ?? null },
+      terminal: c.terminal.nome, operador: operador?.nome ?? '-', abertoEm: c.abertoEm, fechadoEm: c.fechadoEm, status: c.status,
+      fundoTroco: previa.dto.fundoTroco, totaisPorForma: previa.dto.totaisPorForma, suprimentos: previa.dto.suprimentos, sangrias: previa.dto.sangrias,
+      esperado: c.status === 'FECHADO' ? money(c.valorEsperado ?? 0) : previa.dto.esperadoDinheiro,
+      contado: c.valorContado === null ? null : money(c.valorContado), diferenca: c.diferenca === null ? null : money(c.diferenca),
+      observacao: c.observacao, eventos: tempo.eventos, gavetaAgora: tempo.gavetaAgora,
+    });
+    await auditar(prisma, { usuarioId: u.id, ip: req.ip }, 'FECHAMENTO_PDF', 'caixa_sessao', id);
+    return reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `attachment; filename="fechamento-caixa-${id.slice(0, 8)}.pdf"`).send(pdf);
   });
 
   app.post('/caixas/:id/fechar', { config: { acesso: ['caixa.operar'] } }, async (req) => {

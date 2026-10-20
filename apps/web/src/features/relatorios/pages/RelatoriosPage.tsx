@@ -11,13 +11,15 @@ import { errorMessage } from '../../../shared/api/http';
 import type { RelatorioSecao, TipoRelatorio } from '../../../shared/api/types';
 import { useAsync } from '../../../shared/hooks/useAsync';
 import { Empty, ErrorAlert, Field, MoneyText, PageHeader, Tabs } from '../../../shared/components/ui';
+import { useAuth } from '../../auth/AuthContext';
 import { formatDate, todayLocal } from '../../../shared/lib/format';
 import { downloadBlob } from '../../../shared/lib/download';
 import { useToast } from '../../../shared/components/Toast';
 
-const ABAS: { id: TipoRelatorio; rotulo: string }[] = [
-  { id: 'prestacao-contas', rotulo: 'Prestação de contas' }, { id: 'vendas', rotulo: 'Vendas' }, { id: 'estoque', rotulo: 'Estoque' },
-  { id: 'descartes', rotulo: 'Descartes' }, { id: 'transferencias', rotulo: 'Transferências' }, { id: 'fiado', rotulo: 'Fiado em aberto' },
+/** `estoque`: relatórios que também aparecem para quem só tem `relatorios.estoque`; os demais exigem `relatorios.consultar`. */
+const ABAS: { id: TipoRelatorio; rotulo: string; estoque?: boolean }[] = [
+  { id: 'prestacao-contas', rotulo: 'Prestação de contas' }, { id: 'vendas', rotulo: 'Vendas' }, { id: 'estoque', rotulo: 'Estoque', estoque: true },
+  { id: 'descartes', rotulo: 'Descartes', estoque: true }, { id: 'transferencias', rotulo: 'Transferências', estoque: true }, { id: 'fiado', rotulo: 'Fiado em aberto' },
 ];
 const AGRUPAR_VENDAS: { value: AgrupamentoVendas | ''; label: string }[] = [
   { value: 'dia', label: 'Total por dia' }, { value: 'forma', label: 'Total por forma de pagamento' },
@@ -26,8 +28,11 @@ const AGRUPAR_VENDAS: { value: AgrupamentoVendas | ''; label: string }[] = [
 ];
 
 export function RelatoriosPage() {
-  const { tipo = 'prestacao-contas' } = useParams();
-  const t = (ABAS.some((a) => a.id === tipo) ? tipo : 'prestacao-contas') as TipoRelatorio;
+  const { can } = useAuth();
+  const abas = ABAS.filter((a) => (a.estoque ? can('relatorios.consultar', 'relatorios.estoque') : can('relatorios.consultar')));
+  const padrao = (abas[0]?.id ?? 'estoque') as TipoRelatorio;
+  const { tipo = padrao } = useParams();
+  const t = (abas.some((a) => a.id === tipo) ? tipo : padrao) as TipoRelatorio;
   const nav = useNavigate();
   const toast = useToast();
   const [de, setDe] = useState(todayLocal(-30));
@@ -60,7 +65,7 @@ export function RelatoriosPage() {
       <PageHeader titulo="Relatórios">
         {(['pdf', 'csv', 'xlsx'] as const).map((f) => <button key={f} className="btn" onClick={() => exportar(f)}>Exportar {f.toUpperCase()}</button>)}
       </PageHeader>
-      <Tabs abas={ABAS} atual={t} onChange={(id) => nav(`/relatorios/${id}`)} />
+      <Tabs abas={abas} atual={t} onChange={(id) => nav(`/relatorios/${id}`)} />
       <div className="filters">
         <Field label="De"><input type="date" value={de} onChange={(e) => setDe(e.target.value)} /></Field>
         <Field label="Até"><input type="date" value={ate} onChange={(e) => setAte(e.target.value)} /></Field>

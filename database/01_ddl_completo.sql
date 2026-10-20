@@ -1,6 +1,6 @@
 -- =====================================================================================
 -- Sistema de Bazar — Luz da Esperança · DDL COMPLETA (instalação do zero, PostgreSQL 11+; testado no 16)
--- Gerado pela concatenação das migrações oficiais — a fonte da verdade continua sendo
+-- Gerado pela concatenação das migrações oficiais (0001 a 0008) — a fonte da verdade continua sendo
 -- prisma/migrations/* aplicadas com `prisma migrate deploy`. Use este arquivo para revisão,
 -- ambientes sem Node/Prisma ou para recriar um banco de teste:
 --   createdb -O bazar_owner bazar_teste
@@ -1689,3 +1689,120 @@ BEGIN
     GRANT SELECT ON saldo_estoque TO bazar_api;
   END IF;
 END $$;
+
+-- =====================================================================================
+-- 0004_remove_offline
+-- =====================================================================================
+-- Sprint 1: o sistema passa a ser só web e online. Remove o que existia apenas para o PDV offline.
+-- As colunas venda.numero_local e venda.origem_registro ficam (histórico); toda venda nova é ONLINE.
+
+DROP TABLE "pendencia_sincronizacao";
+DROP TYPE "StatusPendencia";
+
+DELETE FROM "perfil_permissao" WHERE "permissao_codigo" = 'sincronizacao.resolver';
+
+-- permissao tem trigger que bloqueia DELETE (fn_bloqueia_exclusao); desligado só neste comando.
+ALTER TABLE "permissao" DISABLE TRIGGER "tg_permissao_sem_exclusao";
+DELETE FROM "permissao" WHERE "codigo" = 'sincronizacao.resolver';
+ALTER TABLE "permissao" ENABLE TRIGGER "tg_permissao_sem_exclusao";
+
+DELETE FROM "parametro" WHERE "chave" = 'pdv.max_horas_sem_sync';
+
+-- =====================================================================================
+-- 0005_perfis_e_reembolso
+-- =====================================================================================
+-- Sprint 1: quatro perfis padrão (Administrador, Estoquista, Vendedor, Financeiro), cada um vendo só o que é seu,
+-- e reembolso em dinheiro como saída no financeiro (o Administrador deixa de operar caixa).
+-- Perfis criados pelo Administrador (padrao = false) não são tocados.
+
+-- Nomes de perfil e de categoria são únicos: se o Administrador já criou algo com o mesmo nome, ele só ganha o sufixo " (anterior)".
+UPDATE "perfil" SET "nome" = "nome" || ' (anterior)' WHERE "padrao" = false AND "nome" IN ('Vendedor', 'Estoquista', 'Financeiro');
+UPDATE "categoria_despesa" SET "nome" = "nome" || ' (anterior)' WHERE "nome" = 'Reembolso de venda' AND "id" <> '00000000-0000-4000-8000-0000000000c1';
+
+-- Caixa vira Vendedor e Triagem vira Estoquista (mesmos ids, usuários e histórico preservados).
+UPDATE "perfil" SET "nome" = 'Vendedor', "descricao" = 'Opera o PDV: vende e abre e fecha o próprio caixa'
+ WHERE "id" = '00000000-0000-4000-8000-0000000000a2';
+UPDATE "perfil" SET "nome" = 'Estoquista', "descricao" = 'Entradas, cadastro de produtos e estoque (tudo que não é venda nem financeiro)'
+ WHERE "id" = '00000000-0000-4000-8000-0000000000a3';
+INSERT INTO "perfil" ("id", "nome", "descricao", "padrao", "limite_desconto_pct") VALUES
+  ('00000000-0000-4000-8000-0000000000a4', 'Financeiro', 'Contas a pagar e a receber, fluxo de caixa e relatórios', true, 0)
+ON CONFLICT ("id") DO NOTHING;
+
+-- Relatórios de estoque ficam separados dos de receita: o Estoquista vê só os de estoque.
+INSERT INTO "permissao" ("codigo", "modulo", "descricao") VALUES
+  ('relatorios.estoque', 'REL', 'Relatórios de estoque, descartes e transferências')
+ON CONFLICT ("codigo") DO NOTHING;
+
+-- Permissões dos perfis padrão
+DELETE FROM "perfil_permissao" WHERE "perfil_id" IN (
+  '00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000a2',
+  '00000000-0000-4000-8000-0000000000a3', '00000000-0000-4000-8000-0000000000a4');
+
+-- Administrador: tudo, menos operar o PDV (não vende)
+INSERT INTO "perfil_permissao" ("perfil_id", "permissao_codigo")
+SELECT '00000000-0000-4000-8000-0000000000a1', "codigo" FROM "permissao" WHERE "codigo" <> 'caixa.operar';
+
+-- Vendedor: só o PDV (e cadastro rápido de cliente para o fiado)
+INSERT INTO "perfil_permissao" ("perfil_id", "permissao_codigo") VALUES
+  ('00000000-0000-4000-8000-0000000000a2', 'caixa.operar'),
+  ('00000000-0000-4000-8000-0000000000a2', 'clientes.gerenciar');
+
+-- Estoquista: entradas, estoque e relatórios de estoque
+INSERT INTO "perfil_permissao" ("perfil_id", "permissao_codigo") VALUES
+  ('00000000-0000-4000-8000-0000000000a3', 'entrada.registrar'),
+  ('00000000-0000-4000-8000-0000000000a3', 'estoque.consultar'),
+  ('00000000-0000-4000-8000-0000000000a3', 'estoque.transferir'),
+  ('00000000-0000-4000-8000-0000000000a3', 'cadastros.consultar'),
+  ('00000000-0000-4000-8000-0000000000a3', 'relatorios.estoque');
+
+-- Financeiro: contas, relatórios e consulta de estoque (lê categorias de despesa pela permissão de contas a pagar)
+INSERT INTO "perfil_permissao" ("perfil_id", "permissao_codigo") VALUES
+  ('00000000-0000-4000-8000-0000000000a4', 'contas_pagar.gerenciar'),
+  ('00000000-0000-4000-8000-0000000000a4', 'contas_receber.receber'),
+  ('00000000-0000-4000-8000-0000000000a4', 'contas_receber.lancar'),
+  ('00000000-0000-4000-8000-0000000000a4', 'relatorios.consultar'),
+  ('00000000-0000-4000-8000-0000000000a4', 'relatorios.estoque'),
+  ('00000000-0000-4000-8000-0000000000a4', 'estoque.consultar');
+
+-- Reembolso em dinheiro (cancelar venda de caixa fechado, estornar recebimento) vira uma saída paga no financeiro.
+INSERT INTO "categoria_despesa" ("id", "nome") VALUES
+  ('00000000-0000-4000-8000-0000000000c1', 'Reembolso de venda')
+ON CONFLICT DO NOTHING;
+
+-- =====================================================================================
+-- 0006_admin_abre_caixa
+-- =====================================================================================
+-- O Administrador volta a poder abrir caixa (decisão do humano em 19/10/2026): para pagar contas e receber
+-- fiado com o dinheiro da gaveta. O reembolso em dinheiro continua como saída no financeiro (migração 0005).
+INSERT INTO "perfil_permissao" ("perfil_id", "permissao_codigo") VALUES
+  ('00000000-0000-4000-8000-0000000000a1', 'caixa.operar')
+ON CONFLICT DO NOTHING;
+
+-- =====================================================================================
+-- 0007_pagamento_dinheiro_exige_recebido
+-- =====================================================================================
+-- Defesa em profundidade: pagamento em dinheiro SEMPRE tem valor recebido (o servidor já exige; agora o banco também).
+-- NOT VALID: só vale para pagamentos novos; vendas antigas (sem valor recebido) não são reescritas nem recusadas.
+ALTER TABLE "venda_pagamento" ADD CONSTRAINT "ck_pagamento_dinheiro_recebido"
+  CHECK ("forma" <> 'DINHEIRO' OR "valor_recebido" IS NOT NULL) NOT VALID;
+
+-- =====================================================================================
+-- 0008_cpf_na_venda
+-- =====================================================================================
+-- CPF na venda (decisão do humano, 19/10/2026): aparece só no comprovante, fica guardado até o fim do mês e depois é apagado.
+-- A venda NÃO guarda o CPF: ele fica numa tabela própria, que pode ser limpa sem mexer na venda.
+CREATE TABLE "venda_cpf" (
+    "venda_id" UUID NOT NULL,
+    "cpf" CHAR(11) NOT NULL,
+    "criado_em" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "venda_cpf_pkey" PRIMARY KEY ("venda_id"),
+    CONSTRAINT "venda_cpf_venda_id_fkey" FOREIGN KEY ("venda_id") REFERENCES "venda"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT "ck_venda_cpf_formato" CHECK ("cpf" ~ '^[0-9]{11}$')
+);
+CREATE INDEX "venda_cpf_cpf_criado_em_idx" ON "venda_cpf"("cpf", "criado_em");
+
+-- Opções do Administrador (Parâmetros)
+INSERT INTO "parametro" ("chave", "valor", "descricao") VALUES
+  ('cpf.limite_mensal', '0', 'Limite de compras por CPF no mês, em reais (0 = sem limite)'),
+  ('cpf.obrigatorio', '0', 'CPF obrigatório na venda (1 = sim, 0 = não)')
+ON CONFLICT ("chave") DO NOTHING;

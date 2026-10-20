@@ -1,6 +1,6 @@
 /** CXA — terminais e sessões de caixa. */
 import { http } from '../../shared/api/http';
-import type { CaixaLancamentoRequest, CaixaSessao, Money, Page, PreviaFechamento, Terminal } from '../../shared/api/types';
+import type { CaixaLancamentoRequest, CaixaSessao, LinhaDoTempo, Money, Page, PreviaFechamento, Terminal } from '../../shared/api/types';
 
 export const terminaisApi = {
   listar: (q: { ativo?: boolean } = {}) => http.get<Terminal[]>('/terminais', { query: q }),
@@ -15,5 +15,9 @@ export const caixaApi = {
   lancar: (caixaId: string, l: CaixaLancamentoRequest) => http.post<void>(`/caixas/${caixaId}/lancamentos`, l),
   previaFechamento: (caixaId: string) => http.get<PreviaFechamento>(`/caixas/${caixaId}/previa-fechamento`),
   fechar: (caixaId: string, contado: Money, observacao?: string) => http.post<CaixaSessao>(`/caixas/${caixaId}/fechar`, { contado, observacao }),
+  /** Tudo o que aconteceu no caixa, da abertura ao fechamento (ou até agora). */
+  linhaDoTempo: (caixaId: string) => http.get<LinhaDoTempo>(`/caixas/${caixaId}/linha-do-tempo`),
+  /** PDF do fechamento (ou da parcial, se o caixa ainda estiver aberto). */
+  pdfFechamento: (caixaId: string) => http.blob(`/caixas/${caixaId}/fechamento.pdf`),
   historico: (q: { de?: string; ate?: string; page?: number }) => http.get<Page<CaixaSessao>>('/caixas', { query: q }),
 };

@@ -10,8 +10,9 @@ import { FlorMarca, PontosMarca } from '../../../shared/components/BrandMark';
 /** Destino pós-login: troca de senha > rota pedida > PDV (perfil só de caixa) > início. */
 function destino(u: Me, from?: string) {
   if (u.trocarSenha) return '/trocar-senha';
-  if (from && from !== '/login') return from;
   const soCaixa = u.permissoes.includes('caixa.operar') && !u.permissoes.some((p) => ['estoque.ajustar', 'entrada.registrar', 'relatorios.consultar'].includes(p));
+  // Perfil só de caixa nunca cai no Início: vai direto ao PDV, mesmo que a rota pedida tenha sido a raiz.
+  if (from && from !== '/login' && !(soCaixa && from === '/')) return from;
   return soCaixa ? '/pdv' : '/';
 }
 
@@ -52,10 +53,7 @@ export function LoginPage() {
       <form onSubmit={entrar} noValidate>
         <h2>Boas-vindas!</h2>
         <p className="muted">Entre com seu usuário e senha para começar.</p>
-        {!navigator.onLine && (
-          <div className="alert alert-warn">Sem internet. O PDV só reabre offline para o operador que estava com o caixa aberto neste dispositivo (dentro do prazo configurado). Para outros acessos, conecte-se.</div>
-        )}
-        {sessaoExpirada && <div className="alert alert-info">Sua sessão expirou. Entre novamente — o carrinho em andamento foi preservado.</div>}
+        {sessaoExpirada && <div className="alert alert-info">Sua sessão expirou. Entre novamente — o carrinho em andamento foi preservado neste aparelho.</div>}
         <Field label="Usuário">
           <input value={usuario} onChange={(e) => setUsuario(e.target.value)} autoComplete="username" autoFocus required maxLength={60} />
         </Field>

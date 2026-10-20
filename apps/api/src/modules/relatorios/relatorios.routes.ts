@@ -7,13 +7,13 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import PDFDocument from 'pdfkit';
 import { prisma } from '../../shared/prisma.js';
-import { AppError } from '../../shared/errors.js';
+import { AppError, proibido } from '../../shared/errors.js';
 import { parse, zData, zUuid } from '../../shared/http.js';
 import { fromCents, toCents } from '../../shared/money.js';
 import { fimDoDiaExclusivo, inicioDoDia, localDate, TZ } from '../../shared/dates.js';
 import { gerarCsv, gerarXlsx } from '../../shared/planilha.js';
 import { auditar } from '../../shared/audit.js';
-import { exigirUsuario } from '../../plugins/auth.js';
+import { exigirUsuario, tem } from '../../plugins/auth.js';
 
 type Tipo = 'money' | 'number' | 'date' | 'text';
 interface Coluna { chave: string; rotulo: string; tipo?: Tipo }
@@ -382,12 +382,16 @@ async function gerarPdf(r: Relatorio, f: Filtro, instituicao: string): Promise<B
   return fim;
 }
 
+/** Relatórios de estoque podem ser vistos por quem tem `relatorios.estoque`; os demais (receita, vendas, fiado) exigem `relatorios.consultar`. */
+const TIPOS_DE_ESTOQUE = ['estoque', 'descartes', 'transferencias'];
+
 export async function rotasRelatorios(app: FastifyInstance) {
-  app.get('/relatorios/:tipo', { config: { acesso: ['relatorios.consultar'], rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
+  app.get('/relatorios/:tipo', { config: { acesso: ['relatorios.consultar', 'relatorios.estoque'], rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
     const u = exigirUsuario(req);
     const { tipo } = parse(z.object({ tipo: z.string().max(40) }), req.params);
     const gerar = RELATORIOS[tipo];
     if (!gerar) throw new AppError(404, 'Relatório inexistente', 'RELATORIO_INEXISTENTE');
+    if (!TIPOS_DE_ESTOQUE.includes(tipo) && !tem(u, 'relatorios.consultar')) proibido();
     const f = parse(zFiltro, req.query);
     const r = await gerar(f);
     if (f.formato === 'json') return r;

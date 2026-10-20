@@ -17,7 +17,6 @@ export type LocalEstoque = 'BAZAR' | 'DOACOES';
 export type TipoMovimentacao =
   | 'ENTRADA' | 'TRANSFERENCIA' | 'VENDA' | 'ESTORNO_VENDA' | 'BAIXA' | 'AJUSTE_ENTRADA' | 'AJUSTE_SAIDA';
 export type FormaPagamento = 'DINHEIRO' | 'PIX' | 'CARTAO_DEBITO' | 'CARTAO_CREDITO' | 'FIADO';
-export type OrigemRegistroVenda = 'ONLINE' | 'OFFLINE';
 export type StatusContaReceber = 'ABERTA' | 'PARCIAL' | 'QUITADA' | 'CANCELADA';
 
 export const FORMAS_PAGAMENTO: { value: FormaPagamento; label: string }[] = [
@@ -37,9 +36,9 @@ export const PERMISSOES = [
   'cadastros.gerenciar', 'cadastros.consultar', 'clientes.gerenciar', 'parametros.gerenciar',
   'entrada.registrar', 'triagem.reabrir',
   'estoque.consultar', 'estoque.transferir', 'estoque.ajustar',
-  'caixa.operar', 'venda.cancelar', 'venda.desconto_autorizar', 'sincronizacao.resolver', 'terminais.gerenciar',
+  'caixa.operar', 'venda.cancelar', 'venda.desconto_autorizar', 'terminais.gerenciar',
   'contas_pagar.gerenciar', 'contas_receber.receber', 'contas_receber.lancar', 'recebimento.estornar',
-  'relatorios.consultar', 'fiscal.gerenciar', 'privacidade.gerenciar',
+  'relatorios.consultar', 'relatorios.estoque', 'fiscal.gerenciar', 'privacidade.gerenciar',
 ] as const;
 export type Permissao = (typeof PERMISSOES)[number];
 
@@ -77,6 +76,8 @@ export interface AuditoriaRegistro {
 
 // ---------- CAD ----------
 export interface Categoria { id: Uuid; nome: string; precoPadrao: Money; vendaPorCategoria: boolean; ativo: boolean }
+/** Categoria no catálogo do PDV: traz quanto há para vender por categoria no Bazar. */
+export interface CategoriaPdv extends Categoria { saldoBazar: number }
 export type TipoParceiro = 'EMPRESA' | 'LOJA' | 'PESSOA_FISICA' | 'OUTRO';
 export const TIPOS_PARCEIRO: { value: TipoParceiro; label: string }[] = [
   { value: 'EMPRESA', label: 'Empresa' }, { value: 'LOJA', label: 'Loja' },
@@ -157,15 +158,18 @@ export interface CargaInicialResultado { gravado: boolean; linhas: number; erros
 // ---------- PDV ----------
 export interface CatalogoPdv {
   versao: string;
-  categorias: Categoria[];
+  categorias: CategoriaPdv[];
   itensEtiquetados: { itemId: Uuid; codigo: string; descricao: string; preco: Money }[];
   /** RNF-19: só nome e telefone dos clientes do fiado. */
   clientesFiado: { id: Uuid; nome: string; telefone: string }[];
   regrasFiscais: RegraFiscal[];
   fiadoPrazoDias?: number;
-  /** Parâmetro `pdv.max_horas_sem_sync`: validade do resumo do operador para reabrir o PDV offline. */
-  pdvMaxHorasSemSync?: number;
+  /** O Administrador decide, em Parâmetros, se o CPF é obrigatório na venda e qual o limite mensal por CPF (em reais; 0 = sem limite). */
+  cpfObrigatorio?: boolean;
+  cpfLimiteMensal?: number;
 }
+/** Saldo do CPF no mês: `limite` e `saldo` são nulos quando não há limite. */
+export interface SaldoCpf { cpf: string; limite: Money | null; comprado: Money; saldo: Money | null; obrigatorio: boolean }
 export type VendaItemRequest =
   | { codigo: string; quantidade: 1; desconto?: Money }
   | { categoriaId: Uuid; quantidade: number; desconto?: Money };
@@ -175,9 +179,8 @@ export interface VendaRequest {
   terminalId: Uuid;
   caixaId: Uuid;
   clienteId?: Uuid;
-  numeroLocal?: string;
-  ocorridaEm: IsoDateTime;
-  origem: OrigemRegistroVenda;
+  /** CPF da compra (só dígitos); o servidor valida e confere o limite do mês */
+  cpf?: string;
   itens: VendaItemRequest[];
   desconto?: Money;
   pagamentos: PagamentoRequest[];
@@ -185,10 +188,10 @@ export interface VendaRequest {
 }
 export interface Venda {
   id: Uuid;
-  numero: number | null;
-  numeroLocal?: string;
+  numero: number;
+  /** CPF inteiro: só vem no comprovante (nunca nas listas) e some no fim do mês */
+  cpf?: string;
   ocorridaEm: IsoDateTime;
-  origem: OrigemRegistroVenda;
   status: 'CONCLUIDA' | 'CANCELADA';
   subtotal: Money;
   desconto: Money;
@@ -199,18 +202,6 @@ export interface Venda {
   operadorNome: string;
   clienteNome?: string;
   vencimentoFiado?: LocalDate;
-}
-export interface SyncLoteRequest {
-  clientes: { id: Uuid; nome: string; telefone: string; cienciaAviso: boolean }[];
-  vendas: (VendaRequest & { id: Uuid })[];
-}
-export interface SyncLoteResponse {
-  resultados: { id: Uuid; tipo: 'cliente' | 'venda'; status: 'GRAVADA' | 'JA_EXISTENTE' | 'PENDENCIA'; numero?: number; motivo?: string }[];
-}
-export interface Pendencia {
-  id: Uuid; vendaId: Uuid; numeroLocal?: string; terminalNome: string; operadorNome: string;
-  ocorridaEm: IsoDateTime; total: Money; codigo: string; motivo: string;
-  status: 'ABERTA' | 'REPROCESSADA' | 'DESCARTADA';
 }
 
 // ---------- CXA ----------
@@ -224,8 +215,20 @@ export interface CaixaLancamentoRequest { id: Uuid; tipo: 'SANGRIA' | 'SUPRIMENT
 export interface PreviaFechamento {
   fundoTroco: Money; suprimentos: Money; sangrias: Money;
   totaisPorForma: Record<FormaPagamento, Money>;
-  esperadoDinheiro: Money; quantidadeVendas: number; filaPendente: number;
+  esperadoDinheiro: Money; quantidadeVendas: number;
 }
+/** Cada coisa que aconteceu no caixa, da abertura ao fechamento. */
+export interface EventoCaixa {
+  quando: IsoDateTime;
+  tipo: 'ABERTURA' | 'VENDA' | 'VENDA_CANCELADA' | 'SANGRIA' | 'SUPRIMENTO' | 'RECEBIMENTO_FIADO' | 'RECEBIMENTO_ESTORNADO' | 'FECHAMENTO';
+  descricao: string; valor: Money;
+  /** dinheiro que o evento põe (+) ou tira (-) da gaveta */
+  efeitoDinheiro: Money;
+  /** dinheiro na gaveta depois do evento (ausente em evento posterior ao fechamento) */
+  gavetaApos?: Money;
+  aposFechamento?: boolean;
+}
+export interface LinhaDoTempo { gavetaAgora: Money; eventos: EventoCaixa[] }
 
 // ---------- FIN ----------
 export interface ContaPagar {
@@ -268,5 +271,5 @@ export interface RelatorioSecao {
 export interface RelatorioResposta extends RelatorioSecao { blocos?: RelatorioSecao[] }
 
 // ---------- ADM ----------
-export interface Parametro { chave: string; valor: string; descricao: string; tipo: 'number' | 'text' }
+export interface Parametro { chave: string; valor: string; descricao: string; tipo: 'number' | 'text' | 'bool' }
 export interface ImportacaoResultado { gravado: boolean; inseridos: number; duplicados: { linha: number; valor: string }[]; erros: { linha: number; mensagem: string }[] }

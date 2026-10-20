@@ -13,6 +13,7 @@ import { fromCents, money, toCents } from '../../shared/money.js';
 import { fromDbDate, inicioDoDia, fimDoDiaExclusivo, toDbDate } from '../../shared/dates.js';
 import { exigirUsuario } from '../../plugins/auth.js';
 import { caixaAbertoDoOperador, registrarSangria, FORMAS, type Forma } from '../caixa/caixa.service.js';
+import { CATEGORIA_REEMBOLSO_ID, registrarReembolso } from './reembolso.service.js';
 import { obterClienteAtivo } from '../cadastros/clientes.routes.js';
 
 const zValor = zMoney.refine((v) => toCents(v) > 0, 'valor maior que zero');
@@ -220,16 +221,14 @@ export async function rotasFinanceiro(app: FastifyInstance) {
       const r = await tx.recebimento.findUnique({ where: { id }, include: { sessao: { select: { status: true } } } });
       if (!r) naoEncontrado('Recebimento');
       if (r!.estornadoEm) conflito('ESTORNO_DUPLICADO', 'Recebimento já estornado');
-      let sangriaId: string | undefined;
-      // RN-27: estorno de dinheiro de caixa JÁ FECHADO sai como sangria do caixa aberto.
+      let reembolsoId: string | undefined;
+      // RN-27: estorno de dinheiro de caixa JÁ FECHADO vira uma saída paga no financeiro.
       // Caixa ainda aberto: o recebimento estornado já sai do valor esperado.
       if (r!.forma === 'DINHEIRO' && r!.sessao && r!.sessao.status === 'FECHADO') {
-        const cx = await caixaAbertoDoOperador(tx, u.id);
-        if (!cx) conflito('SEM_CAIXA_ABERTO', 'O dinheiro entrou num caixa já fechado: abra um caixa para registrar a sangria');
-        sangriaId = (await registrarSangria(tx, cx!.id, u.id, toCents(r!.valor), 'Estorno de recebimento de fiado')).id;
+        reembolsoId = (await registrarReembolso(tx, u.id, toCents(r!.valor), 'Estorno de recebimento de fiado')).id;
       }
       await tx.recebimento.update({ where: { id }, data: { estornadoEm: new Date(), estornadoPorId: u.id, motivoEstorno: motivo } });
-      await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'RECEBIMENTO_ESTORNADO', 'recebimento', id, undefined, { motivo, sangriaId });
+      await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'RECEBIMENTO_ESTORNADO', 'recebimento', id, undefined, { motivo, reembolsoId });
     });
     return reply.code(204).send();
   });
@@ -255,7 +254,11 @@ export async function rotasFinanceiro(app: FastifyInstance) {
       SELECT p.forma::text AS forma, sum(p.valor)::text AS total FROM venda_pagamento p JOIN venda v ON v.id = p.venda_id
       WHERE v.status = 'FINALIZADA' AND v.ocorrida_em >= ${ini} AND v.ocorrida_em < ${fim} GROUP BY p.forma`;
     const receb = await prisma.recebimento.aggregate({ where: { estornadoEm: null, recebidoEm: { gte: ini, lt: fim } }, _sum: { valor: true } });
-    const saidas = await prisma.contaPagar.aggregate({ where: { status: 'PAGA', pagoEm: { gte: ini, lt: fim } }, _sum: { valorPago: true } });
+    // Reembolso de venda cancelada / recebimento estornado NÃO entra em saídas: a venda cancelada já saiu das entradas e o
+    // recebimento estornado já saiu dos recebimentos; contar de novo deduziria duas vezes. Aparece à parte, em `reembolsos`.
+    const pagas = { status: 'PAGA' as const, pagoEm: { gte: ini, lt: fim } };
+    const saidas = await prisma.contaPagar.aggregate({ where: { ...pagas, OR: [{ categoriaDespesaId: null }, { categoriaDespesaId: { not: CATEGORIA_REEMBOLSO_ID } }] }, _sum: { valorPago: true } });
+    const reembolsos = await prisma.contaPagar.aggregate({ where: { ...pagas, categoriaDespesaId: CATEGORIA_REEMBOLSO_ID }, _sum: { valorPago: true } });
     const t = Object.fromEntries(FORMAS.map((f) => [f, 0])) as Record<Forma, number>;
     for (const r of porForma) t[r.forma] = toCents(Number(r.total).toFixed(2));
     const recebidos = toCents(receb._sum.valor ?? null);
@@ -265,7 +268,7 @@ export async function rotasFinanceiro(app: FastifyInstance) {
     return {
       de: q.de, ate: q.ate,
       entradasPorForma: Object.fromEntries(FORMAS.map((f) => [f, fromCents(t[f])])),
-      recebimentosFiado: fromCents(recebidos), saidas: fromCents(sai), resultado: fromCents(entradas - sai),
+      recebimentosFiado: fromCents(recebidos), saidas: fromCents(sai), reembolsos: fromCents(toCents(reembolsos._sum.valorPago ?? null)), resultado: fromCents(entradas - sai),
     };
   });
 }

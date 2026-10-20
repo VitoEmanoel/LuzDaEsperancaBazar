@@ -18,7 +18,9 @@
     "test:smoke": "tsx tests/smoke.ts",
     "test:concorrencia": "tsx tests/concorrencia.ts",
     "postinstall": "prisma generate",
-    "test:reteste": "tsx tests/reteste-qa.ts"
+    "test:reteste": "tsx tests/reteste-qa.ts",
+    "test:perfis": "tsx tests/perfis.ts",
+    "test:cpf": "tsx tests/cpf.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",

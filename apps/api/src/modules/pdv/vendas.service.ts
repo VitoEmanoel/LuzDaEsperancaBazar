@@ -7,6 +7,7 @@
  *  - regra fiscal vigente copiada em cada item (RN-17); fiado gera conta a receber (RN-03);
  *  - no COMMIT o banco confere a venda inteira (tg_valida_venda_completa).
  */
+import { configCpf, compradoNoMes, limparCpfsVencidos, normalizarCpf } from './cpf.service.js';
 import { z } from 'zod';
 import { Prisma } from '../../generated/prisma/client.js';
 import { prisma, type Db, type Tx } from '../../shared/prisma.js';
@@ -28,9 +29,8 @@ export const zVendaRequest = z.object({
   terminalId: zUuid,
   caixaId: zUuid,
   clienteId: zUuid.optional(),
-  numeroLocal: z.string().trim().max(40).optional(),
-  ocorridaEm: z.string().datetime({ offset: true }),
-  origem: z.enum(['ONLINE', 'OFFLINE']),
+  /** CPF da compra (opcional, salvo se o Administrador marcar como obrigatório); validado pelos dígitos no servidor */
+  cpf: z.string().trim().max(20).nullish(),
   itens: z.array(zItemVenda).min(1, 'venda sem itens').max(200),
   desconto: zMoney.optional(),
   pagamentos: z.array(z.object({
@@ -42,23 +42,23 @@ export const zVendaRequest = z.object({
 export type VendaRequest = z.infer<typeof zVendaRequest>;
 
 export interface Operador { id: string; nome: string; permissoes: Set<Permissao>; limiteDescontoPct: number }
-export type ModoVenda = 'ONLINE' | 'SYNC' | 'REPROCESSO';
-
-const TOLERANCIA_RELOGIO_MS = 5 * 60_000;
 
 // ---------------- DTO ----------------
 const vendaInclude = {
   itens: { include: { item: { select: { descricao: true, tipoControle: true, categoria: { select: { nome: true } }, lote: { select: { numero: true } } } } }, orderBy: { id: 'asc' as const } },
   pagamentos: true,
   cliente: { select: { nome: true } },
+  cpf: true,
   contaReceber: { select: { vencimento: true } },
 } satisfies Prisma.VendaInclude;
 type VendaFull = Prisma.VendaGetPayload<{ include: typeof vendaInclude }>;
 
-export function vendaDto(v: VendaFull, operadorNome: string) {
+/** `comCpf`: o CPF só sai no comprovante e na resposta da venda — nunca nas listas. */
+export function vendaDto(v: VendaFull, operadorNome: string, comCpf = false) {
   return {
-    id: v.id, numero: v.numero, numeroLocal: v.numeroLocal ?? undefined,
-    ocorridaEm: v.ocorridaEm.toISOString(), origem: v.origemRegistro,
+    id: v.id, numero: v.numero,
+    ...(comCpf && v.cpf ? { cpf: v.cpf.cpf } : {}),
+    ocorridaEm: v.ocorridaEm.toISOString(),
     status: v.status === 'FINALIZADA' ? 'CONCLUIDA' : 'CANCELADA',
     subtotal: money(v.subtotal), desconto: money(v.desconto), total: money(v.total),
     troco: fromCents(v.pagamentos.reduce((s, p) => s + toCents(p.troco), 0)),
@@ -73,11 +73,11 @@ export function vendaDto(v: VendaFull, operadorNome: string) {
   };
 }
 
-export async function carregarVenda(db: Db, id: string) {
+export async function carregarVenda(db: Db, id: string, comCpf = false) {
   const v = await db.venda.findUnique({ where: { id }, include: vendaInclude });
   if (!v) return null;
   const op = await db.usuario.findUnique({ where: { id: v.registradaPorId }, select: { nome: true } });
-  return { venda: v, dto: vendaDto(v, op?.nome ?? '—') };
+  return { venda: v, dto: vendaDto(v, op?.nome ?? '—', comCpf) };
 }
 
 // ---------------- alocação ----------------
@@ -161,40 +161,25 @@ export interface ResultadoVenda { id: string; numero: number; jaExistia: boolean
 
 /**
  * Grava a venda dentro de `tx`. Lança AppError (regra de negócio) ou erro do banco.
- * modo SYNC: venda feita sem internet (origem OFFLINE, hora do terminal).
- * modo REPROCESSO: Administrador reprocessa pendência; se o caixa original já fechou, usa o caixa
- * aberto do MESMO terminal (o caixa fechado não é reaberto).
+ * A hora da venda é sempre a do servidor.
  */
-export async function processarVenda(tx: Tx, id: string, req: VendaRequest, op: Operador, modo: ModoVenda): Promise<ResultadoVenda> {
+export async function processarVenda(tx: Tx, id: string, req: VendaRequest, op: Operador): Promise<ResultadoVenda> {
   const existente = await tx.venda.findUnique({ where: { id }, select: { numero: true, registradaPorId: true } });
   if (existente) {
-    if (existente.registradaPorId !== op.id && modo !== 'REPROCESSO') throw new AppError(409, 'Identificador de venda já usado', 'ID_EM_USO');
+    if (existente.registradaPorId !== op.id) throw new AppError(409, 'Identificador de venda já usado', 'ID_EM_USO');
     return { id, numero: existente.numero, jaExistia: true };
   }
 
   // ----- caixa e terminal (anti-IDOR: nunca confia no caixaId/terminalId do corpo sem conferir) -----
-  let caixa = await tx.caixaSessao.findUnique({ where: { id: req.caixaId }, include: { terminal: true } });
+  const caixa = await tx.caixaSessao.findUnique({ where: { id: req.caixaId }, include: { terminal: true } });
   if (!caixa) throw new AppError(409, 'Caixa não encontrado', 'CAIXA_INEXISTENTE');
   if (caixa.terminalId !== req.terminalId) throw new AppError(403, 'Caixa não pertence a este terminal', 'CAIXA_DE_OUTRO_TERMINAL');
-  if (modo !== 'REPROCESSO' && caixa.abertoPorId !== op.id) throw new AppError(403, 'Caixa não pertence a esta sessão', 'CAIXA_DE_OUTRO_OPERADOR');
+  if (caixa.abertoPorId !== op.id) throw new AppError(403, 'Caixa não pertence a esta sessão', 'CAIXA_DE_OUTRO_OPERADOR');
   if (!caixa.terminal.ativo) throw new AppError(409, 'Terminal desativado', 'TERMINAL_DESATIVADO');
-  if (caixa.status !== 'ABERTO') {
-    if (modo !== 'REPROCESSO') throw new AppError(409, 'Caixa fechado', 'CAIXA_FECHADO'); // RN-12
-    const aberto = await tx.caixaSessao.findFirst({ where: { terminalId: caixa.terminalId, status: 'ABERTO' }, include: { terminal: true } });
-    if (!aberto) throw new AppError(409, 'O caixa da venda já foi fechado: abra um caixa neste terminal para reprocessar', 'SEM_CAIXA_ABERTO');
-    caixa = aberto;
-  }
+  if (caixa.status !== 'ABERTO') throw new AppError(409, 'Caixa fechado', 'CAIXA_FECHADO'); // RN-12
 
-  // ----- hora: online = hora do servidor; offline = hora do terminal, dentro de limites (RN-31) -----
-  const agora = Date.now();
-  let ocorrida = new Date(agora);
-  if (modo !== 'ONLINE') {
-    ocorrida = new Date(req.ocorridaEm);
-    if (ocorrida.getTime() > agora + TOLERANCIA_RELOGIO_MS) throw new AppError(409, 'Hora da venda no futuro (relógio do terminal)', 'DATA_INVALIDA');
-    if (modo === 'SYNC' && ocorrida.getTime() < caixa.abertoEm.getTime() - TOLERANCIA_RELOGIO_MS) {
-      throw new AppError(409, 'Venda anterior à abertura do caixa', 'DATA_INVALIDA');
-    }
-  }
+  // ----- hora: sempre a do servidor -----
+  const ocorrida = new Date();
   const diaVenda = localDate(ocorrida);
 
   // ----- itens -----
@@ -228,15 +213,51 @@ export async function processarVenda(tx: Tx, id: string, req: VendaRequest, op: 
     }
   }
   const total = subtotal - descVenda;
+  if (total <= 0) throw new AppError(400, 'Venda sem valor a pagar', 'VENDA_SEM_VALOR');
+
+  // ----- CPF da compra: validado pelos dígitos; o limite mensal (em reais) é conferido DENTRO da transação, com trava por CPF -----
+  const cfgCpf = await configCpf(tx);
+  let cpf: string | null = null;
+  if (req.cpf) {
+    cpf = normalizarCpf(req.cpf);
+    if (!cpf) throw new AppError(400, 'CPF inválido', 'CPF_INVALIDO');
+  } else if (cfgCpf.obrigatorio) {
+    throw new AppError(400, 'Informe o CPF: o Administrador marcou o CPF como obrigatório na venda', 'CPF_OBRIGATORIO');
+  }
+  if (cpf) {
+    await limparCpfsVencidos(tx);
+    // duas vendas do mesmo CPF ao mesmo tempo não podem passar juntas do limite
+    // (a função devolve void, que o Prisma não lê: por isso o SELECT 1 em volta)
+    await tx.$queryRaw`SELECT 1 AS travado FROM (SELECT pg_advisory_xact_lock(hashtext(${`cpf:${cpf}`}))) t`;
+    if (cfgCpf.limiteCents > 0) {
+      const comprado = await compradoNoMes(tx, cpf);
+      if (comprado + total > cfgCpf.limiteCents) {
+        throw new AppError(409, 'Limite de compras por CPF no mês excedido', 'LIMITE_CPF',
+          `Limite de R$ ${fromCents(cfgCpf.limiteCents)} por CPF no mês: já comprou R$ ${fromCents(comprado)}, saldo de R$ ${fromCents(Math.max(0, cfgCpf.limiteCents - comprado))}`);
+      }
+    }
+  }
 
   // ----- pagamentos (RN-15) -----
   const pags = req.pagamentos.map((p) => ({ forma: p.forma, valor: toCents(p.valor), recebido: p.valorRecebido ? toCents(p.valorRecebido) : null }));
   if (pags.some((p) => p.valor <= 0)) throw new AppError(400, 'Pagamento com valor zero', 'VALIDACAO');
   const pago = pags.reduce((s, p) => s + p.valor, 0);
   if (pago !== total) throw new AppError(409, 'Pagamentos não fecham com o total recalculado', 'PAGAMENTO_DIVERGENTE', `Total ${fromCents(total)}, pago ${fromCents(pago)}`);
+  // Valor recebido OBRIGATÓRIO em dinheiro, PIX e cartão (decisão do humano, 19/10/2026): o operador informa o que recebeu em cada forma.
+  //  - dinheiro: recebido >= valor devido nessa forma; a diferença é o troco;
+  //  - PIX e cartão: recebido = valor (não há troco);
+  //  - fiado: o valor é o que fica na conta do cliente e não tem valor recebido.
   for (const p of pags) {
-    if (p.recebido !== null && p.forma !== 'DINHEIRO') throw new AppError(400, 'Troco só existe para pagamento em dinheiro', 'TROCO_INVALIDO');
-    if (p.recebido !== null && p.recebido < p.valor) throw new AppError(400, 'Valor recebido menor que o valor em dinheiro', 'RECEBIDO_INSUFICIENTE');
+    if (p.forma === 'FIADO') {
+      if (p.recebido !== null) throw new AppError(400, 'Fiado não tem valor recebido: o valor é o que fica na conta do cliente', 'FIADO_COM_RECEBIDO');
+      continue;
+    }
+    if (p.recebido === null) throw new AppError(400, 'Informe o valor recebido em cada forma de pagamento', 'RECEBIDO_OBRIGATORIO');
+    if (p.forma === 'DINHEIRO') {
+      if (p.recebido < p.valor) throw new AppError(400, 'Valor recebido menor que o valor em dinheiro', 'RECEBIDO_INSUFICIENTE');
+    } else if (p.recebido !== p.valor) {
+      throw new AppError(400, 'PIX e cartão não têm troco: o valor recebido deve ser igual ao valor da forma', 'TROCO_INVALIDO');
+    }
   }
   const fiados = pags.filter((p) => p.forma === 'FIADO');
   if (fiados.length > 1) throw new AppError(400, 'Apenas uma parcela de fiado por venda', 'VALIDACAO');
@@ -261,13 +282,13 @@ export async function processarVenda(tx: Tx, id: string, req: VendaRequest, op: 
   // ----- gravação -----
   const venda = await tx.venda.create({
     data: {
-      id, numeroLocal: req.numeroLocal ?? null, terminalId: caixa.terminalId, sessaoId: caixa.id, clienteId,
-      origemRegistro: modo === 'ONLINE' ? 'ONLINE' : 'OFFLINE',
+      id, terminalId: caixa.terminalId, sessaoId: caixa.id, clienteId,
       subtotal: fromCents(subtotal), desconto: fromCents(descVenda), total: fromCents(total),
       registradaPorId: op.id, ocorridaEm: ocorrida,
     },
     select: { id: true, numero: true },
   });
+  if (cpf) await tx.vendaCpf.create({ data: { vendaId: venda.id, cpf } });
   // baixas em ordem de item_id (evita deadlock entre caixas)
   for (const l of [...linhas].sort((a, b) => a.itemId.localeCompare(b.itemId))) {
     const fiscal = resolverRegra(regras, l.itemId, l.categoriaId);
@@ -289,8 +310,9 @@ export async function processarVenda(tx: Tx, id: string, req: VendaRequest, op: 
     await tx.vendaPagamento.create({
       data: {
         vendaId: venda.id, forma: p.forma, valor: fromCents(p.valor),
-        valorRecebido: p.recebido !== null ? fromCents(p.recebido) : null,
-        troco: p.recebido !== null ? fromCents(p.recebido - p.valor) : '0.00',
+        // o banco só aceita valor recebido guardado para dinheiro (ck_pagamento_dinheiro); em PIX e cartão ele é igual ao valor
+        valorRecebido: p.forma === 'DINHEIRO' && p.recebido !== null ? fromCents(p.recebido) : null,
+        troco: p.forma === 'DINHEIRO' && p.recebido !== null ? fromCents(p.recebido - p.valor) : '0.00',
       },
     });
   }

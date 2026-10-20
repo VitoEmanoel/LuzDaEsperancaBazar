@@ -40,7 +40,7 @@ GRANT USAGE ON SCHEMA public TO bazar_api;
 GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO bazar_api;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO bazar_api;
 -- exclusão só nas tabelas técnicas (logout/limpeza, troca de permissões do perfil)
-GRANT DELETE ON sessao_usuario, idempotencia, perfil_permissao TO bazar_api;
+GRANT DELETE ON sessao_usuario, idempotencia, perfil_permissao, venda_cpf TO bazar_api; -- venda_cpf: o CPF é apagado todo mês
 -- saldo é derivado: a API só lê (quem escreve é o trigger SECURITY DEFINER)
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON saldo_estoque FROM bazar_api;
 -- dados fixos e trilha de auditoria: a API não altera
@@ -59,8 +59,9 @@ SELECT format('GRANT CONNECT ON DATABASE %I TO bazar_relatorio', current_databas
 SELECT 'GRANT USAGE ON SCHEMA public TO bazar_relatorio' WHERE :'senha_relatorio' <> '' \gexec
 SELECT 'GRANT SELECT ON ALL TABLES IN SCHEMA public TO bazar_relatorio' WHERE :'senha_relatorio' <> '' \gexec
 -- LGPD (RN-29): sem dados pessoais, credenciais nem tokens para o papel de leitura
-SELECT 'REVOKE SELECT ON cliente, consentimento, usuario, sessao_usuario, idempotencia, auditoria, pendencia_sincronizacao FROM bazar_relatorio'
+SELECT 'REVOKE SELECT ON cliente, consentimento, usuario, sessao_usuario, idempotencia, auditoria FROM bazar_relatorio'
  WHERE :'senha_relatorio' <> '' \gexec
+SELECT 'REVOKE SELECT ON venda_cpf FROM bazar_relatorio' WHERE :'senha_relatorio' <> '' \gexec
 SELECT 'GRANT SELECT (id, ativo, anonimizado_em, criado_em) ON cliente TO bazar_relatorio' WHERE :'senha_relatorio' <> '' \gexec
 SELECT 'GRANT SELECT (id, nome, perfil_id, ativo) ON usuario TO bazar_relatorio' WHERE :'senha_relatorio' <> '' \gexec
 SELECT 'REVOKE SELECT ON parceiro FROM bazar_relatorio' WHERE :'senha_relatorio' <> '' \gexec

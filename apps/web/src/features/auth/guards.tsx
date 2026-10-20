@@ -5,12 +5,10 @@ import type { Permissao } from '../../shared/api/types';
 
 /** Exige login. Troca de senha provisória é obrigatória antes de qualquer outra tela. */
 export function RequireAuth({ children }: { children: ReactNode }) {
-  const { me, carregando, saiu, modoOfflinePdv } = useAuth();
+  const { me, carregando, saiu } = useAuth();
   const loc = useLocation();
   if (carregando) return <div className="center-page">Carregando…</div>;
   if (!me) return <Navigate to="/login" replace state={saiu ? undefined : { from: loc.pathname }} />;
-  // Sessão local sem internet (ticket 9): só o PDV. Qualquer outra rota volta para /pdv.
-  if (modoOfflinePdv && loc.pathname !== '/pdv') return <Navigate to="/pdv" replace />;
   if (me.trocarSenha && loc.pathname !== '/trocar-senha') return <Navigate to="/trocar-senha" replace />;
   return <>{children}</>;
 }

@@ -8,7 +8,7 @@
 
 O Sistema de Bazar substitui o controle manual do bazar beneficente do **Centro Espírita e Obras Sociais Luz da Esperança** (Parnaíba – PI) por uma aplicação web única que junta:
 
-- **Ponto de venda (PDV)** que funciona mesmo sem internet;
+- **Ponto de venda (PDV)** web, que exige internet;
 - **entrada e triagem de doações**;
 - **dois estoques independentes**, Bazar (o que é vendido) e Doações (o que vai para a assistência social);
 - **controle de caixa** por terminal;
@@ -40,9 +40,10 @@ O MVP é hoje um **monolito single-tenant** (uma instituição por instalação:
 
 | Perfil | O que faz | Onde trabalha |
 |---|---|---|
-| **Administrador** | Tudo: cadastros, usuários, perfis, parâmetros, regra fiscal, relatórios, financeiro, cancelamentos, LGPD, auditoria | Backoffice |
-| **Caixa** | Abre/fecha caixa, vende, sangria/suprimento, cadastro rápido de cliente para fiado | PDV em tela cheia (entra direto nele) |
-| **Triagem** | Registra lotes de doação, aprova itens (com etiqueta) e descarta com motivo | Backoffice → Entradas |
+| **Administrador** | Tudo: cadastros, usuários, perfis, parâmetros, regra fiscal, relatórios, financeiro, cancelamentos, LGPD, auditoria, e abrir caixa (para pagar contas e receber fiado com o dinheiro da gaveta) | Backoffice |
+| **Vendedor** | Abre/fecha o próprio caixa, vende, sangria/suprimento, cadastro rápido de cliente para fiado | PDV em tela cheia (entra direto nele) |
+| **Estoquista** | Registra lotes de doação, cadastra itens (com etiqueta), transfere entre estoques, consulta estoque e relatórios de estoque | Backoffice → Entradas e Estoque |
+| **Financeiro** | Contas a pagar e a receber, resumo financeiro, relatórios, consulta de estoque | Backoffice → Financeiro |
 
 Os perfis são **compostos por 24 permissões** (ex.: `caixa.operar`, `estoque.transferir`, `relatorios.consultar`), e o administrador pode criar novos. O menu só esconde o que o usuário não usaria; **quem decide é sempre o servidor**.
 
@@ -53,7 +54,6 @@ Os perfis são **compostos por 24 permissões** (ex.: `caixa.operar`, `estoque.t
 | Camada | Tecnologia | Por quê |
 |---|---|---|
 | Front-end | **React 19 + TypeScript estrito + Vite 7**, React Router 7 | Interface rápida, tipagem forte ponta a ponta |
-| PDV offline | **PWA**: Service Worker próprio + **IndexedDB** | Vender sem internet e sincronizar depois |
 | Back-end | **Node.js ≥ 20.19 + Fastify 5 + TypeScript** | Desempenho e plugins maduros de segurança |
 | Validação | **Zod 4** | Toda entrada validada com lista branca de campos |
 | Banco | **PostgreSQL 16** (compatível 11+) | Regras críticas garantidas por triggers e CHECKs |
@@ -62,7 +62,7 @@ Os perfis são **compostos por 24 permissões** (ex.: `caixa.operar`, `estoque.t
 | Segurança HTTP | `@fastify/helmet`, `@fastify/cors`, `@fastify/rate-limit` | CSP/HSTS, CORS restrito, limite de tentativas |
 | Relatórios | `pdfkit` (PDF), `exceljs` (XLSX), CSV próprio | Exportação com proteção contra injeção de fórmula |
 | Upload | `@fastify/multipart` + `file-type` | Tipo real do arquivo por *magic bytes* |
-| Fontes | `@fontsource-variable/lora` e `/nunito` | Servidas pelo próprio app (offline + CSP `'self'`) |
+| Fontes | `@fontsource-variable/lora` e `/nunito` | Servidas pelo próprio app (CSP `'self'`, sem CDN) |
 | Monorepo | **npm workspaces** | Um `npm install`, scripts unificados |
 
 ---
@@ -77,7 +77,7 @@ BAZAR/
 │   │       ├── app/         rotas e layout (menu lateral)
 │   │       ├── features/    um módulo por domínio: auth, inicio, pdv, caixa, entradas,
 │   │       │                estoque, financeiro, relatorios, cadastros, admin
-│   │       ├── shared/      api (cliente HTTP, tipos), components, hooks, lib, offline
+│   │       ├── shared/      api (cliente HTTP, tipos), components, hooks, lib
 │   │       ├── styles/      tokens.css (brandbook) → base → components → layout → pdv → print
 │   │       └── mocks/       API simulada, só em desenvolvimento (fora do build)
 │   └── api/                 @bazar/api — API REST /api/v1
@@ -129,32 +129,34 @@ Tela cheia, pensada para leitor de código e tablet de 10".
 
 - **Leitura de código:** campo sempre focado; leitor USB funciona como teclado (Enter); feedback sonoro e visual.
 - **Venda por categoria:** botões com preço para itens comuns, com quantidade (F2).
-- **Atalhos:** F2 quantidade · F4 pagamento · Esc remove o último · F6 sangria/suprimento · F8 sincronizar.
-- **Pagamento** (F4): divide entre formas (dinheiro, PIX, débito, crédito, fiado), calcula troco (só em dinheiro — RN-15), desconto até o limite do perfil.
+- **Atalhos:** F2 quantidade · F4 pagamento · Esc remove o último · F6 sangria/suprimento.
+- **Pagamento** (F4): o operador **digita quanto recebeu em cada forma** (dinheiro, PIX, débito, crédito) e o sistema faz a conta: mostra o que falta e, em dinheiro, o **troco** (conta de R$ 20 paga com nota de R$ 100: troco de R$ 80). A venda só finaliza quando a soma cobre o total. PIX e cartão não aceitam receber mais do que falta. No fiado o valor digitado é o que fica na conta do cliente (RN-15). Desconto só até o limite do perfil (o Vendedor padrão não dá desconto).
+- **CPF na compra (S1B-17 a S1B-21):** no **primeiro bip** de cada venda o PDV pergunta "A compra é com CPF?" (**S**im / **N**ão). Em Sim, o vendedor digita o CPF (com máscara; o sistema confere os dígitos e não segue com CPF inválido) e vê o **saldo do CPF no mês**; o PDV bloqueia o que passar do saldo. O CPF aparece **inteiro** só no comprovante (nunca nas listas nem na auditoria), fica guardado na tabela `venda_cpf` até o fim do mês e **depois é apagado** (e o saldo zera). O CPF não fica guardado no aparelho. O **Administrador decide**, em Parâmetros, o **limite de compras por CPF no mês em reais** (0 = sem limite) e se o **CPF é obrigatório** (com ele obrigatório o "Não" não aparece e o servidor recusa venda sem CPF válido). Venda cancelada devolve o saldo. Duas vendas ao mesmo tempo do mesmo CPF não passam juntas do limite.
+- **Estoque no PDV:** o catálogo traz o saldo do Bazar por categoria; o botão mostra "N em estoque" e o sistema **bloqueia e avisa a quantidade** ao passar do que há (o servidor confere de novo ao gravar). Peça que está no estoque de Doações avisa que não pode ser vendida.
+- **Tirar do carrinho por quantidade:** o ✕ pergunta quantas unidades tirar (peça única sai inteira). Esc tira uma unidade da última linha, e só se o campo estiver vazio (com texto digitado, Esc só limpa o campo).
 - **Fiado:** exige cliente e vencimento; **cadastro rápido de cliente** com ciência do aviso de privacidade (LGPD); se o telefone já existe, pergunta "É a mesma pessoa?".
 - **Comprovante não fiscal** com nome, CNPJ e endereço da instituição (impressão 80 mm).
 - **O servidor recalcula tudo** (preço, subtotal, desconto, total, troco); a tela é só conferência.
 - **PEPS** na venda por categoria, com desempate fixo (RN-09). Dois caixas disputando a última peça: só um vende (testado).
 
-### 5.4 PDV offline (PWA)
+### 5.4 Sem modo offline
 
-1. **Sem internet a venda continua:** vai para o IndexedDB com número provisório (`OFF-XXXX-0001`) e entra na **fila**.
-2. **Na reconexão** (e a cada 30 s) a fila sobe em `POST /sync/lote`. O id da venda é a chave de idempotência: reenviar não duplica. Venda recusada (ex.: peça já vendida) vira **pendência de sincronização**, resolvida pelo administrador em `/sincronizacao` (RN-26).
-3. **F5 ou queda de energia sem internet:** o PDV reabre para o mesmo operador, desde que:
-   - só a tela do PDV fique liberada (permissão `caixa.operar` apenas);
-   - exista caixa aberto por esse operador naquele aparelho;
-   - o último login online esteja dentro de `pdv.max_horas_sem_sync` (padrão 8 h);
-   - nenhum token ou senha fica no aparelho, só um resumo do operador.
-4. **Ao reconectar**, o sistema confirma a sessão no servidor **antes** de sincronizar. Sessão revogada → nada sobe, pede novo login, e carrinho e fila ficam guardados.
-5. **Logout** bloqueado enquanto houver fila; depois apaga IndexedDB e caches. O Service Worker nunca guarda respostas da API.
+O sistema é **somente web** e exige internet (decisão de 19/10/2026, Sprint 1). Não há PWA, Service Worker, fila local
+nem sincronização. A venda é gravada direto no servidor, com o id gerado no cliente como chave de idempotência: se a
+resposta se perder e o operador repetir, a mesma venda é devolvida, sem duplicar. O aparelho guarda só o terminal fixo
+e o carrinho em andamento (sem dado pessoal, token ou senha), e o logout apaga isso. A hora da venda é sempre a do servidor.
+(A migração `0004_remove_offline` retirou a tabela de pendências, a permissão `sincronizacao.resolver` e o parâmetro `pdv.max_horas_sem_sync`.)
 
 ### 5.5 Controle de caixa
 
 **Fluxo:** abrir (terminal + fundo de troco) → vender / receber / sangria / suprimento → fechar (contado × esperado).
 
 - **Um caixa aberto por terminal e um por operador** (RN-12/13, garantido no banco).
-- **Sangria e suprimento** com motivo; sangria maior que o dinheiro em caixa é recusada.
-- **Fechamento** (RN-19): prévia com totais por forma e **dinheiro esperado** = fundo + vendas em dinheiro + fiado recebido em dinheiro + suprimentos − sangrias. O operador informa o contado; a diferença fica registrada com justificativa. Exige fila offline vazia.
+- **Sangria e suprimento** com motivo. A tela da sangria mostra o **dinheiro que há na gaveta agora** e bloqueia valor acima dele (o servidor também recusa, e duas sangrias simultâneas não passam juntas).
+- **Abertura** com saldo inicial (troco) obrigatório: o operador digita o valor (0 se não houver troco).
+- **Total do caixa** (fechamento parcial): no PDV, mostra o dinheiro da gaveta, as vendas por forma e tudo o que aconteceu desde a abertura, sem fechar o caixa, com PDF.
+- **Linha do tempo e PDF do fechamento:** ao fechar, o sistema mostra tudo o que aconteceu da abertura ao fechamento (cada venda com o recebido e o troco, cancelamentos, sangrias, suprimentos, fiado recebido) com o dinheiro da gaveta depois de cada evento, e gera o PDF do fechamento. O Vendedor vê só o próprio caixa; Administrador e Financeiro veem qualquer caixa.
+- **Fechamento** (RN-19): prévia com totais por forma e **dinheiro esperado** = fundo + vendas em dinheiro + fiado recebido em dinheiro + suprimentos − sangrias. O operador informa o contado; a diferença fica registrada com justificativa.
 - Fiado recebido em PIX ou cartão é gravado com a forma correta; só dinheiro entra no esperado da gaveta.
 
 ### 5.6 Financeiro
@@ -190,7 +192,7 @@ Categorias, parceiros, campanhas, motivos de descarte e de baixa, categorias de 
 ### 5.9 Administração, regra fiscal, auditoria e LGPD
 
 - **Usuários e perfis:** senha provisória exibida uma única vez e troca obrigatória no primeiro acesso; perfis compostos pelas 24 permissões.
-- **Terminais, parâmetros** (prazo do fiado, sessão, PDV offline…) e **dados da instituição** (aparecem no comprovante).
+- **Terminais, parâmetros** (prazo do fiado, sessão…) e **dados da instituição** (aparecem no comprovante).
 - **Regra fiscal versionada:** geral, por categoria ou por item; isento ou tributado, alíquota, fundamento legal e vigência. Nova regra encerra a anterior **sem alterar vendas passadas**: cada venda guarda cópia da regra usada (RN-17).
 - **Auditoria imutável** de ações sensíveis (cancelamentos, ajustes, estornos, exportações), **sem dados pessoais**.
 - **LGPD:** ciência do aviso de privacidade registrada; **exportação** dos dados do titular; **anonimização** irreversível (as vendas continuam nos relatórios sem identificar a pessoa); catálogo do PDV só leva clientes com fiado ativo ou recente; CPF de parceiro nunca volta inteiro da API.
@@ -242,7 +244,7 @@ As regras críticas são validadas **duas vezes**: na API e no banco (defesa em 
 - **Erros** no padrão RFC 9457 (`application/problem+json`), com `code` de negócio (ex.: `SALDO_INSUFICIENTE`), erros por campo e `requestId`; **nunca** stack trace.
 - **Toda rota declara a permissão exigida**; se alguma não declarar, a API não sobe (*fail secure*).
 - **Idempotência:** venda, transferência e recebimento usam UUID gerado no cliente; reenviar não duplica.
-- **Exemplos:** `PUT /vendas/:id`, `POST /sync/lote`, `GET /pdv/catalogo` (ETag), `POST /caixas`, `POST /caixas/:id/fechar`, `POST /lotes`, `POST /lotes/:id/itens`, `GET /relatorios/:tipo?formato=pdf|csv|xlsx`, `POST /titulares/:tipo/:id/anonimizar`.
+- **Exemplos:** `PUT /vendas/:id`, `GET /pdv/catalogo` (ETag), `POST /caixas`, `POST /caixas/:id/fechar`, `POST /lotes`, `POST /lotes/:id/itens`, `GET /relatorios/:tipo?formato=pdf|csv|xlsx`, `POST /titulares/:tipo/:id/anonimizar`.
 
 ---
 
@@ -280,12 +282,14 @@ Segue o brandbook da instituição (`docs/marca/`):
 
 | Bateria | Resultado atual |
 |---|---|
-| `tests/smoke.ts` (fluxos críticos e segurança) | 114 ok |
+| `tests/smoke.ts` (fluxos críticos e segurança) | 151 ok |
 | `tests/concorrencia.ts` (disputa da última peça, IDOR) | OK |
-| `tests/reteste-qa.ts` (regressão dos 12 tickets) | 37 ok |
+| `tests/reteste-qa.ts` (regressão dos 12 tickets) | 36 ok |
+| `tests/perfis.ts` (acesso de cada perfil, perfil personalizado, proteção dos perfis padrão) | 120 ok |
+| `tests/cpf.ts` (CPF: dígitos, limite em reais, obrigatório, só no comprovante, trava entre vendas, limpeza do mês) | 37 ok |
 | `database/04_testes_0003.sql` (tentativas de violar regras do banco) | 0 falha |
 | `database/07_manutencao_rotina.sql` (conferência de saldo e prestação de contas) | 0 divergência |
-| E2E no navegador (PWA offline, comprovante, cadastros, relatórios) | OK |
+| E2E no navegador (comprovante, cadastros, relatórios) | a refazer após a Sprint 1 |
 | Typecheck web + api e `npm audit` | 0 erros, 0 vulnerabilidades |
 
 Teste de volume (`05_carga_volume_teste.sql`): cerca de 5 anos simulados — 64 mil itens, 129 mil movimentações, 60 mil vendas.
@@ -308,7 +312,7 @@ psql -d bazar -v senha_api="..." -f database/03_seguranca_papeis.sql
 npm run dev:api                              # http://localhost:3000/api/v1
 
 # Testes, em banco de TESTE, nesta ordem:
-npm run test:smoke && npm run test:concorrencia && npm run test:reteste
+npm run test:smoke && npm run test:concorrencia && npm run test:reteste && npm run test:perfis && npm run test:cpf   # espere ~1 minuto entre as baterias: o login aceita 10 por minuto
 ```
 
 **Produção:** atrás de proxy com TLS (`TRUST_PROXY=true`), segredos vindos do cofre, pasta de uploads em volume com backup, `03_seguranca_papeis.sql` após cada deploy e `07_manutencao_rotina.sql` diariamente.
@@ -322,7 +326,6 @@ npm run test:smoke && npm run test:concorrencia && npm run test:reteste
 | Item | Situação |
 |---|---|
 | **Ticket 13 — CNPJ alfanumérico** (formato da Receita Federal a partir de julho/2026) | Recomendado antes do go-live; hoje um CNPJ com letras é recusado. Não bloqueia (documento é opcional) |
-| PIN local no PDV offline (terminal compartilhado) | Avaliar após o piloto |
 | RF-PDV-06 — desconto acima do limite com autorização | Depende da PA-08 |
 | RF-PDV-11 — devolução/troca | Depende da PA-14 |
 | Impressão térmica direta | Hoje usa a impressão do navegador (RNF-11) |

@@ -1,7 +1,7 @@
 # Sistema de Bazar — Luz da Esperança
 
 Gestão do bazar beneficente do **Centro Espírita e Obras Sociais Luz da Esperança** (Parnaíba, PI):
-PDV com operação offline (PWA), entrada e triagem de doações, estoque duplo Bazar ⇄ Doações, caixa,
+PDV (somente web, exige internet), entrada e triagem de doações, estoque duplo Bazar ⇄ Doações, caixa,
 financeiro, relatórios de prestação de contas por parceiro/campanha, auditoria e LGPD.
 
 Monolito **React 19 + Vite** (web) · **Fastify 5 + Prisma 7 + PostgreSQL** (API) · TypeScript estrito nos dois.
@@ -48,7 +48,7 @@ cp apps/web/.env.example apps/web/.env.local   # já vem com VITE_USE_MOCK=true
 npm run dev:web                                # http://localhost:5173
 ```
 
-Usuários de teste (só existem neste modo): `admin` / `Admin@123`, `caixa` / `Caixa@123`, `triagem` / `Triagem@123`.
+Usuários de teste (só existem neste modo): `admin` / `Admin@123`, `vendedor` / `Vendedor@123`, `estoquista` / `Estoquista@123`, `financeiro` / `Financeiro@123`.
 Os dados ficam na memória da aba: o F5 zera tudo e não dá para usar em mais de um aparelho.
 
 ### Opção B — sistema completo (API + banco)
@@ -75,7 +75,7 @@ npm run dev:web                                # http://localhost:5173         (
 ```
 
 No primeiro login o sistema pede a troca da senha. Depois, em **Administração**: crie um **terminal** para cada
-aparelho de caixa e os **usuários** (Caixa, Triagem) — cada pessoa com o seu login.
+aparelho de caixa e os **usuários** (Vendedor, Estoquista, Financeiro ou um perfil criado por você) — cada pessoa com o seu login. O Administrador não opera o PDV.
 
 ### Problemas comuns
 
@@ -97,7 +97,7 @@ aparelho de caixa e os **usuários** (Caixa, Triagem) — cada pessoa com o seu 
 | `npm run typecheck` | `tsc` nos dois workspaces |
 | `npm run audit` | `npm audit --audit-level=high` em todas as dependências |
 | `npm run db:deploy` / `db:seed` | migrações Prisma e carga inicial |
-| `npm run test:smoke` / `test:concorrencia` / `test:reteste` | testes ponta a ponta da API (banco de teste); `test:reteste` cobre os tickets do QA |
+| `npm run test:smoke` / `test:concorrencia` / `test:reteste` / `test:perfis` | testes ponta a ponta da API (banco de teste); `test:reteste` cobre os tickets do QA; `test:perfis` confere o acesso de cada perfil. O login aceita 10 tentativas por minuto: espere um minuto entre as baterias |
 
 Detalhes de cada parte: [`apps/web/README.md`](apps/web/README.md), [`apps/api/README.md`](apps/api/README.md),
 [`database/README.md`](database/README.md). Identidade visual: [`docs/marca/identidade-visual.md`](docs/marca/identidade-visual.md).
@@ -107,5 +107,5 @@ Detalhes de cada parte: [`apps/web/README.md`](apps/web/README.md), [`apps/api/R
 - Segredos só por variável de ambiente (Azure Key Vault / Google Secret Manager em produção); `.env*` fora do Git.
 - JWT com algoritmo fixado, `exp`, `iss`/`aud`; refresh em cookie `HttpOnly; Secure; SameSite=Strict` com rotação.
 - AuthZ por permissão em todas as rotas no servidor (o front só esconde menus); papel de banco sem `DELETE`.
-- PDV offline guarda só o mínimo no IndexedDB, nunca token ou senha; logout apaga dados locais e caches.
+- O aparelho guarda só o terminal fixo e o carrinho em andamento (sem dado pessoal, token ou senha); logout apaga isso.
 - Fontes e assets servidos pelo próprio app (CSP `'self'`, sem CDN).

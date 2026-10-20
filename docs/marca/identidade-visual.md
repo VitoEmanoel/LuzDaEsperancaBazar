@@ -53,7 +53,7 @@ Os cinco aparecem juntos só na marca (flor e pontos), como na capa do brandbook
 | Corpo | **Nunito** (sans humanista) | todo o resto, inclusive números (`tabular-nums`) |
 | Comprovante | monoespaçada do sistema | impressão 80 mm |
 
-As fontes são servidas pelo próprio app (`@fontsource-variable/lora` e `/nunito`): funcionam offline no PDV e
+As fontes são servidas pelo próprio app (`@fontsource-variable/lora` e `/nunito`): funcionam sem depender de servidor externo e
 respeitam a CSP `default-src 'self'` — não usar Google Fonts por CDN.
 Fonte manuscrita (Patrick Hand/Caveat) **não** se aplica: o sistema é peça institucional.
 

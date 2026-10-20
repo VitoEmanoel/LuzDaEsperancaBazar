@@ -12,10 +12,11 @@
 import type { Transport, TransportRequest, TransportResponse } from '../shared/api/http';
 import type {
   CatalogoPdv, ContaReceber, FormaPagamento, HistoricoEvento, ItemEstoque, LocalEstoque, Me, Permissao,
-  ProblemDetails, RelatorioResposta, SyncLoteRequest, Venda, VendaRequest,
+  ProblemDetails, RelatorioResposta, Venda, VendaRequest,
 } from '../shared/api/types';
 import { PERMISSOES } from '../shared/api/types';
 import { fromCents, toCents } from '../shared/lib/money';
+import { cpfValido, soDigitos } from '../shared/lib/cpf';
 import { db, FORMAS, type CaixaDb, type ItemDb, type UsuarioDb, type VendaDb } from './db';
 
 // ---------------- infraestrutura ----------------
@@ -402,11 +403,13 @@ rota('POST', '/carga-inicial', ['estoque.ajustar'], ({ body }) => {
 rota('GET', '/pdv/catalogo', ['caixa.operar'], ({ headers }) => {
   const cat: CatalogoPdv = {
     versao: '',
-    categorias: db.categorias.filter((c) => c.ativo && c.vendaPorCategoria),
+    categorias: db.categorias.filter((c) => c.ativo && c.vendaPorCategoria).map((c) => ({
+      ...c, saldoBazar: db.itens.filter((i) => i.controle === 'CATEGORIA' && i.categoriaId === c.id).reduce((s, i) => s + i.saldo.BAZAR, 0),
+    })),
     itensEtiquetados: db.itens.filter((i) => i.controle === 'ETIQUETADO' && i.saldo.BAZAR > 0).map((i) => ({ itemId: i.id, codigo: i.codigo!, descricao: i.descricao, preco: fromCents(i.preco) })),
     clientesFiado: db.clientes.filter((c) => c.ativo && !c.anonimizado).map((c) => ({ id: c.id, nome: c.nome, telefone: c.telefone })),
     regrasFiscais: db.regrasFiscais.filter((r) => !r.vigenciaFim),
-    pdvMaxHorasSemSync: Number(db.parametros.find((p) => p.chave === 'pdv.max_horas_sem_sync')?.valor ?? 8),
+    cpfObrigatorio: cpfConfig().obrigatorio, cpfLimiteMensal: cpfConfig().limiteCents / 100,
   };
   const etag = `"${hash(JSON.stringify(cat))}"`;
   if (headers['if-none-match'] === etag) return { status: 304, headers: { etag }, body: null };
@@ -415,14 +418,12 @@ rota('GET', '/pdv/catalogo', ['caixa.operar'], ({ headers }) => {
 function hash(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return (h >>> 0).toString(16); }
 
 /** Regra da venda (o servidor real faz isso numa transação única conferida no COMMIT). */
-function processarVenda(id: string, req: VendaRequest, user: UsuarioDb, opts: { relaxarCaixa?: boolean } = {}): VendaDb {
+function processarVenda(id: string, req: VendaRequest, user: UsuarioDb): VendaDb {
   const existente = db.vendas.find((v) => v.id === id); if (existente) return existente; // idempotência
   const caixa = db.caixas.find((c) => c.id === req.caixaId);
   if (!caixa) falha(404, 'Caixa não encontrado', 'CAIXA_INEXISTENTE');
-  if (!opts.relaxarCaixa) {
-    if (caixa!.operadorId !== user.id || caixa!.terminalId !== req.terminalId) falha(403, 'Caixa não pertence a esta sessão', 'CAIXA_DE_OUTRO_OPERADOR'); // anti-IDOR
-    if (caixa!.status !== 'ABERTO') falha(409, 'Caixa fechado', 'CAIXA_FECHADO');
-  }
+  if (caixa!.operadorId !== user.id || caixa!.terminalId !== req.terminalId) falha(403, 'Caixa não pertence a esta sessão', 'CAIXA_DE_OUTRO_OPERADOR'); // anti-IDOR
+  if (caixa!.status !== 'ABERTO') falha(409, 'Caixa fechado', 'CAIXA_FECHADO');
   if (!req.itens?.length) falha(400, 'Venda sem itens', 'VENDA_VAZIA');
   // Snapshot para desfazer se algo falhar (simula ROLLBACK).
   const snap = db.itens.map((i) => ({ i, s: { ...i.saldo } })); const movLen = db.movs.length;
@@ -457,17 +458,30 @@ function processarVenda(id: string, req: VendaRequest, user: UsuarioDb, opts: { 
     if (desconto < 0 || desconto > subtotal) falha(400, 'Desconto inválido', 'DESCONTO_INVALIDO');
     if (subtotal && (desconto * 10000) / subtotal > limite) falha(409, 'Desconto acima do limite do perfil', 'DESCONTO_ACIMA_LIMITE');
     const total = subtotal - desconto;
+    // CPF da compra: validado pelos dígitos; o Admin decide se é obrigatório e qual o limite mensal em reais
+    const cfgCpf = cpfConfig();
+    let cpf: string | undefined;
+    if (req.cpf) { const d = soDigitos(req.cpf); if (!cpfValido(d)) falha(400, 'CPF inválido', 'CPF_INVALIDO'); cpf = d; }
+    else if (cfgCpf.obrigatorio) falha(400, 'Informe o CPF: o Administrador marcou o CPF como obrigatório na venda', 'CPF_OBRIGATORIO');
+    if (cpf && cfgCpf.limiteCents > 0 && compradoCpf(cpf) + total > cfgCpf.limiteCents) {
+      falha(409, 'Limite de compras por CPF no mês excedido', 'LIMITE_CPF', `Limite de R$ ${fromCents(cfgCpf.limiteCents)} por CPF no mês: já comprou R$ ${fromCents(compradoCpf(cpf))}`);
+    }
     const pagos = req.pagamentos.reduce((s, p) => s + toCents(p.valor), 0);
     if (pagos !== total) falha(409, 'Pagamentos não fecham com o total recalculado', 'PAGAMENTO_DIVERGENTE', `Total ${fromCents(total)}, pago ${fromCents(pagos)}`);
+    // Valor recebido obrigatório em dinheiro, PIX e cartão; troco só em dinheiro; fiado não tem valor recebido.
     let troco = 0;
     for (const p of req.pagamentos) {
-      if (p.forma === 'DINHEIRO' && p.valorRecebido) { const r = toCents(p.valorRecebido); if (r < toCents(p.valor)) falha(400, 'Valor recebido menor que o pago em dinheiro'); troco += r - toCents(p.valor); }
+      if (p.forma === 'FIADO') { if (p.valorRecebido) falha(400, 'Fiado não tem valor recebido: o valor é o que fica na conta do cliente', 'FIADO_COM_RECEBIDO'); continue; }
+      if (!p.valorRecebido) falha(400, 'Informe o valor recebido em cada forma de pagamento', 'RECEBIDO_OBRIGATORIO');
+      const r = toCents(p.valorRecebido), v = toCents(p.valor);
+      if (p.forma === 'DINHEIRO') { if (r < v) falha(400, 'Valor recebido menor que o valor em dinheiro', 'RECEBIDO_INSUFICIENTE'); troco += r - v; }
+      else if (r !== v) falha(400, 'PIX e cartão não têm troco: o valor recebido deve ser igual ao valor da forma', 'TROCO_INVALIDO');
     }
     const fiado = req.pagamentos.find((p) => p.forma === 'FIADO');
     const cliente = db.clientes.find((c) => c.id === req.clienteId);
     if (fiado && (!cliente || !req.vencimentoFiado)) falha(400, 'Fiado exige cliente e vencimento', 'FIADO_SEM_CLIENTE');
     const v: VendaDb = {
-      id, numero: ++db.seq.venda, numeroLocal: req.numeroLocal, ocorridaEm: req.ocorridaEm, origem: req.origem, status: 'CONCLUIDA',
+      id, numero: ++db.seq.venda, ...(cpf ? { cpf } : {}), ocorridaEm: now(), status: 'CONCLUIDA',
       subtotal: fromCents(subtotal), desconto: fromCents(desconto), total: fromCents(total), troco: fromCents(troco), itens: linhas, pagamentos: req.pagamentos,
       operadorNome: user.nome, clienteNome: cliente?.nome, clienteId: cliente?.id, vencimentoFiado: req.vencimentoFiado,
       caixaId: req.caixaId, terminalId: req.terminalId, operadorId: user.id, alocacoes,
@@ -479,41 +493,32 @@ function processarVenda(id: string, req: VendaRequest, user: UsuarioDb, opts: { 
     snap.forEach(({ i, s }) => { i.saldo = s; }); db.movs.length = movLen; throw e;
   }
 }
+/** Opções do Administrador sobre o CPF (Parâmetros). */
+function cpfConfig() {
+  const num = (k: string) => Number(db.parametros.find((p) => p.chave === k)?.valor ?? 0) || 0;
+  return { limiteCents: Math.round(num('cpf.limite_mensal') * 100), obrigatorio: num('cpf.obrigatorio') === 1 };
+}
+/** O que o CPF já comprou neste mês (venda cancelada devolve o saldo). */
+const compradoCpf = (cpf: string) => db.vendas.filter((v) => v.cpf === cpf && v.status === 'CONCLUIDA' && v.ocorridaEm.slice(0, 7) === now().slice(0, 7)).reduce((s, v) => s + toCents(v.total), 0);
+/** O CPF só sai no comprovante e na resposta da venda, nunca nas listas. */
+const semCpf = ({ cpf: _cpf, ...v }: Venda): Venda => v;
 const vendaDto = ({ caixaId: _c, terminalId: _t, operadorId: _o, alocacoes: _a, clienteId: _cl, ...v }: VendaDb): Venda => v;
 rota('PUT', '/vendas/:id', ['caixa.operar'], ({ user, params, body }) => {
-  exigir(body?.caixaId && body?.terminalId && body?.ocorridaEm, 'caixaId/terminalId/ocorridaEm');
+  exigir(body?.caixaId && body?.terminalId, 'caixaId/terminalId');
   const ja = db.vendas.some((v) => v.id === params.id);
   const v = processarVenda(params.id!, body, user);
   return ok(vendaDto(v), ja ? 200 : 201);
 });
-rota('POST', '/sync/lote', ['caixa.operar'], ({ user, body }) => {
-  const b = body as SyncLoteRequest; const resultados: any[] = [];
-  for (const c of b.clientes ?? []) {
-    if (!db.clientes.some((x) => x.id === c.id)) db.clientes.push({ ...c, ativo: true });
-    resultados.push({ id: c.id, tipo: 'cliente', status: 'GRAVADA' });
-  }
-  for (const v of [...(b.vendas ?? [])].sort((a, b) => a.ocorridaEm.localeCompare(b.ocorridaEm))) {
-    if (db.vendas.some((x) => x.id === v.id)) { resultados.push({ id: v.id, tipo: 'venda', status: 'JA_EXISTENTE', numero: db.vendas.find((x) => x.id === v.id)!.numero }); continue; }
-    try {
-      const r = processarVenda(v.id, v, user, { relaxarCaixa: true });
-      resultados.push({ id: v.id, tipo: 'venda', status: 'GRAVADA', numero: r.numero });
-    } catch (e) {
-      if (!(e instanceof Falha)) throw e;
-      const p = e.r.body as ProblemDetails;
-      if (!db.pendencias.some((x) => x.vendaId === v.id)) {
-        // RN-26: venda recusada é PRESERVADA como pendência para o Admin resolver.
-        const total = v.pagamentos.reduce((s, x) => s + toCents(x.valor), 0);
-        db.pendencias.push({ id: uid(), vendaId: v.id, numeroLocal: v.numeroLocal, terminalNome: db.terminais.find((t) => t.id === v.terminalId)?.nome ?? '—', operadorNome: user.nome, operadorId: user.id, ocorridaEm: v.ocorridaEm, total: fromCents(total), codigo: p.code ?? 'ERRO', motivo: p.detail ?? p.title, status: 'ABERTA', req: v });
-      }
-      resultados.push({ id: v.id, tipo: 'venda', status: 'PENDENCIA', motivo: p.detail ?? p.title });
-    }
-  }
-  return ok({ resultados });
+rota('POST', '/pdv/cpf/saldo', ['caixa.operar'], ({ body }) => {
+  const d = soDigitos(String(body?.cpf ?? ''));
+  if (!cpfValido(d)) return problem(400, 'CPF inválido', 'CPF_INVALIDO');
+  const cfg = cpfConfig(); const comprado = compradoCpf(d);
+  return ok({ cpf: d, limite: cfg.limiteCents > 0 ? fromCents(cfg.limiteCents) : null, comprado: fromCents(comprado), saldo: cfg.limiteCents > 0 ? fromCents(Math.max(0, cfg.limiteCents - comprado)) : null, obrigatorio: cfg.obrigatorio });
 });
 rota('GET', '/vendas', ['caixa.operar', 'venda.cancelar'], ({ user, query }) => {
   const admin = perfilDe(user).permissoes.includes('venda.cancelar');
   return ok(paginar(db.vendas.filter((v) => (admin || v.operadorId === user.id) && noPeriodo(v.ocorridaEm, query) && (!query.get('caixaId') || v.caixaId === query.get('caixaId')))
-    .sort((a, b) => b.ocorridaEm.localeCompare(a.ocorridaEm)).map(vendaDto), query));
+    .sort((a, b) => b.ocorridaEm.localeCompare(a.ocorridaEm)).map((v) => semCpf(vendaDto(v))), query));
 });
 rota('GET', '/vendas/:id/comprovante', ['caixa.operar'], ({ params }) => { const v = db.vendas.find((x) => x.id === params.id); return v ? ok(vendaDto(v)) : problem(404, 'Venda não encontrada'); });
 rota('POST', '/vendas/:id/cancelar', ['venda.cancelar'], ({ user, params, body }) => {
@@ -523,29 +528,14 @@ rota('POST', '/vendas/:id/cancelar', ['venda.cancelar'], ({ user, params, body }
   v.alocacoes.forEach((a) => mover(db.itens.find((i) => i.id === a.itemId)!, 'BAZAR', a.quantidade, 'ESTORNO_VENDA', user.nome, `Estorno da venda ${v.numero}`));
   v.status = 'CANCELADA';
   const dinheiro = v.pagamentos.filter((p) => p.forma === 'DINHEIRO').reduce((s, p) => s + toCents(p.valor), 0);
-  const cx = db.caixas.find((c) => c.status === 'ABERTO' && c.operadorId === user.id);
-  if (dinheiro && cx) cx.lancamentos.push({ id: uid(), tipo: 'SANGRIA', valor: dinheiro, motivo: `Reembolso venda ${v.numero}`, em: now() });
+  // Caixa já fechado: o reembolso em dinheiro vira uma saída paga no financeiro (o Administrador não opera caixa).
+  if (dinheiro && db.caixas.find((c) => c.id === v.caixaId)?.status === 'FECHADO') {
+    const cat = db.categoriasDespesa.find((c) => c.nome === 'Reembolso de venda')!;
+    db.contasPagar.push({ id: uid(), descricao: `Reembolso da venda nº ${v.numero}`, categoriaDespesaId: cat.id, categoriaDespesaNome: cat.nome, valor: fromCents(dinheiro), vencimento: now().slice(0, 10), status: 'PAGA', pagaEm: now(), saiuDoCaixa: false, formaPagamento: 'DINHEIRO' });
+  }
   db.contasReceber.filter((c) => c.vendaNumero === v.numero).forEach((c) => { c.status = 'CANCELADA'; c.saldo = '0.00'; });
   auditar(user, 'VENDA_CANCELADA', 'venda', v.id); return ok(vendaDto(v));
 });
-rota('GET', '/pendencias', ['sincronizacao.resolver'], ({ query }) => ok(paginar(db.pendencias.filter((p) => !query.get('status') || p.status === query.get('status')).map(({ req: _r, operadorId: _o, ...p }) => p), query)));
-rota('POST', '/pendencias/:id/reprocessar', ['sincronizacao.resolver'], ({ user, params }) => {
-  const p = db.pendencias.find((x) => x.id === params.id); if (!p) return problem(404, 'Pendência não encontrada');
-  if (p.status !== 'ABERTA') return problem(409, 'Pendência já resolvida', 'PENDENCIA_RESOLVIDA');
-  const operador = db.usuarios.find((u) => u.id === p.operadorId)!;
-  try { processarVenda(p.vendaId, p.req, operador, { relaxarCaixa: true }); } catch (e) {
-    if (e instanceof Falha) { const pd = e.r.body as ProblemDetails; p.motivo = pd.detail ?? pd.title; p.codigo = pd.code ?? p.codigo; return e.r; } throw e;
-  }
-  p.status = 'REPROCESSADA'; auditar(user, 'PENDENCIA_REPROCESSADA', 'pendencia', p.id);
-  const { req: _r, operadorId: _o, ...dto } = p; return ok(dto);
-});
-rota('POST', '/pendencias/:id/descartar', ['sincronizacao.resolver'], ({ user, params, body }) => {
-  const p = db.pendencias.find((x) => x.id === params.id); if (!p) return problem(404, 'Pendência não encontrada');
-  exigir(String(body?.justificativa ?? '').trim().length >= 5, 'justificativa');
-  p.status = 'DESCARTADA'; auditar(user, 'PENDENCIA_DESCARTADA', 'pendencia', p.id);
-  const { req: _r, operadorId: _o, ...dto } = p; return ok(dto);
-});
-
 // ---------------- CXA ----------------
 // GET /terminais também liberado para caixa.operar (escolha na abertura) — DIVERGÊNCIA a validar com o back-end.
 rota('GET', '/terminais', ['terminais.gerenciar', 'caixa.operar'], ({ query }) => ok(db.terminais.filter((t) => query.get('ativo') === null || String(t.ativo) === query.get('ativo'))));
@@ -580,8 +570,38 @@ function previa(c: CaixaDb) {
   const sang = c.lancamentos.filter((l) => l.tipo === 'SANGRIA').reduce((s, l) => s + l.valor, 0);
   const sup = c.lancamentos.filter((l) => l.tipo === 'SUPRIMENTO').reduce((s, l) => s + l.valor, 0);
   const esperado = toCents(c.fundoTroco) + porForma.DINHEIRO + receb + sup - sang;
-  return { fundoTroco: c.fundoTroco, suprimentos: fromCents(sup), sangrias: fromCents(sang), totaisPorForma: Object.fromEntries(FORMAS.map((f) => [f, fromCents(porForma[f])])) as Record<FormaPagamento, string>, esperadoDinheiro: fromCents(esperado), quantidadeVendas: vendas.length, filaPendente: 0 };
+  return { fundoTroco: c.fundoTroco, suprimentos: fromCents(sup), sangrias: fromCents(sang), totaisPorForma: Object.fromEntries(FORMAS.map((f) => [f, fromCents(porForma[f])])) as Record<FormaPagamento, string>, esperadoDinheiro: fromCents(esperado), quantidadeVendas: vendas.length };
 }
+/** Caixa do próprio operador ou, para quem vê relatórios, qualquer caixa. */
+function caixaVisivel(user: UsuarioDb, id: string) {
+  const c = db.caixas.find((x) => x.id === id); if (!c) falha(404, 'Caixa não encontrado');
+  if (c!.operadorId !== user.id && !perfilDe(user).permissoes.includes('relatorios.consultar')) falha(403, 'Caixa não pertence a esta sessão', 'CAIXA_DE_OUTRO_OPERADOR');
+  return c!;
+}
+/** Tudo o que aconteceu no caixa, em ordem, com o dinheiro da gaveta depois de cada evento. */
+function linhaDoTempo(c: CaixaDb) {
+  type Ev = { em: string; tipo: string; descricao: string; valor: string; cents: number };
+  const ev: Ev[] = [{ em: c.abertoEm, tipo: 'ABERTURA', descricao: 'Abertura do caixa (fundo de troco)', valor: c.fundoTroco, cents: toCents(c.fundoTroco) }];
+  for (const v of db.vendas.filter((x) => x.caixaId === c.id)) {
+    const din = v.pagamentos.filter((p) => p.forma === 'DINHEIRO').reduce((s, p) => s + toCents(p.valor), 0);
+    const formas = v.pagamentos.map((p) => `${p.forma.toLowerCase()} ${p.valor}${p.forma === 'DINHEIRO' && p.valorRecebido ? ` (recebido ${p.valorRecebido}${toCents(v.troco) ? `, troco ${v.troco}` : ''})` : ''}`).join(' + ');
+    ev.push({ em: v.ocorridaEm, tipo: 'VENDA', descricao: `Venda nº ${v.numero}${v.clienteNome ? ` · ${v.clienteNome}` : ''} · ${formas}`, valor: v.total, cents: din });
+    if (v.status === 'CANCELADA') ev.push({ em: v.ocorridaEm, tipo: 'VENDA_CANCELADA', descricao: `Venda nº ${v.numero} cancelada`, valor: v.total, cents: -din });
+  }
+  for (const l of c.lancamentos) ev.push({ em: l.em, tipo: l.tipo, descricao: `${l.tipo === 'SANGRIA' ? 'Sangria' : 'Suprimento'}: ${l.motivo}`, valor: fromCents(l.valor), cents: l.tipo === 'SANGRIA' ? -l.valor : l.valor });
+  ev.sort((a, b) => a.em.localeCompare(b.em));
+  let gaveta = 0;
+  const eventos = ev.map(({ em, cents, ...e }) => { gaveta += cents; return { quando: em, efeitoDinheiro: fromCents(cents), gavetaApos: fromCents(gaveta), ...e }; });
+  if (c.status === 'FECHADO' && c.fechadoEm) eventos.push({ quando: c.fechadoEm, tipo: 'FECHAMENTO', descricao: `Fechamento do caixa (esperado ${c.esperado}, diferença ${c.diferenca})`, valor: c.contado ?? '0.00', efeitoDinheiro: '0.00', gavetaApos: c.contado ?? '0.00' });
+  return { gavetaAgora: fromCents(gaveta), eventos };
+}
+rota('GET', '/caixas/:id/linha-do-tempo', ['caixa.operar', 'relatorios.consultar'], ({ user, params }) => ok(linhaDoTempo(caixaVisivel(user, params.id!))));
+rota('GET', '/caixas/:id/fechamento.pdf', ['caixa.operar', 'relatorios.consultar'], ({ user, params }) => {
+  caixaVisivel(user, params.id!);
+  // Demonstração: um PDF mínimo. O sistema real gera o PDF completo no servidor.
+  const pdf = '%PDF-1.1\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 320 120]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n4 0 obj<</Length 60>>stream\nBT /F1 12 Tf 20 60 Td (Demonstracao: o PDF real vem do servidor) Tj ET\nendstream endobj\n5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\ntrailer<</Root 1 0 R/Size 6>>\n%%EOF';
+  return { status: 200, headers: { 'content-type': 'application/pdf' }, body: new Blob([pdf], { type: 'application/pdf' }) };
+});
 rota('GET', '/caixas/:id/previa-fechamento', ['caixa.operar'], ({ user, params }) => ok(previa(meuCaixa(user, params.id!))));
 rota('POST', '/caixas/:id/fechar', ['caixa.operar'], ({ user, params, body }) => {
   const c = meuCaixa(user, params.id!); const contado = toCents(body?.contado ?? '-1'); exigir(contado >= 0, 'contado');
@@ -739,7 +759,8 @@ function relatorio(tipo: string, q: URLSearchParams): RelatorioResposta {
     default: return falha(404, 'Relatório inexistente');
   }
 }
-rota('GET', '/relatorios/:tipo', ['relatorios.consultar'], ({ params, query }) => {
+rota('GET', '/relatorios/:tipo', ['relatorios.consultar', 'relatorios.estoque'], ({ user, params, query }) => {
+  if (!['estoque', 'descartes', 'transferencias'].includes(params.tipo!) && !perfilDe(user).permissoes.includes('relatorios.consultar')) return problem(403, 'Você não tem permissão para esta ação', 'SEM_PERMISSAO');
   const r = relatorio(params.tipo!, query); const fmt = query.get('formato') ?? 'json';
   if (fmt === 'json') return ok(r);
   const secao = (x: typeof r) => [x.colunas.map((c) => c.rotulo).join(';'), ...x.linhas.map((l) => x.colunas.map((c) => `"${String(l[c.chave] ?? '').replace(/"/g, '""')}"`).join(';'))];

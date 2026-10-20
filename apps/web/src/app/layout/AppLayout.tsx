@@ -7,15 +7,15 @@ import { useState } from 'react';
 import { useAuth } from '../../features/auth/AuthContext';
 import type { Permissao } from '../../shared/api/types';
 import { useToast } from '../../shared/components/Toast';
-import { useOnline } from '../../shared/offline/hooks';
 import { BrandMark } from '../../shared/components/BrandMark';
 
-interface ItemMenu { to: string; rotulo: string; perms: Permissao[] }
+/** `escondeSe`: o item some quando o usuário tem essa permissão (evita dois links para a mesma área). */
+interface ItemMenu { to: string; rotulo: string; perms: Permissao[]; escondeSe?: Permissao }
 /** `cor`: acento do brandbook que identifica a área (slide 09 — uma cor por frente). */
 const MENU: { grupo: string; cor: 'coral' | 'laranja' | 'sol' | 'ceu' | 'roxo'; itens: ItemMenu[] }[] = [
   { grupo: 'Operação', cor: 'coral', itens: [
     { to: '/pdv', rotulo: 'PDV — Vender', perms: ['caixa.operar'] },
-    { to: '/vendas', rotulo: 'Vendas', perms: ['caixa.operar', 'venda.cancelar'] },
+    { to: '/vendas', rotulo: 'Vendas', perms: ['venda.cancelar'] },
   ] },
   { grupo: 'Entradas e estoque', cor: 'laranja', itens: [
     { to: '/entradas', rotulo: 'Lotes de entrada', perms: ['entrada.registrar'] },
@@ -30,8 +30,8 @@ const MENU: { grupo: string; cor: 'coral' | 'laranja' | 'sol' | 'ceu' | 'roxo'; 
   ] },
   { grupo: 'Gestão', cor: 'ceu', itens: [
     { to: '/relatorios/prestacao-contas', rotulo: 'Relatórios', perms: ['relatorios.consultar'] },
-    { to: '/sincronizacao', rotulo: 'Pendências de sincronização', perms: ['sincronizacao.resolver'] },
-    { to: '/cadastros/categorias', rotulo: 'Cadastros', perms: ['cadastros.gerenciar', 'cadastros.consultar', 'clientes.gerenciar'] },
+    { to: '/relatorios/estoque', rotulo: 'Relatórios de estoque', perms: ['relatorios.estoque'], escondeSe: 'relatorios.consultar' },
+    { to: '/cadastros/categorias', rotulo: 'Cadastros', perms: ['cadastros.gerenciar', 'cadastros.consultar'] },
     { to: '/admin', rotulo: 'Administração', perms: ['usuarios.gerenciar', 'perfis.gerenciar', 'parametros.gerenciar', 'auditoria.consultar', 'terminais.gerenciar', 'privacidade.gerenciar', 'fiscal.gerenciar'] },
   ] },
 ];
@@ -46,7 +46,6 @@ export function AppLayout() {
   const { me, can, logout } = useAuth();
   const toast = useToast();
   const nav = useNavigate();
-  const online = useOnline();
   const [menuAberto, setMenuAberto] = useState(false);
 
   async function sair() {
@@ -62,7 +61,7 @@ export function AppLayout() {
         <nav aria-label="Menu principal" onClick={() => setMenuAberto(false)}>
           <NavLink to="/" end className="nav-item">Início</NavLink>
           {MENU.map((g) => {
-            const itens = g.itens.filter((i) => can(...i.perms));
+            const itens = g.itens.filter((i) => can(...i.perms) && !(i.escondeSe && can(i.escondeSe)));
             if (!itens.length) return null;
             return (
               <div key={g.grupo} className="nav-group" data-cor={g.cor}>
@@ -77,7 +76,6 @@ export function AppLayout() {
       <div className="main">
         <header className="topbar">
           <button className="btn btn-ghost menu-toggle" onClick={() => setMenuAberto((v) => !v)} aria-label="Abrir menu">☰</button>
-          {!online && <span className="badge badge-erro">Sem conexão — o Backoffice exige internet</span>}
           <div className="spacer" />
           <span className="user">{me?.nome}<small>{me?.perfil.nome}</small></span>
           <span className="avatar" aria-hidden="true">{iniciais(me?.nome)}</span>

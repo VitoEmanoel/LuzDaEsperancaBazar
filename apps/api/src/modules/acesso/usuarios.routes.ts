@@ -22,10 +22,10 @@ const DESCRICOES: Record<Permissao, string> = {
   'estoque.consultar': 'Estoque e histórico do item', 'estoque.transferir': 'Transferir entre bazar e doações',
   'estoque.ajustar': 'Baixa, ajuste, preço, carga inicial', 'caixa.operar': 'Abrir/fechar caixa, vender, sangria, suprimento',
   'venda.cancelar': 'Cancelar venda', 'venda.desconto_autorizar': 'Desconto acima do limite do perfil',
-  'sincronizacao.resolver': 'Pendências de venda offline', 'terminais.gerenciar': 'Pontos de caixa',
+  'terminais.gerenciar': 'Pontos de caixa',
   'contas_pagar.gerenciar': 'Contas a pagar e lote de compra', 'contas_receber.receber': 'Receber fiado, extrato do cliente',
   'contas_receber.lancar': 'Conta a receber manual', 'recebimento.estornar': 'Estornar recebimento',
-  'relatorios.consultar': 'Relatórios, prestação de contas, histórico de caixas', 'fiscal.gerenciar': 'Regra de imposto',
+  'relatorios.consultar': 'Relatórios, prestação de contas, histórico de caixas', 'relatorios.estoque': 'Relatórios de estoque, descartes e transferências', 'fiscal.gerenciar': 'Regra de imposto',
   'privacidade.gerenciar': 'Exportar e anonimizar titulares',
 };
 

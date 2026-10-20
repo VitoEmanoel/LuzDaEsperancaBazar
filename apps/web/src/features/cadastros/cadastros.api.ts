@@ -18,7 +18,7 @@ export const cadastrosApi = {
 export const clientesApi = {
   /** Busca por nome vai no CORPO do POST para não expor PII em URL/log de acesso. */
   buscar: (termo: string, ativo?: boolean) => http.post<Cliente[]>('/clientes/busca', { termo, ativo }),
-  /** Aceita id gerado no cliente (cadastro offline/rápido no PDV). */
+  /** Aceita id gerado no cliente (cadastro rápido no PDV). */
   criar: (c: { id: string; nome: string; telefone: string; cienciaAviso: boolean }) => http.post<Cliente>('/clientes', c),
   atualizar: (id: string, patch: Partial<Pick<Cliente, 'nome' | 'telefone' | 'ativo'>>) => http.patch<Cliente>(`/clientes/${id}`, patch),
 };

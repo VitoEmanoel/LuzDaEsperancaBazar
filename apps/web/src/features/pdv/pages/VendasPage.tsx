@@ -36,14 +36,13 @@ export function VendasPage() {
       <ErrorAlert erro={erro} />
       {carregando ? <p>Carregando…</p> : !data?.items.length ? <Empty /> : (
         <table className="table">
-          <thead><tr><th>Nº</th><th>Data/hora</th><th>Operador</th><th>Origem</th><th>Status</th><th className="num">Total</th><th /></tr></thead>
+          <thead><tr><th>Nº</th><th>Data/hora</th><th>Operador</th><th>Status</th><th className="num">Total</th><th /></tr></thead>
           <tbody>
             {data.items.map((v) => (
               <tr key={v.id}>
-                <td>{v.numero ?? v.numeroLocal}</td>
+                <td>{v.numero}</td>
                 <td>{formatDateTime(v.ocorridaEm)}</td>
                 <td>{v.operadorNome}</td>
-                <td>{v.origem === 'OFFLINE' ? <Badge tom="info">Offline</Badge> : 'Online'}</td>
                 <td>{v.status === 'CANCELADA' ? <Badge tom="erro">Cancelada</Badge> : <Badge tom="ok">Concluída</Badge>}</td>
                 <td className="num"><MoneyText value={v.total} /></td>
                 <td className="actions">
