@@ -41,7 +41,9 @@ interface LinhaPg { forma: FormaPagamento; recebido: string }
 
 export function PagamentoModal(p: Props) {
   const [desconto, setDesconto] = useState('');
-  const [linhas, setLinhas] = useState<LinhaPg[]>([]);
+  // A primeira linha já existe quando a janela abre: o campo do valor recebido nasce com o foco (sem um instante vazio em que o foco
+  // pararia em outro botão e o primeiro número digitado se perderia).
+  const [linhas, setLinhas] = useState<LinhaPg[]>([{ forma: 'DINHEIRO', recebido: '' }]);
   const [cliente, setCliente] = useState<{ id: string; nome: string } | null>(null);
   const [vencimento, setVencimento] = useState(todayLocal(PRAZO_FIADO_DIAS));
   const [erro, setErro] = useState<string | null>(null);
