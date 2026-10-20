@@ -30,8 +30,9 @@ SELECT id AS u FROM usuario WHERE ativo ORDER BY criado_em LIMIT 1 \gset
 SELECT id AS cat FROM categoria ORDER BY criado_em LIMIT 1 \gset
 INSERT INTO lote_entrada (id, tipo, parceiro_id, recebido_em, recebido_por_id)
 VALUES ('10000000-0000-4000-8000-000000000001', 'DOACAO', '00000000-0000-4000-8000-0000000000b1', now(), :'u');
-INSERT INTO item (id, lote_id, categoria_id, tipo_controle, valor_atribuido, quantidade_inicial, criado_por_id)
-VALUES ('10000000-0000-4000-8000-0000000000a1', '10000000-0000-4000-8000-000000000001', :'cat', 'CATEGORIA', 1, 3, :'u');
+-- (desde a 0009 o item nasce cadastrado; aqui ele já entra aprovado, com o local da entrada)
+INSERT INTO item (id, lote_id, categoria_id, tipo_controle, valor_atribuido, quantidade_inicial, criado_por_id, status, local_destino_id, aprovado_por_id, aprovado_em)
+VALUES ('10000000-0000-4000-8000-0000000000a1', '10000000-0000-4000-8000-000000000001', :'cat', 'CATEGORIA', 1, 3, :'u', 'APROVADO', 1, :'u', now());
 INSERT INTO movimentacao (item_id, tipo, local_destino_id, quantidade, usuario_id)
 VALUES ('10000000-0000-4000-8000-0000000000a1', 'ENTRADA', 1, 3, :'u');
 SET CONSTRAINTS ALL IMMEDIATE;

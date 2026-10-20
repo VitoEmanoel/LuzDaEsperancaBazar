@@ -46,6 +46,7 @@ async function main() {
   const roupa = (await admin.get('/categorias')).data.find((c: any) => c.nome === 'Roupa adulto');
   const lote = (await admin.post('/lotes', { id: uuid(), tipo: 'DOACAO', parceiroId: parc.id })).data;
   await admin.post(`/lotes/${lote.id}/itens`, { id: uuid(), categoriaId: roupa.id, controle: 'CATEGORIA', quantidade: 60, preco: '10.00', localDestino: 'BAZAR' });
+  await admin.post(`/lotes/${lote.id}/aprovar`);
   const definir = async (chave: string, valor: string) => (await admin.put('/parametros', { valores: [{ chave, valor }] })).status;
   const vender = (un: number, cpf?: string) => caixa.put(`/vendas/${uuid()}`, {
     terminalId: cx.data.terminalId, caixaId: cx.data.id, itens: [{ categoriaId: roupa.id, quantidade: un }],

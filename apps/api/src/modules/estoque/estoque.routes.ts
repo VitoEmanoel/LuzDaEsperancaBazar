@@ -1,7 +1,8 @@
 /**
  * EST — consulta de estoque (saldo só por vw_saldo_estoque), histórico do item, transferência
  * bazar ⇄ doações, baixa, ajuste, preço e carga inicial (RF-EST-01..08).
- * O banco recusa saldo negativo e peça etiquetada com mais de 1 unidade (tg_valida_movimentacao).
+ * O banco recusa saldo negativo, peça única com mais de 1 unidade e movimento de item não aprovado (tg_valida_movimentacao).
+ * Cada linha é uma entrada (item) de um lote; código e preço da peça vêm do produto (0009).
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -35,14 +36,16 @@ const itemDto = (r: ItemSql) => ({
   saldoBazar: Number(r.saldo_bazar), saldoDoacoes: Number(r.saldo_doacoes),
 });
 
-/** Preço vigente: peça etiquetada = preço próprio; por categoria = preço padrão ATUAL da categoria (RN-08). */
+/** Preço vigente: produto = preço ATUAL do produto; por categoria = preço padrão ATUAL da categoria (RN-08). */
 const SELECT_ITEM = Prisma.sql`
-  SELECT i.id::text, i.codigo_barras, i.descricao, i.categoria_id::text, c.nome AS categoria_nome, i.tipo_controle::text AS tipo_controle,
-         (CASE WHEN i.tipo_controle = 'ETIQUETADO' THEN i.preco_venda ELSE c.preco_padrao END)::text AS preco,
+  SELECT i.id::text, coalesce(pr.codigo, i.codigo_barras) AS codigo_barras, coalesce(i.descricao, pr.nome) AS descricao,
+         i.categoria_id::text, c.nome AS categoria_nome, i.tipo_controle::text AS tipo_controle,
+         (CASE WHEN i.tipo_controle = 'ETIQUETADO' THEN pr.preco_venda ELSE c.preco_padrao END)::text AS preco,
          l.id::text AS lote_id, l.numero AS lote_numero, p.nome AS parceiro_nome, cp.nome AS campanha_nome,
          coalesce(s.b, 0)::int AS saldo_bazar, coalesce(s.d, 0)::int AS saldo_doacoes
   FROM item i
   JOIN categoria c ON c.id = i.categoria_id
+  LEFT JOIN produto pr ON pr.id = i.produto_id
   JOIN lote_entrada l ON l.id = i.lote_id
   LEFT JOIN parceiro p ON p.id = l.parceiro_id
   LEFT JOIN campanha cp ON cp.id = l.campanha_id
@@ -53,18 +56,28 @@ export async function itemPorId(db: Db, id: string) {
   const [r] = await db.$queryRaw<ItemSql[]>`${SELECT_ITEM} WHERE i.id = ${id}::uuid`;
   return r ? itemDto(r) : null;
 }
+/** Pelo código do produto: a entrada aprovada mais antiga que ainda tem saldo no Bazar (a próxima a ser vendida, PEPS). */
 async function itemPorCodigo(db: Db, codigo: string) {
-  const [r] = await db.$queryRaw<ItemSql[]>`${SELECT_ITEM} WHERE i.codigo_barras = ${codigo}`;
+  const [r] = await db.$queryRaw<ItemSql[]>`
+    ${SELECT_ITEM} WHERE pr.codigo = ${codigo} AND i.status = 'APROVADO'
+    ORDER BY (coalesce(s.b, 0) > 0) DESC, l.recebido_em, l.numero, i.criado_em, i.id LIMIT 1`;
   return r ? itemDto(r) : null;
 }
 
-/** Resolve o item por id ou código (RF-EST-02: transferência por código da peça ou por item). */
+/**
+ * Resolve o item por id ou código (RF-EST-02: transferência por código da peça ou por item).
+ * Produto com várias entradas é ambíguo pelo código: escolha a entrada (lote) na lista do estoque.
+ */
 async function acharItemId(db: Db, b: { itemId?: string | undefined; codigo?: string | undefined }): Promise<string> {
-  const i = b.itemId
-    ? await db.item.findUnique({ where: { id: b.itemId }, select: { id: true } })
-    : b.codigo ? await db.item.findUnique({ where: { codigoBarras: b.codigo.toUpperCase() }, select: { id: true } }) : null;
-  if (!i) throw new AppError(404, 'Item não encontrado', 'ITEM_INEXISTENTE');
-  return i.id;
+  if (b.itemId) {
+    const i = await db.item.findUnique({ where: { id: b.itemId }, select: { id: true } });
+    if (!i) throw new AppError(404, 'Item não encontrado', 'ITEM_INEXISTENTE');
+    return i.id;
+  }
+  const itens = b.codigo ? await db.item.findMany({ where: { produto: { codigo: b.codigo.toUpperCase() }, status: 'APROVADO' }, select: { id: true }, take: 2 }) : [];
+  if (!itens.length) throw new AppError(404, 'Item não encontrado', 'ITEM_INEXISTENTE');
+  if (itens.length > 1) conflito('CODIGO_COM_VARIAS_ENTRADAS', 'Este produto tem várias entradas: escolha a entrada (lote) na lista do estoque');
+  return itens[0]!.id;
 }
 
 const zTransf = z.object({
@@ -90,7 +103,7 @@ export async function rotasEstoque(app: FastifyInstance) {
     if (q.loteId) conds.push(Prisma.sql`l.id = ${q.loteId}::uuid`);
     if (q.busca) {
       const like = `%${q.busca.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-      conds.push(Prisma.sql`(i.descricao ILIKE ${like} OR i.codigo_barras ILIKE ${like} OR c.nome ILIKE ${like})`);
+      conds.push(Prisma.sql`(i.descricao ILIKE ${like} OR pr.nome ILIKE ${like} OR pr.codigo ILIKE ${like} OR c.nome ILIKE ${like})`);
     }
     const where = Prisma.join(conds, ' AND ');
     const rows = await prisma.$queryRaw<ItemSql[]>`
@@ -126,7 +139,7 @@ export async function rotasEstoque(app: FastifyInstance) {
         eventos.push({ ...base, descricao: `Transferência ${o} → ${d}${extra}`, quantidade: -m.quantidade, local: o });
         eventos.push({ ...base, descricao: `Transferência ${o} → ${d}`, quantidade: m.quantidade, local: d });
       } else {
-        const rotulo: Record<string, string> = { ENTRADA: 'Entrada pela triagem', VENDA: 'Venda', ESTORNO_VENDA: 'Estorno de venda', BAIXA: 'Baixa', AJUSTE_ENTRADA: 'Ajuste de inventário (+)', AJUSTE_SAIDA: 'Ajuste de inventário (−)' };
+        const rotulo: Record<string, string> = { ENTRADA: 'Entrada (aprovação do lote)', VENDA: 'Venda', ESTORNO_VENDA: 'Estorno de venda', BAIXA: 'Baixa', AJUSTE_ENTRADA: 'Ajuste de inventário (+)', AJUSTE_SAIDA: 'Ajuste de inventário (−)' };
         eventos.push({ ...base, descricao: `${rotulo[m.tipo]}${extra}`, quantidade: o ? -m.quantidade : m.quantidade, local: o ?? d });
       }
     }
@@ -184,12 +197,13 @@ export async function rotasEstoque(app: FastifyInstance) {
     const { id } = parse(zIdParam, req.params);
     const b = parse(zPreco, req.body);
     await prisma.$transaction(async (tx) => {
-      const i = await tx.item.findUnique({ where: { id }, select: { tipoControle: true, precoVenda: true } });
+      const i = await tx.item.findUnique({ where: { id }, select: { tipoControle: true, produto: { select: { id: true, precoVenda: true } } } });
       if (!i) naoEncontrado('Item');
       if (i!.tipoControle !== 'ETIQUETADO') conflito('PRECO_DA_CATEGORIA', 'Item por categoria usa o preço padrão da categoria');
-      await tx.item.update({ where: { id }, data: { precoVenda: b.preco } });
+      // o preço é do produto: vale para todas as unidades, de todas as entradas (P-14)
+      await tx.produto.update({ where: { id: i!.produto!.id }, data: { precoVenda: b.preco } });
       // RF-EST-07: histórico do preço na auditoria
-      await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'PRECO_ITEM', 'item', id, { preco: money(i!.precoVenda) }, { preco: b.preco, motivo: b.motivo });
+      await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'PRECO_PRODUTO', 'produto', i!.produto!.id, { preco: money(i!.produto!.precoVenda) }, { preco: b.preco, motivo: b.motivo, itemId: id });
     });
     return reply.code(204).send();
   });
@@ -243,12 +257,19 @@ export async function rotasEstoque(app: FastifyInstance) {
 
     await prisma.$transaction(async (tx) => {
       const lote = await tx.loteEntrada.create({ data: { tipo: 'SALDO_INICIAL', recebidoEm: new Date(), recebidoPorId: u.id, observacao: 'Carga inicial da implantação' } });
+      const agora = new Date();
       for (const l of validas) {
-        const codigo = l.controle === 'ETIQUETADO' ? await proximoCodigo(tx) : null;
+        const descricao = l.descricao || `${l.cat.nome} (saldo inicial)`;
+        // cada linha etiquetada vira um produto de peça única (como antes: quantidade 1)
+        const produto = l.controle === 'ETIQUETADO' ? await tx.produto.create({
+          data: { codigo: await proximoCodigo(tx), tituloEtiqueta: descricao.slice(0, 40), nome: descricao, categoriaId: l.cat.id, precoVenda: l.preco, pecaUnica: true, criadoPorId: u.id },
+        }) : null;
+        // quem carrega é o Administrador (estoque.ajustar): os itens já entram aprovados
         const it = await tx.item.create({
           data: {
-            loteId: lote.id, categoriaId: l.cat.id, tipoControle: l.controle, codigoBarras: codigo, descricao: l.descricao || `${l.cat.nome} (saldo inicial)`,
-            valorAtribuido: l.valor, precoVenda: l.controle === 'ETIQUETADO' ? l.preco : null, quantidadeInicial: l.quantidade, criadoPorId: u.id,
+            loteId: lote.id, categoriaId: l.cat.id, tipoControle: l.controle, produtoId: produto?.id ?? null, descricao,
+            valorAtribuido: l.valor, quantidadeInicial: l.quantidade, criadoPorId: u.id,
+            localDestinoId: LOCAL_ID[l.local], status: 'APROVADO', aprovadoPorId: u.id, aprovadoEm: agora,
           },
         });
         await tx.movimentacao.create({ data: { itemId: it.id, tipo: 'ENTRADA', localDestinoId: LOCAL_ID[l.local], quantidade: l.quantidade, usuarioId: u.id, motivo: 'Saldo inicial' } });

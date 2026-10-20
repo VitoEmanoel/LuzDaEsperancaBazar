@@ -2,8 +2,8 @@
  * PDV — registro da venda (fluxos 8.2 e 8.3 do doc 04) numa ÚNICA transação (RNF-06):
  *  - o servidor recalcula preços, subtotal, desconto, total e troco (o front só exibe);
  *  - caixaId/terminalId conferidos contra a sessão de caixa do operador (anti-IDOR);
- *  - peça etiquetada só pelo código (RN-30); por categoria, PEPS com desempate fixo (RN-09);
- *  - travas em ordem fixa (etiquetadas por item_id, depois categorias por PEPS) — sem deadlock;
+ *  - produto só pelo código (RN-30); produto e categoria por PEPS entre as entradas aprovadas (RN-09, S2-10);
+ *  - todas as entradas da venda travadas de uma vez, na ordem do id (a mesma do estorno) — sem deadlock;
  *  - regra fiscal vigente copiada em cada item (RN-17); fiado gera conta a receber (RN-03);
  *  - no COMMIT o banco confere a venda inteira (tg_valida_venda_completa).
  */
@@ -19,10 +19,12 @@ import { paramNum } from '../../shared/parametros.js';
 import { obterClienteAtivo } from '../cadastros/clientes.routes.js';
 import { regrasVigentes, resolverRegra } from '../fiscal/fiscal.service.js';
 import type { Permissao } from '../../shared/permissoes.js';
+import { travarItens } from '../entradas/lotes.routes.js';
 
 // ---------------- contrato ----------------
 const zItemVenda = z.union([
-  z.object({ codigo: z.string().trim().min(1).max(40), quantidade: z.literal(1), desconto: zMoney.optional() }).strict(),
+  // produto pelo código: várias unidades (S2-10); a peça única continua recusando mais de 1
+  z.object({ codigo: z.string().trim().min(1).max(40), quantidade: z.number().int().min(1).max(10_000), desconto: zMoney.optional() }).strict(),
   z.object({ categoriaId: zUuid, quantidade: z.number().int().min(1).max(10_000), desconto: zMoney.optional() }).strict(),
 ]);
 export const zVendaRequest = z.object({
@@ -92,68 +94,94 @@ function ratear(totalCents: number, bases: number[]): number[] {
   return r;
 }
 
-async function alocarEtiquetadas(tx: Tx, itens: { codigo: string; descontoCents: number }[]): Promise<Linha[]> {
-  if (!itens.length) return [];
-  const codigos = itens.map((i) => i.codigo);
-  if (new Set(codigos).size !== codigos.length) throw new AppError(409, 'A mesma peça aparece duas vezes na venda', 'CODIGO_DUPLICADO');
-  const rows = await tx.$queryRaw<{ id: string; codigo_barras: string; categoria_id: string; preco_venda: string }[]>`
-    SELECT i.id::text, i.codigo_barras, i.categoria_id::text, i.preco_venda::text
-    FROM item i WHERE i.codigo_barras = ANY(${codigos}::text[]) AND i.tipo_controle = 'ETIQUETADO'
-    ORDER BY i.id FOR UPDATE OF i`;
-  const porCodigo = new Map(rows.map((r) => [r.codigo_barras, r]));
-  const linhas: Linha[] = [];
-  for (const it of itens) {
-    const r = porCodigo.get(it.codigo);
-    if (!r) throw new AppError(409, 'Código não encontrado', 'CODIGO_INEXISTENTE', it.codigo);
-    const saldos = await tx.$queryRaw<{ local_id: number; saldo: number }[]>`SELECT local_id, saldo FROM vw_saldo_estoque WHERE item_id = ${r.id}::uuid`;
-    const bazar = saldos.find((s) => s.local_id === 1)?.saldo ?? 0;
-    if (bazar < 1) {
-      const doacoes = saldos.find((s) => s.local_id === 2)?.saldo ?? 0;
-      if (doacoes > 0) throw new AppError(409, 'Peça está no estoque de doações — transfira antes de vender', 'ITEM_EM_DOACOES', it.codigo); // RN-07
-      throw new AppError(409, 'Peça indisponível (já vendida ou baixada)', 'ITEM_INDISPONIVEL', it.codigo);
-    }
-    linhas.push({ itemId: r.id, forma: 'CODIGO', categoriaId: r.categoria_id, quantidade: 1, precoCents: toCents(Number(r.preco_venda).toFixed(2)), descontoCents: it.descontoCents });
-  }
-  return linhas;
+/** O que a venda pede: um produto (pelo código) ou uma categoria, com a quantidade e o desconto somados. */
+interface Pedido { chave: string; forma: 'CODIGO' | 'CATEGORIA'; nome: string; categoriaId: string; quantidade: number; precoCents: number; descontoCents: number; pecaUnica: boolean }
+
+/** Entradas aprovadas com saldo no Bazar, por PEPS (RN-09): lote mais antigo; desempate por número do lote, criação do item e id. */
+async function candidatas(tx: Tx, produtoIds: string[], categoriaIds: string[]): Promise<{ id: string; chave: string }[]> {
+  return tx.$queryRaw<{ id: string; chave: string }[]>`
+    SELECT i.id::text, coalesce(i.produto_id, i.categoria_id)::text AS chave FROM item i JOIN lote_entrada l ON l.id = i.lote_id
+    WHERE i.status = 'APROVADO'
+      AND ((i.tipo_controle = 'ETIQUETADO' AND i.produto_id = ANY(${produtoIds}::uuid[]))
+        OR (i.tipo_controle = 'CATEGORIA' AND i.categoria_id = ANY(${categoriaIds}::uuid[])))
+      AND EXISTS (SELECT 1 FROM vw_saldo_estoque s WHERE s.item_id = i.id AND s.local_id = 1 AND s.saldo > 0)
+    ORDER BY l.recebido_em, l.numero, i.criado_em, i.id`;
 }
 
-async function alocarCategoria(tx: Tx, categoriaId: string, quantidade: number, descontoCents: number): Promise<Linha[]> {
-  const cat = await tx.categoria.findUnique({ where: { id: categoriaId }, select: { nome: true, precoPadrao: true } });
-  if (!cat) throw new AppError(409, 'Categoria não encontrada', 'CATEGORIA_INEXISTENTE');
-  const preco = toCents(cat.precoPadrao);
-  if (preco <= 0) throw new AppError(409, `Categoria "${cat.nome}" sem preço padrão`, 'CATEGORIA_SEM_PRECO');
-
+/**
+ * Reparte cada pedido entre as entradas pelo PEPS — uma linha por entrada consumida, para a receita
+ * continuar atribuída ao parceiro de cada lote (S2-10). As entradas de TODOS os pedidos são travadas de uma vez,
+ * na ordem do id (a mesma do estorno e da aprovação): duas vendas, ou uma venda e um cancelamento, nunca se cruzam.
+ */
+async function alocar(tx: Tx, pedidos: Pedido[]): Promise<Linha[]> {
+  if (!pedidos.length) return [];
+  const produtoIds = pedidos.filter((p) => p.forma === 'CODIGO').map((p) => p.chave);
+  const categoriaIds = pedidos.filter((p) => p.forma === 'CATEGORIA').map((p) => p.chave);
+  let falta: { pedido: Pedido; resta: number } | null = null;
   for (let tentativa = 0; tentativa < 2; tentativa++) {
-    // PEPS (RN-09): lote mais antigo; desempate por número do lote, criação do item e id. Trava antes de ler o saldo.
-    const cand = await tx.$queryRaw<{ id: string }[]>`
-      SELECT i.id::text FROM item i JOIN lote_entrada l ON l.id = i.lote_id
-      WHERE i.categoria_id = ${categoriaId}::uuid AND i.tipo_controle = 'CATEGORIA'
-        AND EXISTS (SELECT 1 FROM vw_saldo_estoque s WHERE s.item_id = i.id AND s.local_id = 1 AND s.saldo > 0)
-      ORDER BY l.recebido_em, l.numero, i.criado_em, i.id
-      FOR UPDATE OF i`;
-    if (cand.length) {
-      const ids = cand.map((c) => c.id);
-      const saldos = await tx.$queryRaw<{ item_id: string; saldo: number }[]>`
-        SELECT item_id::text, saldo FROM vw_saldo_estoque WHERE local_id = 1 AND item_id = ANY(${ids}::uuid[])`;
-      const saldo = new Map(saldos.map((s) => [s.item_id, s.saldo]));
-      const linhas: Linha[] = [];
-      let resta = quantidade;
-      for (const id of ids) {
+    const cand = await candidatas(tx, produtoIds, categoriaIds);
+    await travarItens(tx, cand.map((c) => c.id));
+    // o saldo é lido depois da trava: outra venda pode ter levado unidades entre a escolha e a trava
+    const saldos = cand.length ? await tx.$queryRaw<{ item_id: string; saldo: number }[]>`
+      SELECT item_id::text, saldo FROM vw_saldo_estoque WHERE local_id = 1 AND item_id = ANY(${cand.map((c) => c.id)}::uuid[])` : [];
+    const saldo = new Map(saldos.map((s) => [s.item_id, s.saldo]));
+    const linhas: Linha[] = [];
+    falta = null;
+    for (const p of pedidos) {
+      const doPedido: Linha[] = [];
+      let resta = p.quantidade;
+      for (const c of cand) {
         if (!resta) break;
-        const q = Math.min(resta, saldo.get(id) ?? 0);
-        if (q > 0) { linhas.push({ itemId: id, forma: 'CATEGORIA', categoriaId, quantidade: q, precoCents: preco, descontoCents: 0 }); resta -= q; }
+        if (c.chave !== p.chave) continue;
+        const q = Math.min(resta, saldo.get(c.id) ?? 0);
+        if (q > 0) { doPedido.push({ itemId: c.id, forma: p.forma, categoriaId: p.categoriaId, quantidade: q, precoCents: p.precoCents, descontoCents: 0 }); resta -= q; }
       }
-      if (resta === 0) {
-        const d = ratear(descontoCents, linhas.map((l) => l.quantidade * l.precoCents));
-        linhas.forEach((l, i) => { l.descontoCents = d[i]!; });
-        return linhas;
-      }
-      if (tentativa === 1) throw new AppError(409, 'Saldo insuficiente', 'SALDO_INSUFICIENTE', `${cat.nome}: faltam ${resta}`);
-    } else if (tentativa === 1) {
-      throw new AppError(409, 'Saldo insuficiente', 'SALDO_INSUFICIENTE', `${cat.nome}: sem saldo no bazar`);
+      if (resta > 0) { falta = { pedido: p, resta }; break; }
+      const d = ratear(p.descontoCents, doPedido.map((l) => l.quantidade * l.precoCents));
+      doPedido.forEach((l, i) => { l.descontoCents = d[i]!; });
+      linhas.push(...doPedido);
+    }
+    if (!falta) return linhas;
+  }
+  const { pedido: p, resta } = falta!;
+  if (p.forma === 'CATEGORIA') {
+    throw new AppError(409, 'Saldo insuficiente', 'SALDO_INSUFICIENTE', resta === p.quantidade ? `${p.nome}: sem saldo no bazar` : `${p.nome}: faltam ${resta}`);
+  }
+  if (resta === p.quantidade) {
+    // nada no Bazar: se há unidades em Doações, o operador precisa transferir antes (RN-07)
+    const [d] = await tx.$queryRaw<{ n: number }[]>`
+      SELECT coalesce(sum(s.saldo), 0)::int AS n FROM item i JOIN vw_saldo_estoque s ON s.item_id = i.id AND s.local_id = 2 WHERE i.produto_id = ${p.chave}::uuid`;
+    if ((d?.n ?? 0) > 0) throw new AppError(409, 'Peça está no estoque de doações — transfira antes de vender', 'ITEM_EM_DOACOES', p.nome);
+    throw new AppError(409, 'Peça indisponível (já vendida ou baixada)', 'ITEM_INDISPONIVEL', p.nome);
+  }
+  throw new AppError(409, 'Saldo insuficiente', 'SALDO_INSUFICIENTE', `${p.nome}: faltam ${resta}`);
+}
+
+/** Monta os pedidos: produtos pelo código (o preço é o ATUAL do produto) e categorias (preço padrão ATUAL). */
+async function montarPedidos(tx: Tx, porCodigo: Map<string, { qtd: number; desc: number }>, porCategoria: Map<string, { qtd: number; desc: number }>): Promise<Pedido[]> {
+  const pedidos: Pedido[] = [];
+  if (porCodigo.size) {
+    const produtos = await tx.produto.findMany({ where: { codigo: { in: [...porCodigo.keys()] } }, select: { id: true, codigo: true, nome: true, categoriaId: true, precoVenda: true, pecaUnica: true } });
+    const achados = new Map(produtos.map((p) => [p.codigo, p]));
+    for (const [codigo, c] of porCodigo) {
+      const p = achados.get(codigo);
+      if (!p) throw new AppError(409, 'Código não encontrado', 'CODIGO_INEXISTENTE', codigo);
+      if (p.pecaUnica && c.qtd > 1) throw new AppError(409, 'A mesma peça aparece duas vezes na venda', 'CODIGO_DUPLICADO', codigo); // peça única: 1 unidade
+      pedidos.push({ chave: p.id, forma: 'CODIGO', nome: `${codigo} — ${p.nome}`, categoriaId: p.categoriaId, quantidade: c.qtd, precoCents: toCents(p.precoVenda), descontoCents: c.desc, pecaUnica: p.pecaUnica });
     }
   }
-  throw new AppError(409, 'Saldo insuficiente', 'SALDO_INSUFICIENTE', cat.nome);
+  if (porCategoria.size) {
+    const cats = await tx.categoria.findMany({ where: { id: { in: [...porCategoria.keys()] } }, select: { id: true, nome: true, precoPadrao: true } });
+    const achadas = new Map(cats.map((c) => [c.id, c]));
+    for (const [id, c] of porCategoria) {
+      const cat = achadas.get(id);
+      if (!cat) throw new AppError(409, 'Categoria não encontrada', 'CATEGORIA_INEXISTENTE');
+      const preco = toCents(cat.precoPadrao);
+      if (preco <= 0) throw new AppError(409, `Categoria "${cat.nome}" sem preço padrão`, 'CATEGORIA_SEM_PRECO');
+      pedidos.push({ chave: id, forma: 'CATEGORIA', nome: cat.nome, categoriaId: id, quantidade: c.qtd, precoCents: preco, descontoCents: c.desc, pecaUnica: false });
+    }
+  }
+  return pedidos;
 }
 
 // ---------------- processamento ----------------
@@ -183,21 +211,16 @@ export async function processarVenda(tx: Tx, id: string, req: VendaRequest, op: 
   const diaVenda = localDate(ocorrida);
 
   // ----- itens -----
-  const etiquetadas: { codigo: string; descontoCents: number }[] = [];
+  // o mesmo código repetido soma (produto de várias unidades); peça única continua com 1 unidade
+  const porCodigo = new Map<string, { qtd: number; desc: number }>();
   const porCategoria = new Map<string, { qtd: number; desc: number }>();
   for (const it of req.itens) {
     const d = it.desconto ? toCents(it.desconto) : 0;
-    if ('codigo' in it) etiquetadas.push({ codigo: it.codigo.toUpperCase(), descontoCents: d });
-    else {
-      const a = porCategoria.get(it.categoriaId) ?? { qtd: 0, desc: 0 };
-      porCategoria.set(it.categoriaId, { qtd: a.qtd + it.quantidade, desc: a.desc + d });
-    }
+    const [mapa, chave] = 'codigo' in it ? [porCodigo, it.codigo.toUpperCase()] : [porCategoria, it.categoriaId];
+    const a = mapa.get(chave) ?? { qtd: 0, desc: 0 };
+    mapa.set(chave, { qtd: a.qtd + it.quantidade, desc: a.desc + d });
   }
-  const linhas: Linha[] = [...(await alocarEtiquetadas(tx, etiquetadas))];
-  for (const catId of [...porCategoria.keys()].sort()) {
-    const c = porCategoria.get(catId)!;
-    linhas.push(...(await alocarCategoria(tx, catId, c.qtd, c.desc)));
-  }
+  const linhas = await alocar(tx, await montarPedidos(tx, porCodigo, porCategoria));
 
   // ----- totais e desconto (servidor recalcula tudo) -----
   for (const l of linhas) if (l.descontoCents > l.quantidade * l.precoCents) throw new AppError(409, 'Desconto do item maior que o valor do item', 'DESCONTO_INVALIDO');

@@ -50,7 +50,7 @@ async function prestacaoContas(f: Filtro): Promise<Relatorio> {
   const recebido = await prisma.$queryRawUnsafe<Rec[]>(`
     SELECT ${grupoLote}::text AS grupo, l.tipo::text AS tipo, count(DISTINCT l.id) AS lotes,
            coalesce(sum(i.quantidade_inicial), 0) AS recebidos, coalesce(sum(i.quantidade_inicial * i.valor_atribuido), 0)::text AS valor
-    FROM lote_entrada l LEFT JOIN item i ON i.lote_id = l.id
+    FROM lote_entrada l LEFT JOIN item i ON i.lote_id = l.id AND i.status = 'APROVADO'
     WHERE l.recebido_em >= $1 AND l.recebido_em < $2 GROUP BY 1, 2`, ini, fim);
   const descartes = await prisma.$queryRawUnsafe<Des[]>(`
     SELECT ${grupoLote}::text AS grupo, l.tipo::text AS tipo, count(*) AS descartados
@@ -225,8 +225,8 @@ async function estoque(f: Filtro): Promise<Relatorio> {
   const rows = await prisma.$queryRaw<{ categoria: string; local_id: number; qtd: bigint; atribuido: string; potencial: string }[]>`
     SELECT c.nome AS categoria, s.local_id, sum(s.saldo) AS qtd,
       sum(s.saldo * i.valor_atribuido)::text AS atribuido,
-      sum(s.saldo * CASE WHEN i.tipo_controle = 'ETIQUETADO' THEN i.preco_venda ELSE coalesce(c.preco_padrao, 0) END)::text AS potencial
-    FROM vw_saldo_estoque s JOIN item i ON i.id = s.item_id JOIN categoria c ON c.id = i.categoria_id
+      sum(s.saldo * CASE WHEN i.tipo_controle = 'ETIQUETADO' THEN pr.preco_venda ELSE coalesce(c.preco_padrao, 0) END)::text AS potencial
+    FROM vw_saldo_estoque s JOIN item i ON i.id = s.item_id JOIN categoria c ON c.id = i.categoria_id LEFT JOIN produto pr ON pr.id = i.produto_id
     WHERE s.saldo > 0 GROUP BY c.nome, s.local_id ORDER BY c.nome, s.local_id`;
   const filtrado = rows.filter((r) => !f.local || (f.local === 'BAZAR' ? r.local_id === 1 : r.local_id === 2));
   return {
@@ -278,7 +278,7 @@ async function descartesRel(f: Filtro): Promise<Relatorio> {
 async function transferencias(f: Filtro): Promise<Relatorio> {
   const rows = await prisma.movimentacao.findMany({
     where: { tipo: 'TRANSFERENCIA', ocorridoEm: { gte: inicioDoDia(f.de), lt: fimDoDiaExclusivo(f.ate) } },
-    include: { item: { select: { descricao: true, codigoBarras: true, categoria: { select: { nome: true } } } } },
+    include: { item: { select: { descricao: true, produto: { select: { codigo: true } }, categoria: { select: { nome: true } } } } },
     orderBy: { ocorridoEm: 'asc' },
   });
   const nomes = new Map((await prisma.usuario.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.usuarioId))] } }, select: { id: true, nome: true } })).map((u) => [u.id, u.nome]));
@@ -286,7 +286,7 @@ async function transferencias(f: Filtro): Promise<Relatorio> {
     titulo: 'Transferências entre bazar e doações',
     colunas: [{ chave: 'data', rotulo: 'Data', tipo: 'date' }, { chave: 'item', rotulo: 'Item' }, { chave: 'descricao', rotulo: 'Sentido' }, { chave: 'quantidade', rotulo: 'Qtd.', tipo: 'number' }, { chave: 'usuario', rotulo: 'Usuário' }, { chave: 'motivo', rotulo: 'Motivo' }],
     linhas: rows.map((m) => ({
-      data: m.ocorridoEm.toISOString(), item: m.item.codigoBarras ? `${m.item.codigoBarras} — ${m.item.descricao ?? ''}` : m.item.descricao ?? m.item.categoria.nome,
+      data: m.ocorridoEm.toISOString(), item: m.item.produto ? `${m.item.produto.codigo} — ${m.item.descricao ?? ''}` : m.item.descricao ?? m.item.categoria.nome,
       descricao: m.localOrigemId === 1 ? 'Bazar → Doações' : 'Doações → Bazar', quantidade: m.quantidade, usuario: nomes.get(m.usuarioId) ?? '—', motivo: m.motivo ?? '',
     })),
     totais: { quantidade: rows.reduce((s, r) => s + r.quantidade, 0) },

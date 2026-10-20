@@ -91,6 +91,7 @@ async function main() {
   check(r.status === 400 && campo(r) === 'valorAtribuido', 'compra sem valor atribuído → 400', r.data);
   r = await admin.post(`/lotes/${compra.id}/itens`, { id: uuid(), categoriaId: catCarga.id, controle: 'CATEGORIA', quantidade: 5, preco: '8.00', valorAtribuido: '2.00', localDestino: 'BAZAR' });
   check(r.status === 201, 'compra com custo unitário → 201', r.data);
+  await admin.post(`/lotes/${compra.id}/aprovar`); // o valor atribuído conta depois da aprovação (S2)
   const loteDet = (await admin.get(`/lotes/${compra.id}`)).data;
   check(loteDet.valorAtribuido === '10.00', 'valor atribuído do lote = 5 × 2,00 (não o preço de venda)', loteDet);
 

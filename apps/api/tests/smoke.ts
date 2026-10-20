@@ -111,22 +111,30 @@ async function main() {
   check((await caixa.post('/clientes/busca', { termo: 'maria' })).data.length === 1, 'busca de cliente por POST');
 
   console.log('ENT/TRI — lotes e triagem');
-  check((await tri.post('/lotes', { id: uuid(), tipo: 'DOACAO' })).data?.code === 'ORIGEM_OBRIGATORIA', 'doação sem origem => 400 (RN-04)');
+  check((await tri.post('/lotes', { id: uuid(), tipo: 'DOACAO' })).data?.code === 'PARCEIRO_OBRIGATORIO', 'doação sem parceiro => 400 (RN-04, S2-06)');
+  check((await tri.post('/lotes', { id: uuid(), tipo: 'DOACAO', campanhaId: camp.id })).data?.code === 'PARCEIRO_OBRIGATORIO', 'doação só com campanha => 400 (a campanha é opcional)');
   check((await tri.post('/lotes', { id: uuid(), tipo: 'COMPRA', parceiroId: fornecedor.id, valorCompra: '100.00' })).status === 403, 'compra exige contas_pagar.gerenciar');
   const lote1 = (await tri.post('/lotes', { id: uuid(), tipo: 'DOACAO', parceiroId: parc.id, documento: 'Termo 01' })).data;
-  const lote2 = (await tri.post('/lotes', { id: uuid(), tipo: 'DOACAO', campanhaId: camp.id })).data;
+  // doação de campanha sem doador conhecido: o parceiro é o "Doador não identificado" (a prestação do parceiro do lote 1 fica só com ele)
+  const lote2 = (await tri.post('/lotes', { id: uuid(), tipo: 'DOACAO', parceiroId: especial.id, campanhaId: camp.id })).data;
   check(lote1.numero && lote1.status === 'ABERTO', 'lote criado', lote1);
-  const pec1 = (await tri.post(`/lotes/${lote1.id}/itens`, { id: uuid(), categoriaId: catPeca.id, controle: 'ETIQUETADO', quantidade: 1, preco: '35.00', descricao: 'Jaqueta jeans', localDestino: 'BAZAR' })).data;
-  const pec2 = (await tri.post(`/lotes/${lote1.id}/itens`, { id: uuid(), categoriaId: catPeca.id, controle: 'ETIQUETADO', quantidade: 1, preco: '60.00', descricao: 'Vestido', localDestino: 'BAZAR' })).data;
-  const pec3 = (await tri.post(`/lotes/${lote1.id}/itens`, { id: uuid(), categoriaId: catPeca.id, controle: 'ETIQUETADO', quantidade: 1, preco: '45.00', descricao: 'Bolsa', localDestino: 'DOACOES' })).data;
-  check(/^BZ\d{6}$/.test(pec1.codigo), 'código de barras gerado', pec1);
-  check((await tri.post(`/lotes/${lote1.id}/itens`, { id: uuid(), categoriaId: catPeca.id, controle: 'ETIQUETADO', quantidade: 2, preco: '10.00', localDestino: 'BAZAR' })).status === 400, 'etiquetada com qtd 2 => 400');
+  // peça única: produto de código próprio com 1 unidade (o valor atribuído é obrigatório no produto)
+  const peca = (nome: string, preco: string, localDestino = 'BAZAR') => ({ id: uuid(), categoriaId: catPeca.id, controle: 'ETIQUETADO', quantidade: 1, valorAtribuido: preco, localDestino, produto: { tituloEtiqueta: nome, nome, preco, pecaUnica: true } });
+  const pec1 = (await tri.post(`/lotes/${lote1.id}/itens`, peca('Jaqueta jeans', '35.00'))).data;
+  const pec2 = (await tri.post(`/lotes/${lote1.id}/itens`, peca('Vestido', '60.00'))).data;
+  const pec3 = (await tri.post(`/lotes/${lote1.id}/itens`, peca('Bolsa', '45.00', 'DOACOES'))).data;
+  check(/^BZ\d{6}$/.test(pec1.codigo) && pec1.status === 'CADASTRADO', 'código de barras gerado; item nasce cadastrado', pec1);
+  check((await tri.post(`/lotes/${lote1.id}/itens`, { ...peca('Duas', '10.00'), quantidade: 2 })).data?.code === 'PECA_UNICA_QTD', 'peça única com qtd 2 => 400');
   const itRoupa1 = (await tri.post(`/lotes/${lote1.id}/itens`, { id: uuid(), categoriaId: catRoupa.id, controle: 'CATEGORIA', quantidade: 5, preco: '10.00', localDestino: 'BAZAR' })).data;
   const desc = (await tri.post(`/lotes/${lote1.id}/descartes`, { id: uuid(), categoriaId: catRoupa.id, motivoId: motivoDesc.id })).data;
   check(desc.id && desc.revertido === false, 'descarte item a item');
   check((await tri.post(`/lotes/${lote1.id}/encerrar`)).data.status === 'TRIADO', 'lote encerrado');
   check((await tri.post(`/lotes/${lote1.id}/itens`, { id: uuid(), categoriaId: catRoupa.id, controle: 'CATEGORIA', quantidade: 1, preco: '10.00', localDestino: 'BAZAR' })).data?.code === 'LOTE_TRIADO', 'lote triado não aceita item');
   await tri.post(`/lotes/${lote2.id}/itens`, { id: uuid(), categoriaId: catRoupa.id, controle: 'CATEGORIA', quantidade: 10, preco: '10.00', localDestino: 'BAZAR' });
+  check((await tri.get(`/estoque?categoriaId=${catRoupa.id}`)).data.total === 0, 'cadastrado não entra no estoque antes da aprovação');
+  check((await tri.post(`/lotes/${lote1.id}/aprovar`)).status === 403, 'estoquista não aprova');
+  check((await admin.post(`/lotes/${lote1.id}/aprovar`)).data?.aprovadosAgora === 4, 'Admin aprova o lote inteiro (mesmo encerrado)');
+  check((await admin.post(`/lotes/${lote2.id}/aprovar`)).data?.aprovadosAgora === 1, 'Admin aprova o segundo lote');
   const det = (await tri.get(`/lotes/${lote1.id}`)).data;
   check(det.aprovados === 8 && det.descartados === 1 && det.valorAtribuido === '190.00', 'resumo do lote', det);
   const et = (await tri.get(`/etiquetas?itens=${pec1.id},${pec2.id}`)).data;

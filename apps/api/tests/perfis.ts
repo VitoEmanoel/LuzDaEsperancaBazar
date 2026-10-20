@@ -47,6 +47,13 @@ const ACESSOS: [string, string, unknown, Perfil[], number[]?][] = [
   ['GET', '/regras-fiscais', undefined, ['admin']],
   ['POST', '/categorias', {}, ['admin'], [400]],
   ['GET', '/lotes', undefined, ['admin', 'estoquista']],
+  // Sprint 2 (0009): só o Administrador aprova e devolve; o Estoquista cria parceiro (sem editar); produtos para quem cadastra ou consulta
+  ['POST', `/lotes/${uuid()}/aprovar`, {}, ['admin'], [404]],
+  ['POST', `/itens/${uuid()}/aprovar`, {}, ['admin'], [404]],
+  ['POST', `/itens/${uuid()}/devolver`, { motivo: 'Faltou a foto' }, ['admin'], [404]],
+  ['POST', '/parceiros', {}, ['admin', 'estoquista'], [400]],
+  ['PATCH', `/parceiros/${uuid()}`, {}, ['admin'], [404]],
+  ['GET', '/produtos', undefined, ['admin', 'estoquista', 'financeiro']],
   ['GET', '/estoque', undefined, ['admin', 'estoquista', 'financeiro']],
   ['GET', '/itens/codigo/BZ999999', undefined, TODOS, [404]], // leitura de código: PDV (vendedor) e estoque
   ['GET', '/contas-pagar', undefined, ['admin', 'financeiro']],
@@ -73,7 +80,7 @@ const ACESSOS: [string, string, unknown, Perfil[], number[]?][] = [
 const PERMISSOES_ESPERADAS: Record<Perfil, string[]> = {
   admin: [], // calculado: todas as permissões (inclusive abrir caixa)
   vendedor: ['caixa.operar', 'clientes.gerenciar'],
-  estoquista: ['cadastros.consultar', 'entrada.registrar', 'estoque.consultar', 'estoque.transferir', 'relatorios.estoque'],
+  estoquista: ['cadastros.consultar', 'entrada.registrar', 'estoque.consultar', 'estoque.transferir', 'parceiros.criar', 'relatorios.estoque'], // parceiros.criar: 0009
   financeiro: ['contas_pagar.gerenciar', 'contas_receber.lancar', 'contas_receber.receber', 'estoque.consultar', 'relatorios.consultar', 'relatorios.estoque'],
 };
 

@@ -23,6 +23,10 @@ UNION ALL
 SELECT 'lotes_com_equacao_aberta', count(*) FROM vw_prestacao_contas_lote
  WHERE itens_aprovados <> itens_vendidos + em_estoque_bazar + em_estoque_doacoes + itens_baixados - ajustes_liquidos
 UNION ALL
+-- 4b. Item cadastrado ou devolvido nunca mexe no estoque (0009) — deve ser 0
+SELECT 'itens_nao_aprovados_com_movimentacao', count(*) FROM item i
+ WHERE i.status <> 'APROVADO' AND EXISTS (SELECT 1 FROM movimentacao m WHERE m.item_id = i.id)
+UNION ALL
 -- 5. Alertas operacionais
 SELECT 'caixas_abertos_ha_mais_de_18h', count(*) FROM caixa_sessao WHERE status = 'ABERTO' AND aberto_em < now() - interval '18 hours'
 UNION ALL
