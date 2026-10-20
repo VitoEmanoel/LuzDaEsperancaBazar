@@ -25,7 +25,8 @@
     "test:cpf": "npm run test:cpf -w @bazar/api",
     "test:produto": "npm run test:produto -w @bazar/api",
     "test:sprint3": "npm run test:sprint3 -w @bazar/api",
-    "test:sprint4": "npm run test:sprint4 -w @bazar/api"
+    "test:sprint4": "npm run test:sprint4 -w @bazar/api",
+    "test:sprint5": "npm run test:sprint5 -w @bazar/api"
   },
   "overrides": {
     "mysql2": "^3.24.5",

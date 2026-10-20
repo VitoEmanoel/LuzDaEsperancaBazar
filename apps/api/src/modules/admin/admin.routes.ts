@@ -3,14 +3,15 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../../shared/prisma.js';
 import { AppError, conflito, naoEncontrado } from '../../shared/errors.js';
-import { parse, zMotivo, zUuid } from '../../shared/http.js';
+import { dataExiste, parse, zMotivo, zUuid } from '../../shared/http.js';
 import { auditar } from '../../shared/audit.js';
-import { lerPlanilha } from '../../shared/planilha.js';
+import { codigoErro, gerarCsv, gerarXlsx, lerPlanilha } from '../../shared/planilha.js';
 import { fromDbDate, toDbDate } from '../../shared/dates.js';
 import { money } from '../../shared/money.js';
-import { exigirUsuario } from '../../plugins/auth.js';
+import { exigirUsuario, tem } from '../../plugins/auth.js';
 import { FINALIDADE_CLIENTE, VERSAO_AVISO } from '../cadastros/clientes.routes.js';
-import { documentoValido } from '../../shared/documento.js';
+import { documentoValido, normalizarDocumento } from '../../shared/documento.js';
+import type { Permissao } from '../../shared/permissoes.js';
 
 const TIPOS_PARAM: Record<string, { tipo: 'number' | 'text' | 'bool'; min?: number; max?: number; vazio?: boolean }> = {
   'fiado.prazo_dias': { tipo: 'number', min: 1, max: 365, vazio: true },
@@ -23,9 +24,48 @@ const TIPOS_PARAM: Record<string, { tipo: 'number' | 'text' | 'bool'; min?: numb
   // tamanho do rolo (S4-01): abaixo de 30 x 20 mm o Code 128 do BZ + 6 dígitos não cabe com barras que o leitor 1D lê
   'etiqueta.largura_mm': { tipo: 'number', min: 30, max: 120 },
   'etiqueta.altura_mm': { tipo: 'number', min: 20, max: 100 },
+  'estoque.pouco_saldo': { tipo: 'number', min: 0, max: 1000 }, // P-08: um valor para todos; 0 = só avisa o que acabou
+};
+
+/**
+ * Modelos para baixar (S5-02): o cabeçalho que cada importação espera e linhas de exemplo (fictícias), em CSV ou XLSX.
+ * Quem baixa é quem pode importar aquele tipo.
+ */
+const MODELOS: Record<string, { perm: Permissao; titulo: string; cab: string[]; exemplo: string[][] }> = {
+  lote: {
+    perm: 'entrada.registrar', titulo: 'Produtos do lote',
+    cab: ['titulo_etiqueta', 'nome', 'categoria', 'preco', 'quantidade', 'valor_atribuido', 'estoque', 'peca_unica', 'codigo', 'modelo', 'marca', 'ano', 'tipo', 'tamanho', 'cor', 'condicao'],
+    exemplo: [
+      ['Caneca branca', 'Caneca de porcelana branca', 'Utensílios', '7,00', '6', '2,00', 'Bazar', 'não', '', '', '', '', '', '', 'branca', 'boa'],
+      ['Vestido azul', 'Vestido de festa azul', 'Roupa adulto', '60,00', '1', '15,00', 'Bazar', 'sim', '', '', '', '', 'festa', 'M', 'azul', 'ótima'],
+      ['', '', '', '', '4', '1,50', 'Doações', '', 'BZ000006', '', '', '', '', '', '', ''],
+    ],
+  },
+  categorias: { perm: 'cadastros.gerenciar', titulo: 'Categorias', cab: ['nome', 'preco_padrao', 'venda_por_categoria'], exemplo: [['Roupa adulto', '10,00', 'sim'], ['Peças especiais', '', 'não']] },
+  parceiros: { perm: 'cadastros.gerenciar', titulo: 'Parceiros', cab: ['nome', 'tipo', 'documento', 'cidade'], exemplo: [['Loja Exemplo', 'LOJA', '12.ABC.345/01DE-35', 'Parnaíba'], ['Doadora Exemplo', 'PESSOA_FISICA', '', 'Parnaíba']] },
+  campanhas: { perm: 'cadastros.gerenciar', titulo: 'Campanhas', cab: ['nome', 'inicio', 'fim'], exemplo: [['Campanha do Agasalho', '2026-05-01', '2026-07-31']] },
+  clientes: { perm: 'cadastros.gerenciar', titulo: 'Clientes', cab: ['nome', 'telefone'], exemplo: [['Cliente Exemplo', '(86) 90000-0000']] },
+  'carga-inicial': {
+    perm: 'estoque.ajustar', titulo: 'Carga inicial',
+    cab: ['categoria', 'quantidade', 'preco', 'estoque', 'controle', 'valor_atribuido', 'descricao'],
+    exemplo: [['Roupa adulto', '30', '10,00', 'Bazar', 'categoria', '10,00', ''], ['Peças especiais', '1', '45,00', 'Bazar', 'etiquetado', '20,00', 'Bolsa de couro marrom']],
+  },
 };
 
 export async function rotasAdmin(app: FastifyInstance) {
+  app.get('/modelos/:tipo', { config: { acesso: ['entrada.registrar', 'cadastros.gerenciar', 'estoque.ajustar'] } }, async (req, reply) => {
+    const u = exigirUsuario(req);
+    const { tipo } = parse(z.object({ tipo: z.enum(Object.keys(MODELOS) as [string, ...string[]]) }), req.params);
+    const { formato } = parse(z.object({ formato: z.enum(['csv', 'xlsx']).default('csv') }), req.query);
+    const m = MODELOS[tipo]!;
+    // a mesma regra de quem importa (clientes: cadastros e clientes, como em /importacoes/clientes)
+    if (!tem(u, m.perm) || (tipo === 'clientes' && !tem(u, 'clientes.gerenciar'))) throw new AppError(403, 'Sem permissão para esta importação', 'SEM_PERMISSAO');
+    const nome = `modelo-${tipo}.${formato}`;
+    if (formato === 'csv') return reply.header('Content-Type', 'text/csv; charset=utf-8').header('Content-Disposition', `attachment; filename="${nome}"`).send(gerarCsv(m.cab, m.exemplo));
+    return reply.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      .header('Content-Disposition', `attachment; filename="${nome}"`).send(await gerarXlsx(m.titulo, m.cab, m.exemplo));
+  });
+
   // ---------------- parâmetros ----------------
   const listar = async () => (await prisma.parametro.findMany({ orderBy: { chave: 'asc' } }))
     .map((p) => ({ chave: p.chave, valor: p.valor, descricao: p.descricao ?? '', tipo: TIPOS_PARAM[p.chave]?.tipo ?? 'text' }));
@@ -70,50 +110,49 @@ export async function rotasAdmin(app: FastifyInstance) {
       : tipo === 'campanhas' ? await prisma.campanha.findMany({ select: { nome: true } })
       : await prisma.cliente.findMany({ where: { anonimizadoEm: null }, select: { nome: true } })).map((x) => x.nome.trim().toLowerCase()));
 
-    const erros: { linha: number; mensagem: string }[] = [];
-    const duplicados: { linha: number; valor: string }[] = [];
-    const novos: { linha: number; v: Record<string, string> }[] = [];
+    // S5-05 (P-19): como todas as importações, grava as linhas válidas e devolve as aceitas e as recusadas (com o motivo);
+    // nome já cadastrado (ou repetido na planilha) é recusado, não gravado de novo
+    const aceitas: { linha: number; nome: string }[] = [];
+    const recusadas: { linha: number; nome: string; motivo: string }[] = [];
     const vistos = new Set<string>();
     for (const { numero, valores: v } of pl.linhas) {
       const nome = (v.nome ?? '').trim();
       const chave = nome.toLowerCase();
       const e: string[] = [];
-      if (nome.length < 2 || nome.length > 120) e.push('Nome obrigatório (2 a 120 caracteres)');
-      if (tipo === 'categorias' && v.preco_padrao && !/^\d{1,8}([.,]\d{1,2})?$/.test(v.preco_padrao)) e.push('Preço padrão inválido');
+      if (nome.length < 2 || nome.length > 120) e.push('nome: obrigatório (2 a 120 caracteres)');
+      if (tipo === 'categorias' && v.preco_padrao && !/^\d{1,8}([.,]\d{1,2})?$/.test(v.preco_padrao)) e.push('preco_padrao: valor no formato 12,50');
       else if (tipo === 'categorias' && /^(s|sim|true|1)$/i.test(v.venda_por_categoria ?? '') && !(Number((v.preco_padrao ?? '').replace(',', '.')) > 0)) {
-        e.push('Preço padrão obrigatório e maior que zero quando venda_por_categoria = sim'); // RF-CAD-01 cenário 2
+        e.push('preco_padrao: obrigatório e maior que zero quando venda_por_categoria = sim'); // RF-CAD-01 cenário 2
       }
-      const doc = (v.documento ?? '').replace(/\D/g, '');
-      if (tipo === 'parceiros' && doc && !documentoValido(doc)) e.push('CPF/CNPJ inválido'); // RF-CAD-02 cenário 2
-      if (tipo === 'clientes' && !/^\d{10,11}$/.test((v.telefone ?? '').replace(/\D/g, ''))) e.push('Telefone com DDD obrigatório');
-      if (tipo === 'campanhas' && ((v.inicio && !/^\d{4}-\d{2}-\d{2}$/.test(v.inicio)) || (v.fim && !/^\d{4}-\d{2}-\d{2}$/.test(v.fim)))) e.push('Datas no formato aaaa-mm-dd');
-      if (tipo === 'parceiros' && v.tipo && !['EMPRESA', 'LOJA', 'PESSOA_FISICA', 'OUTRO'].includes(v.tipo.toUpperCase())) e.push('Tipo deve ser EMPRESA, LOJA, PESSOA_FISICA ou OUTRO');
-      if (e.length) { erros.push({ linha: numero, mensagem: e.join('; ') }); continue; }
-      if (existentes.has(chave) || vistos.has(chave)) { duplicados.push({ linha: numero, valor: nome.slice(0, 120) }); continue; }
+      const doc = normalizarDocumento(v.documento ?? '');
+      if (tipo === 'parceiros' && doc && !documentoValido(doc)) e.push('documento: CPF/CNPJ inválido'); // RF-CAD-02 cenário 2
+      if (tipo === 'clientes' && !/^\d{10,11}$/.test((v.telefone ?? '').replace(/\D/g, ''))) e.push('telefone: obrigatório, com DDD');
+      if (tipo === 'campanhas' && ((v.inicio && !dataExiste(v.inicio)) || (v.fim && !dataExiste(v.fim)))) e.push('inicio/fim: data no formato aaaa-mm-dd');
+      else if (tipo === 'campanhas' && v.inicio && v.fim && v.fim < v.inicio) e.push('fim: antes do início');
+      if (tipo === 'parceiros' && v.tipo && !['EMPRESA', 'LOJA', 'PESSOA_FISICA', 'OUTRO'].includes(v.tipo.toUpperCase())) e.push('tipo: EMPRESA, LOJA, PESSOA_FISICA ou OUTRO');
+      if (!e.length && (existentes.has(chave) || vistos.has(chave))) e.push(vistos.has(chave) ? 'nome repetido na planilha' : 'já cadastrado');
+      if (e.length) { recusadas.push({ linha: numero, nome: nome.slice(0, 120), motivo: e.join('; ') }); continue; }
       vistos.add(chave);
-      novos.push({ linha: numero, v });
-    }
-    // Tudo ou nada nos erros; duplicados não são inseridos e voltam para decisão
-    if (erros.length) return { gravado: false, inseridos: 0, duplicados, erros: erros.slice(0, 500) };
-
-    await prisma.$transaction(async (tx) => {
-      for (const { v } of novos) {
-        const nome = v.nome!.trim();
+      try {
         if (tipo === 'categorias') {
-          await tx.categoria.create({ data: { nome, precoPadrao: v.preco_padrao ? v.preco_padrao.replace(',', '.') : null, vendaPorCategoria: /^(s|sim|true|1)$/i.test(v.venda_por_categoria ?? '') } });
+          await prisma.categoria.create({ data: { nome, precoPadrao: v.preco_padrao ? v.preco_padrao.replace(',', '.') : null, vendaPorCategoria: /^(s|sim|true|1)$/i.test(v.venda_por_categoria ?? '') } });
         } else if (tipo === 'parceiros') {
-          await tx.parceiro.create({ data: { nome, tipo: (v.tipo?.toUpperCase() as 'EMPRESA' | 'LOJA' | 'PESSOA_FISICA' | 'OUTRO') || 'OUTRO', documento: (v.documento ?? '').replace(/\D/g, '') || null, cidade: v.cidade || null } });
+          await prisma.parceiro.create({ data: { nome, tipo: (v.tipo?.toUpperCase() as 'EMPRESA' | 'LOJA' | 'PESSOA_FISICA' | 'OUTRO') || 'OUTRO', documento: doc || null, cidade: v.cidade || null } });
         } else if (tipo === 'campanhas') {
-          await tx.campanha.create({ data: { nome, dataInicio: v.inicio ? toDbDate(v.inicio) : null, dataFim: v.fim ? toDbDate(v.fim) : null } });
+          await prisma.campanha.create({ data: { nome, dataInicio: v.inicio ? toDbDate(v.inicio) : null, dataFim: v.fim ? toDbDate(v.fim) : null } });
         } else {
           // Clientes importados: o consentimento registrado é o da planilha (ciência colhida na origem)
-          await tx.cliente.create({ data: { nome, telefone: (v.telefone ?? '').replace(/\D/g, ''),
+          await prisma.cliente.create({ data: { nome, telefone: (v.telefone ?? '').replace(/\D/g, ''),
             consentimentos: { create: { titularTipo: 'CLIENTE', finalidade: FINALIDADE_CLIENTE, versaoAviso: `${VERSAO_AVISO}-importacao`, registradoPorId: u.id } } } });
         }
+        aceitas.push({ linha: numero, nome });
+      } catch (er) {
+        req.log.error({ erro: codigoErro(er), linha: numero }, 'importação de cadastro'); // sem a mensagem: o Prisma repete os valores da linha
+        recusadas.push({ linha: numero, nome: nome.slice(0, 120), motivo: 'Erro ao gravar a linha' });
       }
-      await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'IMPORTACAO', tipo, '*', undefined, { inseridos: novos.length, duplicados: duplicados.length });
-    }, { timeout: 120_000 });
-    return { gravado: true, inseridos: novos.length, duplicados, erros: [] };
+    }
+    await auditar(prisma, { usuarioId: u.id, ip: req.ip }, 'IMPORTACAO', tipo, '*', undefined, { linhas: pl.linhas.length, aceitas: aceitas.length, recusadas: recusadas.length });
+    return { total: pl.linhas.length, aceitas, recusadas };
   });
 
   // ---------------- LGPD: direitos do titular (RF-PRV-02/03, RN-22) ----------------

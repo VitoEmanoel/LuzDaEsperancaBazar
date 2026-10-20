@@ -15,6 +15,7 @@ import { exigirUsuario } from '../../plugins/auth.js';
 import { caixaAbertoDoOperador, registrarSangria, FORMAS, type Forma } from '../caixa/caixa.service.js';
 import { CATEGORIA_REEMBOLSO_ID, registrarReembolso } from './reembolso.service.js';
 import { obterClienteAtivo } from '../cadastros/clientes.routes.js';
+import { gerarPdfResumo } from './resumo.pdf.js';
 
 const zValor = zMoney.refine((v) => toCents(v) > 0, 'valor maior que zero');
 
@@ -247,28 +248,41 @@ export async function rotasFinanceiro(app: FastifyInstance) {
   });
 
   // ================= resumo (RF-FIN-07) =================
-  app.get('/financeiro/resumo', { config: { acesso: ['relatorios.consultar'] } }, async (req) => {
-    const q = parse(z.object({ de: zData, ate: zData }).refine((x) => x.de <= x.ate, 'período inválido'), req.query);
-    const ini = inicioDoDia(q.de), fim = fimDoDiaExclusivo(q.ate);
-    const porForma = await prisma.$queryRaw<{ forma: Forma; total: string }[]>`
-      SELECT p.forma::text AS forma, sum(p.valor)::text AS total FROM venda_pagamento p JOIN venda v ON v.id = p.venda_id
-      WHERE v.status = 'FINALIZADA' AND v.ocorrida_em >= ${ini} AND v.ocorrida_em < ${fim} GROUP BY p.forma`;
-    const receb = await prisma.recebimento.aggregate({ where: { estornadoEm: null, recebidoEm: { gte: ini, lt: fim } }, _sum: { valor: true } });
-    // Reembolso de venda cancelada / recebimento estornado NÃO entra em saídas: a venda cancelada já saiu das entradas e o
-    // recebimento estornado já saiu dos recebimentos; contar de novo deduziria duas vezes. Aparece à parte, em `reembolsos`.
-    const pagas = { status: 'PAGA' as const, pagoEm: { gte: ini, lt: fim } };
-    const saidas = await prisma.contaPagar.aggregate({ where: { ...pagas, OR: [{ categoriaDespesaId: null }, { categoriaDespesaId: { not: CATEGORIA_REEMBOLSO_ID } }] }, _sum: { valorPago: true } });
-    const reembolsos = await prisma.contaPagar.aggregate({ where: { ...pagas, categoriaDespesaId: CATEGORIA_REEMBOLSO_ID }, _sum: { valorPago: true } });
-    const t = Object.fromEntries(FORMAS.map((f) => [f, 0])) as Record<Forma, number>;
-    for (const r of porForma) t[r.forma] = toCents(Number(r.total).toFixed(2));
-    const recebidos = toCents(receb._sum.valor ?? null);
-    const sai = toCents(saidas._sum.valorPago ?? null);
-    // Fiado não é entrada de caixa: entra quando é recebido
-    const entradas = t.DINHEIRO + t.PIX + t.CARTAO_DEBITO + t.CARTAO_CREDITO + recebidos;
-    return {
-      de: q.de, ate: q.ate,
-      entradasPorForma: Object.fromEntries(FORMAS.map((f) => [f, fromCents(t[f])])),
-      recebimentosFiado: fromCents(recebidos), saidas: fromCents(sai), reembolsos: fromCents(toCents(reembolsos._sum.valorPago ?? null)), resultado: fromCents(entradas - sai),
-    };
+  app.get('/financeiro/resumo', { config: { acesso: ['relatorios.consultar'] } }, async (req) => resumoFinanceiro(parse(zPeriodoResumo, req.query)));
+
+  // S5-10: o mesmo resumo em PDF, para imprimir ou guardar (documento não fiscal)
+  app.get('/financeiro/resumo.pdf', { config: { acesso: ['relatorios.consultar'], rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const r = await resumoFinanceiro(parse(zPeriodoResumo, req.query));
+    const inst = await prisma.instituicao.findFirst();
+    const pdf = await gerarPdfResumo({ instituicao: { nome: inst?.nome ?? 'Bazar Luz da Esperança', cnpj: inst?.cnpj ?? null }, ...r });
+    return reply.header('Content-Type', 'application/pdf')
+      .header('Content-Disposition', `attachment; filename="resumo-financeiro-${r.de}-a-${r.ate}.pdf"`).send(pdf);
   });
+}
+
+const zPeriodoResumo = z.object({ de: zData, ate: zData }).refine((x) => x.de <= x.ate, 'período inválido');
+
+/** Resumo do período pelo regime de caixa: vendas por forma, fiado recebido, contas pagas e o resultado. */
+export async function resumoFinanceiro(q: z.infer<typeof zPeriodoResumo>) {
+  const ini = inicioDoDia(q.de), fim = fimDoDiaExclusivo(q.ate);
+  const porForma = await prisma.$queryRaw<{ forma: Forma; total: string }[]>`
+    SELECT p.forma::text AS forma, sum(p.valor)::text AS total FROM venda_pagamento p JOIN venda v ON v.id = p.venda_id
+    WHERE v.status = 'FINALIZADA' AND v.ocorrida_em >= ${ini} AND v.ocorrida_em < ${fim} GROUP BY p.forma`;
+  const receb = await prisma.recebimento.aggregate({ where: { estornadoEm: null, recebidoEm: { gte: ini, lt: fim } }, _sum: { valor: true } });
+  // Reembolso de venda cancelada / recebimento estornado NÃO entra em saídas: a venda cancelada já saiu das entradas e o
+  // recebimento estornado já saiu dos recebimentos; contar de novo deduziria duas vezes. Aparece à parte, em `reembolsos`.
+  const pagas = { status: 'PAGA' as const, pagoEm: { gte: ini, lt: fim } };
+  const saidas = await prisma.contaPagar.aggregate({ where: { ...pagas, OR: [{ categoriaDespesaId: null }, { categoriaDespesaId: { not: CATEGORIA_REEMBOLSO_ID } }] }, _sum: { valorPago: true } });
+  const reembolsos = await prisma.contaPagar.aggregate({ where: { ...pagas, categoriaDespesaId: CATEGORIA_REEMBOLSO_ID }, _sum: { valorPago: true } });
+  const t = Object.fromEntries(FORMAS.map((f) => [f, 0])) as Record<Forma, number>;
+  for (const r of porForma) t[r.forma] = toCents(Number(r.total).toFixed(2));
+  const recebidos = toCents(receb._sum.valor ?? null);
+  const sai = toCents(saidas._sum.valorPago ?? null);
+  // Fiado não é entrada de caixa: entra quando é recebido
+  const entradas = t.DINHEIRO + t.PIX + t.CARTAO_DEBITO + t.CARTAO_CREDITO + recebidos;
+  return {
+    de: q.de, ate: q.ate,
+    entradasPorForma: Object.fromEntries(FORMAS.map((f) => [f, fromCents(t[f])])) as Record<Forma, string>,
+    recebimentosFiado: fromCents(recebidos), saidas: fromCents(sai), reembolsos: fromCents(toCents(reembolsos._sum.valorPago ?? null)), resultado: fromCents(entradas - sai),
+  };
 }

@@ -16,12 +16,14 @@ import { AppError, conflito, invalido, naoEncontrado, proibido } from '../../sha
 import { page, parse, skipTake, zData, zIdParam, zMoney, zMotivo, zPage, zPeriodo, zUuid } from '../../shared/http.js';
 import { auditar } from '../../shared/audit.js';
 import { money, moneyOpt, toCents, fromCents } from '../../shared/money.js';
-import { localDate, periodo, toDbDate } from '../../shared/dates.js';
+import { addDias, localDate, periodo, toDbDate } from '../../shared/dates.js';
 import { paramNum } from '../../shared/parametros.js';
 import { env } from '../../config/env.js';
 import { exigirUsuario, tem, type UsuarioCtx } from '../../plugins/auth.js';
 import { PERFIL_ADMIN_ID } from '../../shared/permissoes.js';
 import { mudarPrecoProduto } from '../estoque/produtos.routes.js';
+import { codigoErro, lerPlanilha } from '../../shared/planilha.js';
+import { cortar, lerNfe, nfeExemplo } from './nfe.js';
 
 export const LOCAL_ID = { BAZAR: 1, DOACOES: 2 } as const;
 export const LOCAL_COD: Record<number, 'BAZAR' | 'DOACOES'> = { 1: 'BAZAR', 2: 'DOACOES' };
@@ -61,6 +63,7 @@ function loteDto(l: LoteRow, r: Resumo) {
     parceiroId: l.parceiroId ?? undefined, parceiroNome: l.parceiro?.nome,
     campanhaId: l.campanhaId ?? undefined, campanhaNome: l.campanha?.nome,
     documento: l.documentoNumero ?? undefined, temAnexo: !!l.documentoArquivo,
+    observacao: l.observacao ?? undefined, // na NF-e (S5-04), a lista dos produtos da nota para o estoque cadastrar
     recebidoEm: l.recebidoEm.toISOString(),
     status: l.status === 'TRIADO' ? 'TRIADO' : 'ABERTO',
     aprovados: r.aprovados, pendentes: r.pendentes, devolvidos: r.devolvidos, descartados: r.descartados, valorAtribuido: fromCents(r.valor),
@@ -186,6 +189,13 @@ const zItem = z.object({
   if (!b.produtoId === !b.produto) erro('produto', 'informe o produto novo ou o produto que já existe (produtoId), um dos dois');
   if (!b.valorAtribuido) erro('valorAtribuido', 'obrigatório');
 });
+/** Linhas por importação de lote (S5-03). */
+const MAX_LINHAS_LOTE = 1000;
+/** Nome da coluna da planilha para cada campo, nas mensagens das linhas recusadas (S5-03). */
+const ROTULO_COLUNA: Record<string, string> = {
+  tituloEtiqueta: 'titulo_etiqueta', nome: 'nome', preco: 'preco', quantidade: 'quantidade', valorAtribuido: 'valor_atribuido', ano: 'ano',
+  modelo: 'modelo', marca: 'marca', tipo: 'tipo', tamanho: 'tamanho', cor: 'cor', condicao: 'condicao', localDestino: 'estoque', produto: 'produto',
+};
 /** Correção de item cadastrado ou devolvido: só os campos enviados mudam. */
 const zCorrecao = z.object({
   quantidade: z.number().int().min(1).max(10_000).optional(),
@@ -196,6 +206,37 @@ const zCorrecao = z.object({
   produto: zCamposProduto.partial().optional(),
 });
 const zDescarte = z.object({ id: zUuid, categoriaId: zUuid, motivoId: zUuid, observacao: z.string().trim().max(500).optional(), descricao: z.string().trim().max(120).optional() });
+
+/** Cria o item do lote (e o produto novo, se for o caso) com a auditoria; usado no cadastro e na importação (S5-03). */
+async function cadastrarItem(tx: Tx, ctx: { usuarioId: string; ip: string }, lote: { id: string; numero: number }, catNome: string,
+  b: z.infer<typeof zItem>, existente: { id: string; nome: string } | null) {
+  const loteId = lote.id;
+  let produtoId = existente?.id ?? null;
+  let nome = existente?.nome;
+  if (b.produto) {
+    const p = b.produto;
+    const novo = await tx.produto.create({
+      data: {
+        codigo: await proximoCodigo(tx), tituloEtiqueta: p.tituloEtiqueta, nome: p.nome, categoriaId: b.categoriaId, precoVenda: p.preco,
+        pecaUnica: p.pecaUnica, modelo: p.modelo ?? null, marca: p.marca ?? null, ano: p.ano ?? null, tipo: p.tipo ?? null,
+        tamanho: p.tamanho ?? null, cor: p.cor ?? null, condicao: p.condicao ?? null, criadoPorId: ctx.usuarioId,
+      },
+    });
+    produtoId = novo.id;
+    nome = novo.nome;
+    await auditar(tx, ctx, 'PRODUTO_CRIADO', 'produto', novo.id, undefined, { codigo: novo.codigo, preco: p.preco, pecaUnica: p.pecaUnica });
+  }
+  await tx.item.create({
+    data: {
+      id: b.id, loteId, categoriaId: b.categoriaId, tipoControle: b.controle, produtoId,
+      descricao: b.descricao || nome || `${catNome} (lote ${lote.numero})`,
+      valorAtribuido: b.valorAtribuido ?? b.preco!, // RN-33 (por categoria): sugerido pelo preço, editável
+      quantidadeInicial: b.quantidade, descarteOrigemId: b.descarteOrigemId ?? null, criadoPorId: ctx.usuarioId,
+      localDestinoId: LOCAL_ID[b.localDestino], // o estoque só recebe na aprovação
+    },
+  });
+  await auditar(tx, ctx, 'ITEM_CADASTRADO', 'item', b.id, undefined, { loteId, produtoId, quantidade: b.quantidade, local: b.localDestino });
+}
 
 export async function rotasLotes(app: FastifyInstance) {
   // leitura dos lotes: quem registra, quem aprova e quem consulta o estoque (Financeiro, só leitura: S3-12, P-07)
@@ -227,9 +268,11 @@ export async function rotasLotes(app: FastifyInstance) {
     return { ...semCusto(u, base), itens: itens.map((i) => semCusto(u, itemTriagemDto(i))), descartes: descartes.map(descarteDto) };
   });
 
-  app.post('/lotes', { config: { acesso: ['entrada.registrar'] } }, async (req, reply) => {
+  // S5-11: o Financeiro (contas a pagar, sem entrada) lança só a compra; os produtos do lote o estoque cadastra depois
+  app.post('/lotes', { config: { acesso: ['entrada.registrar', 'contas_pagar.gerenciar'] } }, async (req, reply) => {
     const u = exigirUsuario(req);
     const b = parse(zNovoLote, req.body);
+    if (b.tipo !== 'COMPRA' && !tem(u, 'entrada.registrar')) proibido('Sem permissão de entrada: só é possível lançar compra');
     const existente = await prisma.loteEntrada.findUnique({ where: { id: b.id }, select: { id: true } });
     if (existente) return reply.code(200).send(semCusto(u, await obterLoteDto(prisma, b.id))); // reenvio idempotente
 
@@ -268,12 +311,82 @@ export async function rotasLotes(app: FastifyInstance) {
     return reply.code(201).send(semCusto(u, await obterLoteDto(prisma, b.id)));
   });
 
+  // ---------------- NF-e (S5-04, P-20) ----------------
+  // A nota vira lote de COMPRA com a conta a pagar (quem lança é quem tem contas a pagar: Admin e Financeiro);
+  // o emitente vira fornecedor quando ainda não existe. Os produtos não viram itens: o estoque cadastra depois.
+  app.post('/lotes/nfe', { config: { acesso: ['contas_pagar.gerenciar'], rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const u = exigirUsuario(req);
+    const arq = await req.file();
+    if (!arq || arq.fieldname !== 'arquivo') throw new AppError(400, 'Arquivo obrigatório (campo "arquivo")', 'ARQUIVO_OBRIGATORIO');
+    const inst = await prisma.instituicao.findUnique({ where: { id: 1 }, select: { cnpj: true } });
+    const nota = lerNfe(await arq.toBuffer(), { cnpjInstituicao: inst?.cnpj?.trim() || null, aceitaHomologacao: env.NODE_ENV !== 'production' });
+
+    const repetida = await prisma.loteEntrada.findUnique({ where: { nfeChave: nota.chave }, select: { numero: true } });
+    if (repetida) conflito('NFE_JA_IMPORTADA', `Esta nota já foi importada no lote #${repetida.numero}`);
+    const existentes = await prisma.parceiro.findMany({ where: { documento: nota.emitente.documento }, select: { id: true, nome: true, ativo: true } });
+    const fornecedor = existentes.find((p) => p.ativo);
+    if (!fornecedor && existentes.length) conflito('FORNECEDOR_INATIVO', `O fornecedor "${existentes[0]!.nome}" está desativado: o Administrador reativa em Cadastros`);
+    if (!fornecedor && !tem(u, 'cadastros.gerenciar') && !tem(u, 'parceiros.criar')) proibido('O emitente não está cadastrado e você não pode criar fornecedor');
+
+    // a observação lista os produtos da nota, para o estoque cadastrar (cabe nos 500 caracteres da coluna)
+    // quantidade sem os zeros depois da vírgula ("20.0000" → 20, "2.5000" → 2.5); a inteira ("100") fica como está
+    const qtd = (q: string) => (q.includes('.') ? q.replace(/0+$/, '').replace(/\.$/, '') : q);
+    const lista = nota.produtos.map((p) => `${qtd(p.quantidade)} ${p.unidade} ${p.nome}`.trim()).join('; ');
+    const observacao = cortar(`NF-e ${nota.numero} série ${nota.serie}: ${lista}`, 500);
+    const id = randomUUID();
+    let fornecedorId = fornecedor?.id;
+    let criouFornecedor = false;
+    try {
+      await prisma.$transaction(async (tx) => {
+        if (!fornecedorId) {
+          // duas notas do mesmo emitente novo ao mesmo tempo: a segunda espera e usa o fornecedor que a primeira criou
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'parceiro:' + nota.emitente.documento}))`;
+          fornecedorId = (await tx.parceiro.findFirst({ where: { documento: nota.emitente.documento, ativo: true }, select: { id: true } }))?.id;
+        }
+        if (!fornecedorId) {
+          const p = await tx.parceiro.create({ data: { nome: nota.emitente.nome, tipo: nota.emitente.tipo, documento: nota.emitente.documento, cidade: nota.emitente.cidade } });
+          fornecedorId = p.id; criouFornecedor = true;
+          await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'PARCEIRO_CRIADO', 'parceiro', p.id, undefined, { origem: 'NFE', tipo: p.tipo });
+        }
+        const lote = await tx.loteEntrada.create({
+          data: {
+            id, tipo: 'COMPRA', parceiroId: fornecedorId, recebidoEm: new Date(), recebidoPorId: u.id, documentoTipo: 'NOTA_FISCAL',
+            documentoNumero: `${nota.numero}/${nota.serie}`, valorCompra: nota.valor, nfeChave: nota.chave, observacao,
+          },
+        });
+        await tx.contaPagar.create({
+          data: { descricao: `Compra — lote ${lote.numero} (NF-e ${nota.numero})`, valor: nota.valor, loteId: lote.id, criadaPorId: u.id, vencimento: toDbDate(nota.vencimento) },
+        });
+        // sem a chave nem o documento: com emitente pessoa física, eles contêm o CPF
+        await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'NFE_IMPORTADA', 'lote_entrada', lote.id, undefined, { parceiroId: fornecedorId, produtos: nota.produtos.length, parcelas: nota.parcelas });
+      });
+    } catch (e) {
+      // dois envios da mesma nota ao mesmo tempo: o índice único da chave segura o segundo
+      if ((e as { code?: string })?.code === 'P2002') conflito('NFE_JA_IMPORTADA', 'Esta nota já foi importada');
+      throw e;
+    }
+    return reply.code(201).send({
+      lote: semCusto(u, await obterLoteDto(prisma, id)),
+      fornecedor: { nome: (await prisma.parceiro.findUnique({ where: { id: fornecedorId! }, select: { nome: true } }))?.nome ?? nota.emitente.nome, novo: criouFornecedor },
+      numero: nota.numero, serie: nota.serie, emissao: nota.emissao, valor: nota.valor, vencimento: nota.vencimento, parcelas: nota.parcelas,
+      produtos: nota.produtos,
+    });
+  });
+
+  app.get('/modelos/nfe', { config: { acesso: ['contas_pagar.gerenciar'] } }, async (_req, reply) => {
+    const inst = await prisma.instituicao.findUnique({ where: { id: 1 }, select: { cnpj: true } });
+    const hoje = localDate();
+    return reply.header('Content-Type', 'application/xml; charset=utf-8').header('Content-Disposition', 'attachment; filename="modelo-nfe.xml"')
+      .send(nfeExemplo(inst?.cnpj?.trim() || null, hoje, addDias(hoje, 30)));
+  });
+
   // ---------------- anexo (RF-ENT-02, RNF-18) ----------------
-  app.post('/lotes/:id/documento', { config: { acesso: ['entrada.registrar'], rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
+  app.post('/lotes/:id/documento', { config: { acesso: ['entrada.registrar', 'contas_pagar.gerenciar'], rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
     const u = exigirUsuario(req);
     const { id } = parse(zIdParam, req.params);
-    const lote = await prisma.loteEntrada.findUnique({ where: { id }, select: { id: true } });
+    const lote = await prisma.loteEntrada.findUnique({ where: { id }, select: { id: true, tipo: true } });
     if (!lote) naoEncontrado('Lote');
+    if (lote!.tipo !== 'COMPRA' && !tem(u, 'entrada.registrar')) proibido('Sem permissão de entrada: só anexa documento de compra');
     const maxMb = await paramNum(prisma, 'anexo.tamanho_max_mb', 5);
     const arquivo = await req.file();
     if (!arquivo || arquivo.fieldname !== 'arquivo') throw new AppError(400, 'Arquivo obrigatório (campo "arquivo")', 'ARQUIVO_OBRIGATORIO');
@@ -339,34 +452,87 @@ export async function rotasLotes(app: FastifyInstance) {
     if (b.produto?.pecaUnica && b.quantidade !== 1) throw new AppError(400, 'Peça única tem quantidade 1', 'PECA_UNICA_QTD'); // RN-08
 
     const item = await prisma.$transaction(async (tx) => {
-      let produtoId = existente?.id ?? null;
-      let nome = existente?.nome;
-      if (b.produto) {
-        const p = b.produto;
-        const novo = await tx.produto.create({
-          data: {
-            codigo: await proximoCodigo(tx), tituloEtiqueta: p.tituloEtiqueta, nome: p.nome, categoriaId: b.categoriaId, precoVenda: p.preco,
-            pecaUnica: p.pecaUnica, modelo: p.modelo ?? null, marca: p.marca ?? null, ano: p.ano ?? null, tipo: p.tipo ?? null,
-            tamanho: p.tamanho ?? null, cor: p.cor ?? null, condicao: p.condicao ?? null, criadoPorId: u.id,
-          },
-        });
-        produtoId = novo.id;
-        nome = novo.nome;
-        await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'PRODUTO_CRIADO', 'produto', novo.id, undefined, { codigo: novo.codigo, preco: p.preco, pecaUnica: p.pecaUnica });
-      }
-      await tx.item.create({
-        data: {
-          id: b.id, loteId, categoriaId: b.categoriaId, tipoControle: b.controle, produtoId,
-          descricao: b.descricao || nome || `${cat!.nome} (lote ${lote!.numero})`,
-          valorAtribuido: b.valorAtribuido ?? b.preco!, // RN-33 (por categoria): sugerido pelo preço, editável
-          quantidadeInicial: b.quantidade, descarteOrigemId: b.descarteOrigemId ?? null, criadoPorId: u.id,
-          localDestinoId: LOCAL_ID[b.localDestino], // o estoque só recebe na aprovação
-        },
-      });
-      await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'ITEM_CADASTRADO', 'item', b.id, undefined, { loteId, produtoId, quantidade: b.quantidade, local: b.localDestino });
+      await cadastrarItem(tx, { usuarioId: u.id, ip: req.ip }, { id: loteId, numero: lote!.numero }, cat!.nome, b, existente);
       return tx.item.findUniqueOrThrow({ where: { id: b.id }, include: itemTriagemInclude });
     });
     return reply.code(201).send(semCusto(u, itemTriagemDto(item)));
+  });
+
+  // Importação de planilha (S5-03, P-19): cada linha vira um item CADASTRADO (sem aprovar), com as mesmas regras do
+  // cadastro na tela. Grava as linhas válidas e devolve as aceitas e as recusadas, cada recusada com o motivo.
+  app.post('/lotes/:id/importacao', { config: { acesso: ['entrada.registrar'], rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) => {
+    const u = exigirUsuario(req);
+    const { id: loteId } = parse(zIdParam, req.params);
+    const lote = await prisma.loteEntrada.findUnique({ where: { id: loteId }, select: { numero: true, status: true, tipo: true } });
+    if (!lote) naoEncontrado('Lote');
+    if (lote!.status === 'TRIADO') conflito('LOTE_TRIADO', 'Lote já triado não aceita registros');
+    const arq = await req.file();
+    if (!arq || arq.fieldname !== 'arquivo') throw new AppError(400, 'Arquivo obrigatório (campo "arquivo")', 'ARQUIVO_OBRIGATORIO');
+    const pl = await lerPlanilha(await arq.toBuffer());
+    // linha a linha na mesma requisição: um limite que termina em segundos (planilha maior vai em partes)
+    if (pl.linhas.length > MAX_LINHAS_LOTE) throw new AppError(413, `No máximo ${MAX_LINHAS_LOTE} linhas por importação: divida a planilha`, 'PLANILHA_GRANDE');
+    const faltam = ['nome', 'categoria', 'preco', 'quantidade'].filter((c) => !pl.cabecalho.includes(c));
+    if (faltam.length && !(pl.cabecalho.includes('codigo') && pl.cabecalho.includes('quantidade'))) {
+      throw new AppError(400, 'Planilha fora do modelo', 'PLANILHA_INVALIDA', `Colunas obrigatórias ausentes: ${faltam.join(', ')}`);
+    }
+
+    const categorias = new Map((await prisma.categoria.findMany({ where: { ativa: true }, select: { id: true, nome: true } })).map((c) => [c.nome.trim().toLowerCase(), c]));
+    const ctx = { usuarioId: u.id, ip: req.ip };
+    const aceitas: { linha: number; itemId: string; codigo?: string; nome: string; quantidade: number }[] = [];
+    const recusadas: { linha: number; nome: string; motivo: string }[] = [];
+    const dinheiro = (v: string) => (v ? v.replace(/\s|R\$/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.') : '');
+
+    for (const { numero, valores: v } of pl.linhas) {
+      const nomeLinha = (v.nome || v.codigo || '').slice(0, 120);
+      const recusar = (motivo: string) => recusadas.push({ linha: numero, nome: nomeLinha, motivo });
+      try {
+        const codigo = (v.codigo ?? '').toUpperCase();
+        const existente = codigo
+          ? await prisma.produto.findFirst({ where: { codigo, ativo: true }, select: { id: true, nome: true, categoriaId: true, pecaUnica: true, categoria: { select: { nome: true } } } })
+          : null;
+        if (codigo && !existente) { recusar(`Produto ${codigo} inexistente ou inativo`); continue; }
+        if (existente?.pecaUnica) { recusar('Peça única não recebe nova entrada: cadastre um produto novo'); continue; }
+        const cat = existente ? { id: existente.categoriaId, nome: existente.categoria.nome } : categorias.get((v.categoria ?? '').trim().toLowerCase());
+        if (!cat) { recusar(v.categoria ? `Categoria "${v.categoria.slice(0, 60)}" não existe ou está inativa` : 'Informe a categoria'); continue; }
+        if (existente && v.categoria && v.categoria.trim().toLowerCase() !== cat.nome.trim().toLowerCase()) { recusar(`O produto ${codigo} é da categoria ${cat.nome}`); continue; }
+        const estoque = (v.estoque ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+        if (estoque && !['BAZAR', 'DOACOES'].includes(estoque)) { recusar('Estoque deve ser Bazar ou Doações'); continue; }
+        // campos obrigatórios vazios: dizer "obrigatório" (e não o formato esperado)
+        const vazios = existente ? [] : ['nome', 'preco'].filter((c) => !(v[c] ?? '').trim());
+        if (!(v.quantidade ?? '').trim()) vazios.push('quantidade');
+        if (!(v.valor_atribuido ?? '').trim()) vazios.push('valor_atribuido');
+        if (vazios.length) { recusar(vazios.map((c) => `${c}: obrigatório`).join('; ')); continue; }
+        const pecaUnica = /^(s|sim|true|1)$/i.test(v.peca_unica ?? '');
+        const dados = {
+          id: randomUUID(), categoriaId: cat.id, controle: 'ETIQUETADO' as const,
+          quantidade: /^\d+$/.test(v.quantidade ?? '') ? Number(v.quantidade) : NaN,
+          valorAtribuido: dinheiro(v.valor_atribuido ?? '') || undefined, localDestino: (estoque || 'BAZAR') as 'BAZAR' | 'DOACOES',
+          ...(existente ? { produtoId: existente.id } : {
+            produto: {
+              tituloEtiqueta: v.titulo_etiqueta || (v.nome ?? '').slice(0, 40), nome: v.nome ?? '', preco: dinheiro(v.preco ?? ''), pecaUnica,
+              modelo: v.modelo, marca: v.marca, tipo: v.tipo, tamanho: v.tamanho, cor: v.cor, condicao: v.condicao,
+              ano: v.ano ? (/^\d{4}$/.test(v.ano) ? Number(v.ano) : NaN) : undefined,
+            },
+          }),
+        };
+        const r = zItem.safeParse(dados);
+        if (!r.success) { recusar(r.error.issues.map((i) => `${ROTULO_COLUNA[String(i.path.at(-1))] ?? String(i.path.at(-1))}: ${i.message}`).join('; ')); continue; }
+        const b = r.data;
+        if (lote!.tipo === 'COMPRA' && !(b.valorAtribuido && toCents(b.valorAtribuido) > 0)) { recusar('Valor atribuído (custo unitário) obrigatório em lote de compra'); continue; }
+        if (b.produto?.pecaUnica && b.quantidade !== 1) { recusar('Peça única tem quantidade 1'); continue; }
+        // cada linha na sua transação: a recusa de uma não desfaz as outras
+        const criado = await prisma.$transaction(async (tx) => {
+          await cadastrarItem(tx, ctx, { id: loteId, numero: lote!.numero }, cat.nome, b, existente);
+          return tx.item.findUniqueOrThrow({ where: { id: b.id }, select: { produto: { select: { codigo: true, nome: true } } } });
+        });
+        aceitas.push({ linha: numero, itemId: b.id, codigo: criado.produto?.codigo, nome: criado.produto?.nome ?? nomeLinha, quantidade: b.quantidade });
+      } catch (e) {
+        recusar(e instanceof AppError ? e.message : 'Erro ao gravar a linha');
+        if (!(e instanceof AppError)) req.log.error({ erro: codigoErro(e), linha: numero }, 'importação de lote'); // sem a mensagem: o Prisma repete os valores da linha
+      }
+    }
+    await auditar(prisma, ctx, 'LOTE_IMPORTADO', 'lote_entrada', loteId, undefined, { linhas: pl.linhas.length, aceitas: aceitas.length, recusadas: recusadas.length });
+    return { total: pl.linhas.length, aceitas, recusadas };
   });
 
   // Correção pelo estoquista enquanto o item não foi aprovado. Item devolvido volta a CADASTRADO (reenvio, P-14).
