@@ -46,7 +46,7 @@ export function TransferenciaPage() {
             </select>
           </Field>
           <Field label="Quantidade" erro={q > saldoOrigem ? 'Quantidade maior que o saldo na origem' : null}>
-            <input inputMode="numeric" value={qtd} onChange={(e) => setQtd(e.target.value.replace(/\D/g, ''))} disabled={item.controle === 'ETIQUETADO'} />
+            <input inputMode="numeric" value={qtd} onChange={(e) => setQtd(e.target.value.replace(/\D/g, ''))} disabled={!!item.pecaUnica} />
           </Field>
           <Field label="Motivo (opcional)"><input value={motivo} onChange={(e) => setMotivo(e.target.value)} maxLength={200} /></Field>
           <button className="btn btn-primary" onClick={transferir} disabled={enviando || !(q > 0) || q > saldoOrigem}>Transferir</button>

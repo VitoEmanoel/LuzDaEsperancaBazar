@@ -9,7 +9,7 @@ import type {
   HistoricoEvento, Instituicao, LocalEstoque, Motivo, Parametro, Parceiro, Perfil, Permissao,
   Recebimento, RegraFiscal, StatusItem, Terminal, TipoControle, TipoEntrada, Venda, AuditoriaRegistro,
 } from '../shared/api/types';
-import { PERMISSOES } from '../shared/api/types';
+import { PERFIL_ADMIN_ID, PERMISSOES } from '../shared/api/types';
 
 let n = 0;
 /** Ids determinísticos legíveis para o seed (formato UUID). */
@@ -26,6 +26,8 @@ export interface LoteDb {
 export interface ProdutoDb {
   id: string; codigo: string; tituloEtiqueta: string; nome: string; categoriaId: string; preco: number; pecaUnica: boolean;
   modelo?: string; marca?: string; ano?: number; tipo?: string; tamanho?: string; cor?: string; condicao?: string;
+  /** Desconto vigente (S3-09): `valor` em centavos (PERCENTUAL: 25,00% = 2500). Validade opcional, até o fim do dia. */
+  desconto?: { tipo: 'PERCENTUAL' | 'PRECO'; valor: number; ate?: string; motivo: string; porNome: string; em: string };
 }
 /** Entrada num lote. `codigo` e `preco` espelham o produto (ETIQUETADO); o saldo só existe depois da aprovação. */
 export interface ItemDb {
@@ -35,17 +37,21 @@ export interface ItemDb {
   loteId: string; criadoEm: string; quantidadeInicial: number; localInicial: LocalEstoque;
   saldo: Record<LocalEstoque, number>;
   produtoId?: string; status: StatusItem; motivoDevolucao?: string;
+  /** Quem cadastrou: só outra pessoa aprova ou devolve (o Administrador pode o próprio; S3-22). Ausente nos itens da carga. */
+  criadoPorId?: string;
 }
 export interface MovDb { id: string; itemId: string; tipo: HistoricoEvento['tipo']; quantidade: number; local?: LocalEstoque; ocorridoEm: string; usuarioNome: string; descricao: string }
 export interface DescarteDb { id: string; loteId: string; categoriaId: string; motivoId: string; registradoEm: string; revertido: boolean }
-export interface VendaDb extends Venda { caixaId: string; terminalId: string; operadorId: string; alocacoes: { itemId: string; quantidade: number; precoUnit: number }[]; clienteId?: string }
+export interface VendaDb extends Venda { caixaId: string; terminalId: string; operadorId: string; alocacoes: { itemId: string; quantidade: number; precoUnit: number; precoTabela?: number }[]; clienteId?: string }
 export interface CaixaDb extends CaixaSessao { operadorId: string; lancamentos: { id: string; tipo: 'SANGRIA' | 'SUPRIMENTO'; valor: number; motivo: string; em: string }[] }
 
-const PERFIL_ADMIN = sid('perfadm'), PERFIL_VENDEDOR = sid('perfcxa'), PERFIL_ESTOQUISTA = sid('perftri'), PERFIL_FINANCEIRO = sid('perffin');
+// o Administrador tem o mesmo id fixo da API real (as telas comparam com PERFIL_ADMIN_ID)
+const PERFIL_ADMIN = PERFIL_ADMIN_ID, PERFIL_VENDEDOR = sid('perfcxa'), PERFIL_ESTOQUISTA = sid('perftri'), PERFIL_FINANCEIRO = sid('perffin');
 // Mesmas permissões dos perfis padrão (migrações 0005 e 0006: o Administrador tem tudo, inclusive abrir caixa).
 const vendedorPerms: Permissao[] = ['caixa.operar', 'clientes.gerenciar'];
-const estoquistaPerms: Permissao[] = ['entrada.registrar', 'estoque.consultar', 'estoque.transferir', 'cadastros.consultar', 'relatorios.estoque', 'parceiros.criar'];
-const financeiroPerms: Permissao[] = ['contas_pagar.gerenciar', 'contas_receber.receber', 'contas_receber.lancar', 'relatorios.consultar', 'relatorios.estoque', 'estoque.consultar'];
+// 0010 (Sprint 3): o Estoquista vê o custo, muda o preço e aprova (não o próprio); o Financeiro vê o custo e dá desconto
+const estoquistaPerms: Permissao[] = ['entrada.registrar', 'estoque.consultar', 'estoque.transferir', 'cadastros.consultar', 'relatorios.estoque', 'parceiros.criar', 'custo.consultar', 'produtos.preco', 'produtos.aprovar'];
+const financeiroPerms: Permissao[] = ['contas_pagar.gerenciar', 'contas_receber.receber', 'contas_receber.lancar', 'relatorios.consultar', 'relatorios.estoque', 'estoque.consultar', 'custo.consultar', 'produtos.desconto'];
 
 const catRoupaAd = sid('catroup'), catRoupaInf = sid('catinf'), catCalc = sid('catcalc'), catLivro = sid('catliv'), catUtens = sid('catute'), catPeca = sid('catpeca');
 const parcNI = sid('parcni'), parcA = sid('parca'), parcB = sid('parcb');

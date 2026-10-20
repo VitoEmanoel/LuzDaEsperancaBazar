@@ -1,23 +1,39 @@
-/** Posição de estoque por estoque, categoria, parceiro, campanha, lote. Saldo vem da view do servidor. */
+/**
+ * Estoque numa tela só (S3-02): posição por estoque, categoria, parceiro, campanha e lote, com as ações na própria linha
+ * (baixa, ajuste de saída, preço). Saldo vem da view do servidor; o custo só aparece para quem pode vê-lo (S3-05).
+ */
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { cadastrosApi } from '../../cadastros/cadastros.api';
 import { estoqueApi } from '../estoque.api';
-import type { LocalEstoque } from '../../../shared/api/types';
+import type { ItemEstoque, LocalEstoque } from '../../../shared/api/types';
 import { useAsync } from '../../../shared/hooks/useAsync';
-import { Empty, ErrorAlert, Field, MoneyText, PageHeader, Pagination, TabelaRolavel } from '../../../shared/components/ui';
+import { useAuth } from '../../auth/AuthContext';
+import { Empty, ErrorAlert, Field, MoneyText, PageHeader, Pagination, PrecoText, TabelaRolavel } from '../../../shared/components/ui';
+import { BaixaAjusteModal, PrecoCategoriaModal, PrecoProdutoModal } from '../components/AcoesEstoque';
+
+type Acao = { tipo: 'baixa' | 'ajuste' | 'preco'; item: ItemEstoque } | { tipo: 'precoCategoria' } | null;
 
 export function EstoquePage() {
+  const { can } = useAuth();
   const [f, setF] = useState({ local: '' as LocalEstoque | '', categoriaId: '', parceiroId: '', campanhaId: '', busca: '' });
   const [busca, setBusca] = useState('');
   const [page, setPage] = useState(1);
+  const [acao, setAcao] = useState<Acao>(null);
   const ops = useAsync(() => Promise.all([cadastrosApi.listar('categorias'), cadastrosApi.listar('parceiros'), cadastrosApi.listar('campanhas')]), []);
-  const { data, erro, carregando } = useAsync(() => estoqueApi.listar({ ...f, local: f.local || undefined, page }), [f, page]);
+  const lista = useAsync(() => estoqueApi.listar({ ...f, local: f.local || undefined, page }), [f, page]);
+  const { data, erro, carregando } = lista;
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => { setF({ ...f, [k]: e.target.value }); setPage(1); };
+  const verCusto = can('custo.consultar');
+  const ajusta = can('estoque.ajustar');
+  const temAcoes = ajusta || can('produtos.preco');
+  async function feito() { setAcao(null); await lista.reload(); }
 
   return (
     <div className="page">
-      <PageHeader titulo="Estoque" />
+      <PageHeader titulo="Estoque">
+        {ajusta && <button className="btn" onClick={() => setAcao({ tipo: 'precoCategoria' })}>Preço da categoria</button>}
+      </PageHeader>
       <form className="filters" onSubmit={(e) => { e.preventDefault(); setF({ ...f, busca }); setPage(1); }}>
         <Field label="Buscar (descrição ou código)"><input value={busca} onChange={(e) => setBusca(e.target.value)} /></Field>
         <Field label="Estoque"><select value={f.local} onChange={set('local')}><option value="">Ambos</option><option value="BAZAR">Bazar</option><option value="DOACOES">Doações</option></select></Field>
@@ -29,17 +45,39 @@ export function EstoquePage() {
       <ErrorAlert erro={erro} />
       {carregando ? <p>Carregando…</p> : !data?.items.length ? <Empty /> : (
         <TabelaRolavel><table className="table">
-          <thead><tr><th>Código</th><th>Descrição</th><th>Categoria</th><th>Lote</th><th>Origem</th><th className="num">Preço</th><th className="num">Bazar</th><th className="num">Doações</th></tr></thead>
+          <thead><tr>
+            <th>Código</th><th>Descrição</th><th>Categoria</th><th>Lote</th><th>Origem</th><th className="num">Preço</th>
+            {verCusto && <th className="num">Custo (unitário)</th>}
+            <th className="num">Quantidade no Bazar</th><th className="num">Quantidade em Doações</th><th className="num">Total</th>
+            {temAcoes && <th />}
+          </tr></thead>
           <tbody>{data.items.map((i) => (
             <tr key={i.id}>
-              <td>{i.codigo ?? '—'}</td><td><Link to={`/estoque/itens/${i.id}`}>{i.descricao}</Link></td><td>{i.categoriaNome}</td>
+              <td>{i.codigo ?? '—'}</td>
+              {/* produto: a tela do produto (todas as entradas); por categoria: o histórico da entrada */}
+              <td><Link to={i.produtoId ? `/estoque/produtos/${i.produtoId}` : `/estoque/itens/${i.id}`}>{i.descricao}</Link></td>
+              <td>{i.categoriaNome}</td>
               <td>#{i.loteNumero}</td><td>{[i.parceiroNome, i.campanhaNome].filter(Boolean).join(' · ')}</td>
-              <td className="num"><MoneyText value={i.preco} /></td><td className="num">{i.saldoBazar}</td><td className="num">{i.saldoDoacoes}</td>
+              <td className="num"><PrecoText value={i.preco} semDesconto={i.precoSemDesconto} /></td>
+              {verCusto && <td className="num"><MoneyText value={i.valorAtribuido} /></td>}
+              <td className="num">{i.saldoBazar}</td><td className="num">{i.saldoDoacoes}</td><td className="num"><strong>{i.saldoBazar + i.saldoDoacoes}</strong></td>
+              {/* sem botão nesta linha, a célula fica vazia (no celular ela some do cartão) */}
+              {temAcoes && <td>{(ajusta || (can('produtos.preco') && i.produtoId)) && <div className="actions">
+                {ajusta && <button className="btn btn-sm" onClick={() => setAcao({ tipo: 'baixa', item: i })}>Baixa</button>}
+                {ajusta && <button className="btn btn-sm" onClick={() => setAcao({ tipo: 'ajuste', item: i })}>Ajuste</button>}
+                {can('produtos.preco') && i.produtoId && <button className="btn btn-sm" onClick={() => setAcao({ tipo: 'preco', item: i })}>Preço</button>}
+              </div>}</td>}
             </tr>
           ))}</tbody>
         </table></TabelaRolavel>
       )}
       {data && <Pagination page={data.page} pageSize={data.pageSize} total={data.total} onChange={setPage} />}
+
+      {(acao?.tipo === 'baixa' || acao?.tipo === 'ajuste') && <BaixaAjusteModal item={acao.item} modo={acao.tipo} onFechar={() => setAcao(null)} onOk={feito} />}
+      {acao?.tipo === 'preco' && acao.item.produtoId && (
+        <PrecoProdutoModal produtoId={acao.item.produtoId} descricao={acao.item.descricao} precoAtual={acao.item.precoSemDesconto ?? acao.item.preco} onFechar={() => setAcao(null)} onOk={feito} />
+      )}
+      {acao?.tipo === 'precoCategoria' && <PrecoCategoriaModal onFechar={() => setAcao(null)} onOk={feito} />}
     </div>
   );
 }

@@ -30,17 +30,19 @@ export const FORMAS_PAGAMENTO: { value: FormaPagamento; label: string }[] = [
 export type FormaQuitacao = Exclude<FormaPagamento, 'FIADO'>;
 export const FORMAS_QUITACAO = FORMAS_PAGAMENTO.filter((f): f is { value: FormaQuitacao; label: string } => f.value !== 'FIADO');
 
-// ---------- Permissões (lista fixa de 26 — ACS) ----------
+// ---------- Permissões (lista fixa de 29 — ACS) ----------
 export const PERMISSOES = [
   'usuarios.gerenciar', 'perfis.gerenciar', 'auditoria.consultar',
   'cadastros.gerenciar', 'cadastros.consultar', 'clientes.gerenciar', 'parametros.gerenciar',
   'entrada.registrar', 'triagem.reabrir', 'produtos.aprovar', 'parceiros.criar',
-  'estoque.consultar', 'estoque.transferir', 'estoque.ajustar',
+  'estoque.consultar', 'estoque.transferir', 'estoque.ajustar', 'custo.consultar', 'produtos.preco', 'produtos.desconto',
   'caixa.operar', 'venda.cancelar', 'venda.desconto_autorizar', 'terminais.gerenciar',
   'contas_pagar.gerenciar', 'contas_receber.receber', 'contas_receber.lancar', 'recebimento.estornar',
   'relatorios.consultar', 'relatorios.estoque', 'fiscal.gerenciar', 'privacidade.gerenciar',
 ] as const;
 export type Permissao = (typeof PERMISSOES)[number];
+/** Perfil padrão Administrador (id fixo): o único que aprova o próprio cadastro (S3-22). */
+export const PERFIL_ADMIN_ID = '00000000-0000-4000-8000-0000000000a1';
 
 // ---------- Erros (RFC 9457) ----------
 export interface ProblemDetails {
@@ -69,7 +71,9 @@ export interface Me {
 }
 export interface LoginResponse { accessToken: string; expiresIn: number; usuario: Me }
 export interface Usuario { id: Uuid; nome: string; login: string; perfilId: Uuid; perfilNome: string; ativo: boolean }
-export interface Perfil { id: Uuid; nome: string; padrao: boolean; permissoes: Permissao[]; limiteDesconto: Money }
+export interface Perfil { id: Uuid; nome: string; padrao: boolean; ativo?: boolean; permissoes: Permissao[]; limiteDesconto: Money }
+/** Permissão com a descrição em português e a área (para a tela de perfis agrupar: S3-18). */
+export interface PermissaoInfo { codigo: Permissao; descricao: string; grupo: string }
 export interface AuditoriaRegistro {
   id: Uuid; ocorridoEm: IsoDateTime; usuarioNome: string; acao: string; entidade: string; entidadeId: string;
 }
@@ -118,7 +122,8 @@ export interface LoteEntrada {
   pendentes?: number;
   devolvidos?: number;
   descartados: number;
-  valorAtribuido: Money;
+  /** Custo: só para quem pode vê-lo (S3-05). */
+  valorAtribuido?: Money;
   valorCompra?: Money;
   pago?: boolean;
 }
@@ -152,8 +157,16 @@ export interface CorrecaoItemRequest {
 }
 export interface ItemLote {
   id: Uuid; controle: TipoControle; codigo?: string; descricao: string; categoriaId: Uuid; categoriaNome: string;
-  quantidade: number; preco: Money; valorAtribuido: Money; localDestino: LocalEstoque;
+  /** O custo só vem para quem tem a permissão de vê-lo (S3-05). */
+  quantidade: number; preco: Money; valorAtribuido?: Money; localDestino: LocalEstoque;
   status: StatusItem; motivoDevolucao?: string; produto?: Produto;
+  /** Quem cadastrou: só outra pessoa aprova ou devolve (o Administrador pode o próprio; S3-22). */
+  criadoPorId?: Uuid;
+}
+/** Item na fila de aprovação (S3-01): o que espera conferência, de todos os lotes. */
+export interface ItemAprovacao extends ItemLote {
+  criadoPorNome: string; criadoEm: IsoDateTime; loteId: Uuid; loteNumero: number; loteTipo: TipoEntrada;
+  parceiroNome?: string; campanhaNome?: string; podeConferir: boolean;
 }
 export interface TriagemDescarteRequest { id: Uuid; categoriaId: Uuid; motivoId: Uuid; observacao?: string }
 export interface LoteDetalhe extends LoteEntrada {
@@ -165,7 +178,12 @@ export interface Etiqueta { itemId: Uuid; codigo: string; descricao: string; pre
 // ---------- EST ----------
 export interface ItemEstoque {
   id: Uuid; codigo?: string; descricao: string;
-  categoriaId: Uuid; categoriaNome: string; controle: TipoControle; preco: Money;
+  categoriaId: Uuid; categoriaNome: string; controle: TipoControle;
+  /** Preço efetivo (com o desconto vigente do produto); `precoSemDesconto` só quando há desconto (S3-10). */
+  preco: Money; precoSemDesconto?: Money;
+  produtoId?: Uuid; pecaUnica?: boolean;
+  /** Custo unitário da entrada: só para quem pode ver custo (S3-05). */
+  valorAtribuido?: Money;
   loteId: Uuid; loteNumero: number; parceiroNome?: string; campanhaNome?: string;
   saldoBazar: number; saldoDoacoes: number;
 }
@@ -177,8 +195,26 @@ export interface TransferenciaRequest {
   id: Uuid; itemId?: Uuid; codigo?: string; quantidade: number; origem: LocalEstoque; destino: LocalEstoque; motivo?: string;
 }
 export interface BaixaRequest { id: Uuid; itemId: Uuid; quantidade: number; local: LocalEstoque; motivoId: Uuid }
+/** O ajuste de inventário é só de saída (S3-03): o estoque só sobe por entrada aprovada. */
 export interface AjusteRequest {
-  id: Uuid; itemId: Uuid; local: LocalEstoque; tipo: 'AJUSTE_ENTRADA' | 'AJUSTE_SAIDA'; quantidade: number; motivo: string;
+  id: Uuid; itemId: Uuid; local: LocalEstoque; tipo: 'AJUSTE_SAIDA'; quantidade: number; motivo: string;
+}
+export type TipoDesconto = 'PERCENTUAL' | 'PRECO';
+/** Desconto no produto (S3-09): percentual ou preço promocional; validade opcional, até o fim do dia. */
+export interface DescontoProduto { tipo: TipoDesconto; valor: Money; ate?: LocalDate; motivo?: string; porNome?: string; em?: IsoDateTime; vigente: boolean }
+export interface ProdutoEntrada {
+  itemId: Uuid; loteId: Uuid; loteNumero: number; recebidoEm: IsoDateTime; origem?: string; status: StatusItem;
+  quantidade: number; saldoBazar: number; saldoDoacoes: number; valorAtribuido?: Money;
+}
+export interface ProdutoEvento {
+  ocorridoEm: IsoDateTime; tipo: string; usuarioNome?: string;
+  /** movimentação */ loteNumero?: number; quantidade?: number; origem?: LocalEstoque; destino?: LocalEstoque; detalhe?: string;
+  /** mudança do produto (auditoria) */ antes?: Record<string, unknown>; depois?: Record<string, unknown>;
+}
+/** Tela do produto (S3-04). */
+export interface ProdutoDetalhe extends CamposProduto {
+  id: Uuid; codigo: string; categoriaId: Uuid; categoriaNome: string; precoEfetivo: Money; desconto?: DescontoProduto;
+  ativo: boolean; criadoEm: IsoDateTime; saldoBazar: number; saldoDoacoes: number; entradas: ProdutoEntrada[]; eventos: ProdutoEvento[];
 }
 export interface CargaInicialResultado { gravado: boolean; linhas: number; erros: { linha: number; mensagem: string }[] }
 
@@ -187,7 +223,7 @@ export interface CatalogoPdv {
   versao: string;
   categorias: CategoriaPdv[];
   /** Um por produto com saldo no Bazar. `itemId` é o id do produto; `saldoBazar` e `pecaUnica` vêm do servidor real (Sprint 2). */
-  itensEtiquetados: { itemId: Uuid; codigo: string; descricao: string; preco: Money; saldoBazar?: number; pecaUnica?: boolean }[];
+  itensEtiquetados: { itemId: Uuid; codigo: string; descricao: string; preco: Money; precoSemDesconto?: Money; saldoBazar?: number; pecaUnica?: boolean }[];
   /** RNF-19: só nome e telefone dos clientes do fiado. */
   clientesFiado: { id: Uuid; nome: string; telefone: string }[];
   regrasFiscais: RegraFiscal[];

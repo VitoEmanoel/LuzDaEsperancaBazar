@@ -18,10 +18,11 @@ const MENU: { grupo: string; cor: 'coral' | 'laranja' | 'sol' | 'ceu' | 'roxo'; 
     { to: '/vendas', rotulo: 'Vendas', perms: ['venda.cancelar'] },
   ] },
   { grupo: 'Entradas e estoque', cor: 'laranja', itens: [
-    { to: '/entradas', rotulo: 'Lotes de entrada', perms: ['entrada.registrar'] },
+    { to: '/entradas', rotulo: 'Lotes de entrada', perms: ['entrada.registrar', 'produtos.aprovar', 'estoque.consultar'] },
+    { to: '/aprovacoes', rotulo: 'Aprovação de produtos', perms: ['produtos.aprovar'] },
+    // baixa, ajuste e preço viraram ações na lista do Estoque (S3-02)
     { to: '/estoque', rotulo: 'Estoque', perms: ['estoque.consultar'] },
     { to: '/estoque/transferir', rotulo: 'Transferência', perms: ['estoque.transferir'] },
-    { to: '/estoque/ajustes', rotulo: 'Baixa / ajuste / preço', perms: ['estoque.ajustar'] },
   ] },
   { grupo: 'Financeiro', cor: 'sol', itens: [
     { to: '/financeiro/pagar', rotulo: 'Contas a pagar', perms: ['contas_pagar.gerenciar'] },
@@ -32,7 +33,7 @@ const MENU: { grupo: string; cor: 'coral' | 'laranja' | 'sol' | 'ceu' | 'roxo'; 
     { to: '/relatorios/prestacao-contas', rotulo: 'Relatórios', perms: ['relatorios.consultar'] },
     { to: '/relatorios/estoque', rotulo: 'Relatórios de estoque', perms: ['relatorios.estoque'], escondeSe: 'relatorios.consultar' },
     { to: '/cadastros/categorias', rotulo: 'Cadastros', perms: ['cadastros.gerenciar', 'cadastros.consultar'] },
-    { to: '/admin', rotulo: 'Administração', perms: ['usuarios.gerenciar', 'perfis.gerenciar', 'parametros.gerenciar', 'auditoria.consultar', 'terminais.gerenciar', 'privacidade.gerenciar', 'fiscal.gerenciar'] },
+    { to: '/admin', rotulo: 'Administração', perms: ['usuarios.gerenciar', 'perfis.gerenciar', 'parametros.gerenciar', 'auditoria.consultar', 'terminais.gerenciar', 'privacidade.gerenciar', 'fiscal.gerenciar', 'cadastros.gerenciar', 'estoque.ajustar'] },
   ] },
 ];
 

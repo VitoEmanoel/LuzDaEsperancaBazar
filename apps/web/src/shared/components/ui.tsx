@@ -74,6 +74,12 @@ export function MoneyText({ value }: { value: Money | number | undefined | null 
   return <span className="num">{value === undefined || value === null ? '—' : formatMoney(value)}</span>;
 }
 
+/** Preço com o desconto do produto: o preço cheio riscado ao lado do preço que vale (S3-10). */
+export function PrecoText({ value, semDesconto }: { value: Money; semDesconto?: Money | undefined }) {
+  if (!semDesconto) return <MoneyText value={value} />;
+  return <span className="num preco-desconto"><s className="muted">{formatMoney(semDesconto)}</s> <strong>{formatMoney(value)}</strong></span>;
+}
+
 export function Badge({ children, tom = 'neutro' }: { children: ReactNode; tom?: 'neutro' | 'ok' | 'alerta' | 'erro' | 'info' }) {
   return <span className={`badge badge-${tom}`}>{children}</span>;
 }

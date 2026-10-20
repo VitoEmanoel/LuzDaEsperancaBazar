@@ -4,10 +4,9 @@
  * e o PDV somando as unidades de um produto bipado de novo. NÃO faz parte do build nem de nenhum script do projeto.
  *
  * Como rodar (a demonstração precisa estar no ar: `VITE_USE_MOCK=true npx vite --port 5174`, dentro de apps/web):
- *   1. numa pasta FORA do projeto: `npm init -y && npm i playwright-core`
- *   2. copie este arquivo para lá e rode: `URL=http://localhost:5174 SHOT=/tmp node produto-ui.mjs`
- * Usa o Chromium que o Playwright já baixou em ~/.cache/ms-playwright/chromium-1243 (ajuste o caminho se a versão for outra,
- * ou use CHROME=/usr/bin/google-chrome-stable).
+ *   1. o `playwright-core` já é dependência de desenvolvimento do apps/web (`npm install` na raiz)
+ *   2. dentro de apps/web: `URL=http://localhost:5174 SHOT=/tmp node tests-ui/produto-ui.mjs`
+ * Usa o Chromium que o Playwright já baixou em ~/.cache/ms-playwright/chromium-1243, ou o do sistema com CHROME=/usr/bin/google-chrome-stable.
  * A demonstração guarda tudo na memória da aba: o teste nunca recarrega a página (só navega pelos links).
  */
 import { chromium } from 'playwright-core';
@@ -21,7 +20,7 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 const naJanela = () => page.evaluate(() => !!document.activeElement?.closest('[role=dialog]') && ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName));
 
 async function entrar(usuario, senha) {
-  await page.getByLabel('Usuário').fill(usuario); await page.getByLabel('Senha').fill(senha);
+  await page.getByLabel('Usuário').fill(usuario); await page.locator('input[type="password"]').fill(senha);
   await page.getByRole('button', { name: 'Entrar' }).click();
   if (usuario === 'vendedor') await page.waitForURL(/\/pdv/, { timeout: 15000 }); // o PDV é tela cheia, sem o menu
   else await page.getByRole('button', { name: 'Sair' }).waitFor({ timeout: 15000 });

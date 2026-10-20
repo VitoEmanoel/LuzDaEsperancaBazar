@@ -1,6 +1,6 @@
 /** EST — estoque (saldo sempre vem de vw_saldo_estoque no servidor). */
 import { http } from '../../shared/api/http';
-import type { AjusteRequest, BaixaRequest, CargaInicialResultado, HistoricoEvento, ItemEstoque, LocalEstoque, Money, Page, TransferenciaRequest } from '../../shared/api/types';
+import type { AjusteRequest, BaixaRequest, CamposProduto, CargaInicialResultado, HistoricoEvento, ItemEstoque, LocalEstoque, LocalDate, Money, Page, ProdutoDetalhe, TipoDesconto, TransferenciaRequest } from '../../shared/api/types';
 
 export const estoqueApi = {
   listar: (q: { local?: LocalEstoque; categoriaId?: string; parceiroId?: string; campanhaId?: string; loteId?: string; busca?: string; page?: number }) =>
@@ -12,6 +12,12 @@ export const estoqueApi = {
   ajuste: (a: AjusteRequest) => http.post<void>('/ajustes', a),
   precoItem: (itemId: string, preco: Money, motivo: string) => http.patch<void>(`/itens/${itemId}/preco`, { preco, motivo }),
   precoCategoria: (categoriaId: string, preco: Money, motivo: string) => http.patch<void>(`/categorias/${categoriaId}/preco`, { preco, motivo }),
+  // ---------- produto (S3-04, S3-08, S3-09) ----------
+  produto: (id: string) => http.get<ProdutoDetalhe>(`/produtos/${id}`),
+  editarProduto: (id: string, campos: Partial<Omit<CamposProduto, 'preco' | 'pecaUnica'>>) => http.patch<void>(`/produtos/${id}`, campos),
+  precoProduto: (id: string, preco: Money, motivo: string) => http.patch<void>(`/produtos/${id}/preco`, { preco, motivo }),
+  darDesconto: (id: string, d: { tipo: TipoDesconto; valor: Money; ate?: LocalDate; motivo: string }) => http.put<{ ok: true }>(`/produtos/${id}/desconto`, d),
+  encerrarDesconto: (id: string, motivo: string) => http.post<void>(`/produtos/${id}/desconto/encerrar`, { motivo }),
   cargaInicial: (arquivo: File) => {
     const fd = new FormData(); fd.append('arquivo', arquivo);
     return http.upload<CargaInicialResultado>('/carga-inicial', fd);

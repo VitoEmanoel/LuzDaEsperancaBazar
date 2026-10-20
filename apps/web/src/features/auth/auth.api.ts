@@ -1,6 +1,6 @@
 /** ACS — autenticação, usuários, perfis, auditoria. */
 import { http, tokenStore } from '../../shared/api/http';
-import type { AuditoriaRegistro, LoginResponse, Me, Page, Perfil, Permissao, Usuario } from '../../shared/api/types';
+import type { AuditoriaRegistro, LoginResponse, Me, Page, Perfil, PermissaoInfo, Usuario } from '../../shared/api/types';
 
 export const authApi = {
   async login(login: string, senha: string): Promise<Me> {
@@ -24,9 +24,11 @@ export const usuariosApi = {
 
 export const perfisApi = {
   listar: () => http.get<Perfil[]>('/perfis'),
-  permissoes: () => http.get<{ codigo: Permissao; descricao: string }[]>('/permissoes'),
+  permissoes: () => http.get<PermissaoInfo[]>('/permissoes'),
   criar: (p: Omit<Perfil, 'padrao'>) => http.post<Perfil>('/perfis', p),
   atualizar: (id: string, patch: Partial<Pick<Perfil, 'nome' | 'permissoes' | 'limiteDesconto'>>) => http.patch<Perfil>(`/perfis/${id}`, patch),
+  /** Desativa o perfil criado por engano: só sem usuário ativo; padrão nunca (S3-20). */
+  desativar: (id: string) => http.post<Perfil>(`/perfis/${id}/desativar`),
 };
 
 export const auditoriaApi = {

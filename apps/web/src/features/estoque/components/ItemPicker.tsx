@@ -15,10 +15,7 @@ export function ItemPicker({ onSelecionar, rotulo = 'Código ou descrição do i
     const t = termo.trim(); if (!t) return;
     setErro(null); setResultados(null);
     try {
-      // Parece código de barras? tenta o lookup direto primeiro.
-      if (/^[A-Z0-9-]{4,}$/i.test(t) && !/\s/.test(t)) {
-        try { const it = await estoqueApi.porCodigo(t); onSelecionar(it); setTermo(''); return; } catch { /* cai na busca */ }
-      }
+      // código ou descrição: a busca traz cada entrada (lote) com saldo; produto com várias entradas pede a escolha (S3-06)
       const r = await estoqueApi.listar({ busca: t, page: 1 });
       if (r.items.length === 1) { onSelecionar(r.items[0]!); setTermo(''); } else setResultados(r.items);
     } catch (err) { setErro(errorMessage(err)); }
