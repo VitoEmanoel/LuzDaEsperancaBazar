@@ -26,7 +26,8 @@ CREATE FUNCTION pg_temp.espera(teste text, cond boolean, detalhe text DEFAULT NU
 $$;
 
 -- massa mínima fictícia
-SELECT id AS u FROM usuario WHERE ativo ORDER BY criado_em LIMIT 1 \gset
+-- o Administrador: desde a 0010 só ele aprova o que ele mesmo cadastrou (S3-22)
+SELECT id AS u FROM usuario WHERE ativo AND perfil_id = '00000000-0000-4000-8000-0000000000a1' ORDER BY criado_em LIMIT 1 \gset
 SELECT id AS cat FROM categoria ORDER BY criado_em LIMIT 1 \gset
 INSERT INTO lote_entrada (id, tipo, parceiro_id, recebido_em, recebido_por_id)
 VALUES ('10000000-0000-4000-8000-000000000001', 'DOACAO', '00000000-0000-4000-8000-0000000000b1', now(), :'u');

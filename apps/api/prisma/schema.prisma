@@ -161,16 +161,17 @@ model Terminal {
   ativo    Boolean  @default(true)
   criadoEm DateTime @default(now()) @map("criado_em") @db.Timestamptz(3)
 
-  sessoes    SessaoUsuario[]
-  caixas     CaixaSessao[]
-  vendas     Venda[]
+  sessoes SessaoUsuario[]
+  caixas  CaixaSessao[]
+  vendas  Venda[]
 
   @@map("terminal")
 }
 
 model Perfil {
   id                String   @id @default(uuid()) @db.Uuid
-  nome              String   @unique
+  /// único entre os perfis ATIVOS, sem diferença de maiúsculas (índice perfil_nome_ativo_key, 0010)
+  nome              String
   descricao         String?
   padrao            Boolean  @default(false)
   limiteDescontoPct Decimal? @map("limite_desconto_pct") @db.Decimal(5, 2)
@@ -220,26 +221,28 @@ model Usuario {
   sessoes SessaoUsuario[]
 
   // FKs de autoria (0003_dba_integridade_desempenho)
-  auditoriaUsuario           Auditoria[]              @relation("AuditoriaUsuario")
-  idempotenciaUsuario        Idempotencia[]           @relation("IdempotenciaUsuario")
-  consentimentoRegistradoPor Consentimento[]          @relation("ConsentimentoRegistradoPor")
-  loteRecebidoPor            LoteEntrada[]            @relation("LoteRecebidoPor")
-  itemCriadoPor              Item[]                   @relation("ItemCriadoPor")
-  descarteRegistradoPor      Descarte[]               @relation("DescarteRegistradoPor")
-  descarteRevertidoPor       Descarte[]               @relation("DescarteRevertidoPor")
-  movimentacaoUsuario        Movimentacao[]           @relation("MovimentacaoUsuario")
-  caixaAbertoPor             CaixaSessao[]            @relation("CaixaAbertoPor")
-  caixaFechadoPor            CaixaSessao[]            @relation("CaixaFechadoPor")
-  lancamentoUsuario          CaixaLancamento[]        @relation("LancamentoUsuario")
-  vendaRegistradaPor         Venda[]                  @relation("VendaRegistradaPor")
-  vendaCanceladaPor          Venda[]                  @relation("VendaCanceladaPor")
-  contaReceberCriadaPor      ContaReceber[]           @relation("ContaReceberCriadaPor")
-  recebimentoUsuario         Recebimento[]            @relation("RecebimentoUsuario")
-  recebimentoEstornadoPor    Recebimento[]            @relation("RecebimentoEstornadoPor")
-  contaPagarCriadaPor        ContaPagar[]             @relation("ContaPagarCriadaPor")
-  regraFiscalCriadaPor       RegraFiscal[]            @relation("RegraFiscalCriadaPor")
-  produtoCriadoPor           Produto[]                @relation("ProdutoCriadoPor")
-  itemAprovadoPor            Item[]                   @relation("ItemAprovadoPor")
+  auditoriaUsuario           Auditoria[]       @relation("AuditoriaUsuario")
+  idempotenciaUsuario        Idempotencia[]    @relation("IdempotenciaUsuario")
+  consentimentoRegistradoPor Consentimento[]   @relation("ConsentimentoRegistradoPor")
+  loteRecebidoPor            LoteEntrada[]     @relation("LoteRecebidoPor")
+  itemCriadoPor              Item[]            @relation("ItemCriadoPor")
+  descarteRegistradoPor      Descarte[]        @relation("DescarteRegistradoPor")
+  descarteRevertidoPor       Descarte[]        @relation("DescarteRevertidoPor")
+  movimentacaoUsuario        Movimentacao[]    @relation("MovimentacaoUsuario")
+  caixaAbertoPor             CaixaSessao[]     @relation("CaixaAbertoPor")
+  caixaFechadoPor            CaixaSessao[]     @relation("CaixaFechadoPor")
+  lancamentoUsuario          CaixaLancamento[] @relation("LancamentoUsuario")
+  vendaRegistradaPor         Venda[]           @relation("VendaRegistradaPor")
+  vendaCanceladaPor          Venda[]           @relation("VendaCanceladaPor")
+  contaReceberCriadaPor      ContaReceber[]    @relation("ContaReceberCriadaPor")
+  recebimentoUsuario         Recebimento[]     @relation("RecebimentoUsuario")
+  recebimentoEstornadoPor    Recebimento[]     @relation("RecebimentoEstornadoPor")
+  contaPagarCriadaPor        ContaPagar[]      @relation("ContaPagarCriadaPor")
+  regraFiscalCriadaPor       RegraFiscal[]     @relation("RegraFiscalCriadaPor")
+  produtoCriadoPor           Produto[]         @relation("ProdutoCriadoPor")
+  itemAprovadoPor            Item[]            @relation("ItemAprovadoPor")
+  itemDevolvidoPor           Item[]            @relation("ItemDevolvidoPor")
+  produtoDescontoPor         Produto[]         @relation("ProdutoDescontoPor")
 
   @@map("usuario")
 }
@@ -439,13 +442,13 @@ model LoteEntrada {
 /// Produto de código único (0009): várias unidades, várias entradas (itens) em lotes diferentes.
 /// O preço é do produto e vale para todas as unidades; peça única tem uma entrada só, de 1 unidade.
 model Produto {
-  id             String   @id @default(uuid()) @db.Uuid
-  codigo         String   @unique
-  tituloEtiqueta String   @map("titulo_etiqueta")
+  id             String    @id @default(uuid()) @db.Uuid
+  codigo         String    @unique
+  tituloEtiqueta String    @map("titulo_etiqueta")
   nome           String
-  categoriaId    String   @map("categoria_id") @db.Uuid
-  precoVenda     Decimal  @map("preco_venda") @db.Decimal(10, 2)
-  pecaUnica      Boolean  @default(false) @map("peca_unica")
+  categoriaId    String    @map("categoria_id") @db.Uuid
+  precoVenda     Decimal   @map("preco_venda") @db.Decimal(10, 2)
+  pecaUnica      Boolean   @default(false) @map("peca_unica")
   modelo         String?
   marca          String?
   ano            Int?
@@ -453,14 +456,22 @@ model Produto {
   tamanho        String?
   cor            String?
   condicao       String?
-  ativo          Boolean  @default(true)
-  criadoPorId    String   @map("criado_por_id") @db.Uuid
-  criadoEm       DateTime @default(now()) @map("criado_em") @db.Timestamptz(3)
-  atualizadoEm   DateTime @updatedAt @map("atualizado_em") @db.Timestamptz(3)
+  ativo          Boolean   @default(true)
+  /// desconto vigente (0010): PERCENTUAL ou PRECO (promocional); validade opcional, até o fim do dia; preço efetivo em fn_preco_efetivo
+  descontoTipo   String?   @map("desconto_tipo") @db.VarChar(20)
+  descontoValor  Decimal?  @map("desconto_valor") @db.Decimal(10, 2)
+  descontoAte    DateTime? @map("desconto_ate") @db.Date
+  descontoMotivo String?   @map("desconto_motivo")
+  descontoPorId  String?   @map("desconto_por_id") @db.Uuid
+  descontoEm     DateTime? @map("desconto_em") @db.Timestamptz(3)
+  criadoPorId    String    @map("criado_por_id") @db.Uuid
+  criadoEm       DateTime  @default(now()) @map("criado_em") @db.Timestamptz(3)
+  atualizadoEm   DateTime  @updatedAt @map("atualizado_em") @db.Timestamptz(3)
 
-  categoria Categoria @relation(fields: [categoriaId], references: [id])
-  criadoPor Usuario   @relation("ProdutoCriadoPor", fields: [criadoPorId], references: [id], onDelete: Restrict)
-  itens     Item[]
+  categoria   Categoria @relation(fields: [categoriaId], references: [id])
+  criadoPor   Usuario   @relation("ProdutoCriadoPor", fields: [criadoPorId], references: [id], onDelete: Restrict)
+  descontoPor Usuario?  @relation("ProdutoDescontoPor", fields: [descontoPorId], references: [id], onDelete: Restrict)
+  itens       Item[]
 
   @@index([categoriaId])
   @@index([nome])
@@ -480,6 +491,7 @@ model Item {
   motivoDevolucao   String?      @map("motivo_devolucao")
   aprovadoPorId     String?      @map("aprovado_por_id") @db.Uuid
   aprovadoEm        DateTime?    @map("aprovado_em") @db.Timestamptz(3)
+  devolvidoPorId    String?      @map("devolvido_por_id") @db.Uuid
   codigoBarras      String?      @unique @map("codigo_barras")
   descricao         String?
   valorAtribuido    Decimal      @map("valor_atribuido") @db.Decimal(10, 2)
@@ -500,6 +512,7 @@ model Item {
   saldos         SaldoEstoque[]
   criadoPor      Usuario        @relation("ItemCriadoPor", fields: [criadoPorId], references: [id], onDelete: Restrict)
   aprovadoPor    Usuario?       @relation("ItemAprovadoPor", fields: [aprovadoPorId], references: [id], onDelete: Restrict)
+  devolvidoPor   Usuario?       @relation("ItemDevolvidoPor", fields: [devolvidoPorId], references: [id], onDelete: Restrict)
 
   @@index([loteId])
   @@index([categoriaId, tipoControle])
@@ -672,18 +685,21 @@ model Venda {
 }
 
 model VendaItem {
-  id             String         @id @default(uuid()) @db.Uuid
-  vendaId        String         @map("venda_id") @db.Uuid
-  itemId         String         @map("item_id") @db.Uuid
-  formaSelecao   FormaSelecao   @map("forma_selecao")
-  quantidade     Int
-  precoUnitario  Decimal        @map("preco_unitario") @db.Decimal(10, 2)
-  desconto       Decimal        @default(0) @db.Decimal(10, 2)
-  valorTotal     Decimal        @map("valor_total") @db.Decimal(10, 2)
-  situacaoFiscal SituacaoFiscal @map("situacao_fiscal")
-  aliquota       Decimal        @default(0) @db.Decimal(5, 2)
-  valorImposto   Decimal        @default(0) @map("valor_imposto") @db.Decimal(10, 2)
-  regraFiscalId  String?        @map("regra_fiscal_id") @db.Uuid
+  id              String         @id @default(uuid()) @db.Uuid
+  vendaId         String         @map("venda_id") @db.Uuid
+  itemId          String         @map("item_id") @db.Uuid
+  formaSelecao    FormaSelecao   @map("forma_selecao")
+  quantidade      Int
+  precoUnitario   Decimal        @map("preco_unitario") @db.Decimal(10, 2)
+  desconto        Decimal        @default(0) @db.Decimal(10, 2)
+  /// preço sem o desconto do produto (só quando houve) e o desconto do produto na linha (0010); `desconto` é o manual do PDV
+  precoTabela     Decimal?       @map("preco_tabela") @db.Decimal(10, 2)
+  descontoProduto Decimal        @default(0) @map("desconto_produto") @db.Decimal(10, 2)
+  valorTotal      Decimal        @map("valor_total") @db.Decimal(10, 2)
+  situacaoFiscal  SituacaoFiscal @map("situacao_fiscal")
+  aliquota        Decimal        @default(0) @db.Decimal(5, 2)
+  valorImposto    Decimal        @default(0) @map("valor_imposto") @db.Decimal(10, 2)
+  regraFiscalId   String?        @map("regra_fiscal_id") @db.Uuid
 
   venda         Venda          @relation(fields: [vendaId], references: [id])
   item          Item           @relation(fields: [itemId], references: [id])

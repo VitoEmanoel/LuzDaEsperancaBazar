@@ -4,11 +4,12 @@ PostgreSQL 16 (compatível com 11+). Fonte da verdade do esquema: `apps/api/pris
 
 | Arquivo | O que faz | Quem roda / onde |
 |---|---|---|
-| `01_ddl_completo.sql` | 0001 a 0009 concatenadas: instalação do zero sem Prisma | dono, banco **vazio** |
+| `01_ddl_completo.sql` | 0001 a 0010 concatenadas: instalação do zero sem Prisma | dono, banco **vazio** |
 | `02_dml_dados_iniciais.sql` | Dados de referência idempotentes (locais, permissões, perfis, motivos, parâmetros, regra fiscal GERAL) | dono |
 | `03_seguranca_papeis.sql` | Papéis `bazar_api` (sem DELETE, sem escrita no saldo, timeouts) e `bazar_relatorio` (somente leitura, sem PII). Senhas por `-v`, vindas do cofre | superusuário, **após cada deploy** |
 | `04_testes_0003.sql` | 28 tentativas de violar as regras da 0003 (tudo em ROLLBACK) | superusuário, banco de teste |
 | `08_testes_0009.sql` | 32 tentativas de violar as regras da 0009 (produto, entrada por lote, aprovação, peça única), mais 3 do papel da API (tudo em ROLLBACK) | superusuário, banco de teste |
+| `09_testes_0010.sql` | 34 tentativas de violar as regras da 0010 (quem aprova e quem devolve, também no INSERT, ajuste só de saída, desconto e preço efetivo, desativação de perfil, auditoria do parceiro sem dado pessoal), tudo em ROLLBACK | superusuário, banco de teste (depois do `test:sprint3`) |
 | `05_carga_volume_teste.sql` | ~5 anos fictícios: 64 mil itens, 129 mil movimentações, 60 mil vendas (recusa rodar fora de banco de teste) | dono, banco de teste |
 | `06_benchmark_queries.sql` | EXPLAIN ANALYZE das 13 consultas mais pesadas da API (SQL copiado de `apps/api/src/`) | qualquer, após o 05 |
 | `07_manutencao_rotina.sql` | Limpeza de sessões/idempotência vencidas, conferência do saldo e da prestação de contas, alertas | dono, diário |
