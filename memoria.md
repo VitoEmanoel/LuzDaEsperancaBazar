@@ -13,7 +13,7 @@ Anotações de quem trabalha no código (Claude Code ou pessoa). Atualize ao ter
 
 ## 2. Estado atual (19/10/2026)
 - Fase: protótipo. Sprint 0, Sprint 1 (sem offline, perfis) e Sprint 1B (regras de venda e caixa, mais o CPF) **concluídas e mergeadas no `main`** (pull request nº 1, merge `f64cdd9`). A branch antiga foi apagada.
-- **Em andamento:** branch `correcao-foco-do-cpf`, que conserta o foco de todas as janelas (bug do CPF relatado pelo humano) e acrescenta os testes de tela. Verificada: typecheck, build e 25 verificações de navegador. Falta o merge do humano.
+- **Nada em andamento.** A correção do foco das janelas (bug do CPF) foi mergeada no `main` (PR nº 2, merge `5b1cb34`, 19/10/2026), junto com os testes de tela em `apps/web/tests-ui/`; a branch foi apagada. O `main` local e o `origin/main` estão iguais. Aguardando a ordem do humano para a Sprint 2.
 - Próxima: **Sprint 2** (produto, lote e cadastro), só com a ordem do humano.
 - Pendente do humano: conferir no navegador as telas de cada perfil (S1-19) e decidir os pontos da seção 8.
 
@@ -90,4 +90,4 @@ Uma linha por dia de trabalho ou por tarefa: `AAAA-MM-DD | tarefa | o que foi fe
 - 2026-10-19 | S1B-01 a S1B-16 | valor recebido e troco obrigatórios, estoque no PDV, exclusão por quantidade, sangria limitada à gaveta, abertura com saldo, total do caixa, linha do tempo e PDF, PDV responsivo, Admin abre caixa; migrações 0006 e 0007; concorrência passou a verificar de verdade | —
 - 2026-10-19 | S1B-17 a S1B-21 | CPF na venda (migração 0008, `test:cpf`, janela no PDV, limite em reais e obrigatoriedade decididos pelo Admin); bug de trava (`void`) achado pelo próprio teste e corrigido | —
 - 2026-10-19 | merge | humano fez o merge no `main` (PR nº 1, `f64cdd9`); branch antiga apagada; verificado: conteúdo idêntico ao testado, sem segredos | —
-- 2026-10-19 | correção do foco do CPF | humano relatou que o foco saía do campo para o ✕ e o "Sim" não respondia; causa: `onFechar` no efeito do `Modal` e `autoFocus` ignorado; corrigido em `correcao-foco-do-cpf`; provado no navegador (6 falhas no código antigo, 11 de 11 no novo) | commit, push e merge do humano
+- 2026-10-19 | correção do foco do CPF | humano relatou que o foco saía do campo para o ✕ e o "Sim" não respondia; causa: `onFechar` no efeito do `Modal` e `autoFocus` ignorado; corrigido na branch `correcao-foco-do-cpf`; provado no navegador (6 falhas no código antigo, 11 de 11 no novo) | — (mergeado no PR nº 2, `5b1cb34`; branch apagada)
