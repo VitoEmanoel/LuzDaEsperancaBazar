@@ -85,11 +85,15 @@ ALTER TABLE "item" ADD CONSTRAINT ck_item_devolucao CHECK ((status = 'DEVOLVIDO'
 -- Nada se apaga (D-09)
 CREATE TRIGGER tg_produto_sem_exclusao BEFORE DELETE ON "produto" FOR EACH ROW EXECUTE FUNCTION fn_bloqueia_exclusao();
 
--- Código não muda; peça única não vira produto de várias unidades (nem o contrário) depois de ter unidade aprovada.
+-- Código não muda; peça única não vira produto de várias unidades (nem o contrário) depois de ter unidade aprovada;
+-- a categoria não muda depois de ter unidade aprovada (as entradas têm a categoria do produto).
 CREATE OR REPLACE FUNCTION fn_produto_imutavel() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF NEW.codigo <> OLD.codigo OR NEW.criado_por_id <> OLD.criado_por_id OR NEW.criado_em <> OLD.criado_em THEN
     PERFORM fn_falha('ORIGEM_IMUTAVEL', 'O código do produto não muda');
+  END IF;
+  IF NEW.categoria_id <> OLD.categoria_id AND EXISTS (SELECT 1 FROM item WHERE produto_id = OLD.id AND status = 'APROVADO') THEN
+    PERFORM fn_falha('CATEGORIA_DO_PRODUTO', 'Produto com unidades aprovadas não muda de categoria');
   END IF;
   IF NEW.peca_unica <> OLD.peca_unica AND EXISTS (SELECT 1 FROM item WHERE produto_id = OLD.id AND status = 'APROVADO') THEN
     PERFORM fn_falha('PECA_UNICA_IMUTAVEL', 'Produto com unidades aprovadas não muda entre peça única e várias unidades');
@@ -145,14 +149,14 @@ BEGIN
   RETURN NEW;
 END $$;
 
--- No COMMIT: item aprovado tem a ENTRADA da quantidade inicial; item não aprovado não mexe no estoque.
+-- No COMMIT: item aprovado tem a ENTRADA da quantidade inicial, no local escolhido no cadastro; item não aprovado não mexe no estoque.
 CREATE OR REPLACE FUNCTION fn_item_exige_entrada() RETURNS trigger LANGUAGE plpgsql AS $$
-DECLARE v_status "StatusItem"; v_qtd int;
+DECLARE v_status "StatusItem"; v_qtd int; v_local int;
 BEGIN
-  SELECT status, quantidade_inicial INTO v_status, v_qtd FROM item WHERE id = NEW.id; -- estado no fim da transação
+  SELECT status, quantidade_inicial, local_destino_id INTO v_status, v_qtd, v_local FROM item WHERE id = NEW.id; -- estado no fim da transação
   IF v_status = 'APROVADO' THEN
-    IF NOT EXISTS (SELECT 1 FROM movimentacao WHERE item_id = NEW.id AND tipo = 'ENTRADA' AND quantidade = v_qtd) THEN
-      PERFORM fn_falha('ITEM_SEM_ENTRADA', 'Item aprovado precisa da movimentação de ENTRADA com a quantidade inicial');
+    IF NOT EXISTS (SELECT 1 FROM movimentacao WHERE item_id = NEW.id AND tipo = 'ENTRADA' AND quantidade = v_qtd AND local_destino_id = v_local) THEN
+      PERFORM fn_falha('ITEM_SEM_ENTRADA', 'Item aprovado precisa da movimentação de ENTRADA com a quantidade inicial, no local do cadastro');
     END IF;
   ELSIF EXISTS (SELECT 1 FROM movimentacao WHERE item_id = NEW.id) THEN
     PERFORM fn_falha('ITEM_NAO_APROVADO', 'O item só movimenta o estoque depois de aprovado');
@@ -204,6 +208,11 @@ BEGIN
     END IF;
   END IF;
 
+  -- a ENTRADA lê o produto com trava compartilhada: uma mudança simultânea de "peça única" espera a aprovação terminar
+  IF NEW.tipo = 'ENTRADA' AND v_item.produto_id IS NOT NULL THEN
+    PERFORM 1 FROM produto WHERE id = v_item.produto_id FOR SHARE;
+  END IF;
+
   -- RN-08: peça única nunca tem mais de 1 unidade em estoque
   IF v_item.tipo_controle = 'ETIQUETADO' AND NEW.local_origem_id IS NULL
      AND coalesce((SELECT peca_unica FROM produto WHERE id = v_item.produto_id), true) THEN
@@ -225,8 +234,8 @@ BEGIN
   RETURN NEW;
 END $$;
 
--- Doação exige parceiro (campanha opcional). Gatilho só na criação: lotes antigos com só campanha continuam valendo
--- (um CHECK NOT VALID seria conferido de novo em qualquer UPDATE do lote antigo, como ao encerrar a triagem).
+-- Doação exige parceiro (campanha opcional). Gatilho na criação e quando o tipo ou o parceiro mudam: lotes antigos com só
+-- campanha continuam valendo (um CHECK NOT VALID seria conferido de novo em qualquer UPDATE, como ao encerrar o lote).
 CREATE OR REPLACE FUNCTION fn_lote_doacao_exige_parceiro() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF NEW.tipo = 'DOACAO' AND NEW.parceiro_id IS NULL THEN
@@ -234,7 +243,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END $$;
-CREATE TRIGGER tg_lote_doacao_exige_parceiro BEFORE INSERT ON "lote_entrada" FOR EACH ROW EXECUTE FUNCTION fn_lote_doacao_exige_parceiro();
+CREATE TRIGGER tg_lote_doacao_exige_parceiro BEFORE INSERT OR UPDATE OF tipo, parceiro_id ON "lote_entrada" FOR EACH ROW EXECUTE FUNCTION fn_lote_doacao_exige_parceiro();
 
 -- ------------------------------------------------------------------ prestação de contas: só itens aprovados
 -- Mesmas colunas da 0003; itens cadastrados ou devolvidos ainda não foram recebidos no estoque.

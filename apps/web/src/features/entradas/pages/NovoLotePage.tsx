@@ -84,7 +84,7 @@ export function NovoLotePage() {
           {!parceiroId && <small className="hint">Sem doador conhecido, use “Doador não identificado”.</small>}
           {can('cadastros.gerenciar', 'parceiros.criar') && <button type="button" className="btn btn-sm" onClick={() => setNovoParceiro(true)}>+ Novo parceiro</button>}
         </div>
-        <Field label="Documento de origem (nº do termo, nota…)"><input value={documento} onChange={(e) => setDocumento(e.target.value)} maxLength={80} /></Field>
+        <Field label="Documento de origem (nº do termo, nota…)"><input value={documento} onChange={(e) => setDocumento(e.target.value)} maxLength={60} /></Field>
         <Field label={`Anexo (PDF/PNG/JPEG, até ${MAX_MB} MB)`} erro={erroArquivo}>
           <input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" onChange={(e) => setArquivo(e.target.files?.[0] ?? null)} />
         </Field>

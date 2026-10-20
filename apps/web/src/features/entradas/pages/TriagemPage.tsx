@@ -140,7 +140,7 @@ export function TriagemPage() {
         onConfirmar={async (m) => { await lotesApi.reverterDescarte(reverter!, m); toast('Descarte revertido.'); await lote.reload(); }} />
       <ConfirmMotivo aberto={!!devolver} titulo="Devolver ao estoquista" descricao={`${devolver?.descricao ?? ''}: diga o que precisa ser corrigido.`} rotuloConfirmar="Devolver"
         onFechar={() => setDevolver(null)} onConfirmar={async (m) => { await lotesApi.devolverItem(devolver!.id, m); toast('Item devolvido.'); await lote.reload(); }} />
-      {corrigir && <CorrigirModal loteId={id} item={corrigir} onFechar={() => setCorrigir(null)} onOk={async () => { setCorrigir(null); toast('Item corrigido e enviado para aprovação.'); await lote.reload(); }} />}
+      {corrigir && <CorrigirModal loteId={id} compra={l.tipo === 'COMPRA'} item={corrigir} onFechar={() => setCorrigir(null)} onOk={async () => { setCorrigir(null); toast('Item corrigido e enviado para aprovação.'); await lote.reload(); }} />}
       <Modal titulo="Etiquetas" aberto={!!etiquetas} onFechar={() => setEtiquetas(null)} largura="lg"
         rodape={<><button className="btn" onClick={() => setEtiquetas(null)}>Fechar</button><button className="btn btn-primary" onClick={() => window.print()}>Imprimir</button></>}>
         <div className="print-area etiquetas">
@@ -296,7 +296,7 @@ function BuscaProduto({ escolhido, onEscolher }: { escolhido: ProdutoBusca | nul
 }
 
 /** Correção do estoquista (item cadastrado ou devolvido). Os dados do produto só mudam aqui se ele nasceu nesta entrada. */
-function CorrigirModal({ loteId, item, onFechar, onOk }: { loteId: string; item: ItemLote; onFechar: () => void; onOk: () => Promise<void> }) {
+function CorrigirModal({ loteId, compra, item, onFechar, onOk }: { loteId: string; compra: boolean; item: ItemLote; onFechar: () => void; onOk: () => Promise<void> }) {
   const [qtd, setQtd] = useState(String(item.quantidade));
   const [valor, setValor] = useState(item.valorAtribuido.replace('.', ','));
   const [destino, setDestino] = useState<LocalEstoque>(item.localDestino);
@@ -309,7 +309,7 @@ function CorrigirModal({ loteId, item, onFechar, onOk }: { loteId: string; item:
   const q = Number.parseInt(qtd, 10);
   const valorCents = tryCents(valor);
   const precoCents = item.produto ? tryCents(preco) : null;
-  const valido = Number.isInteger(q) && q > 0 && (!pecaUnica || q === 1) && valorCents !== null && valorCents >= 0
+  const valido = Number.isInteger(q) && q > 0 && (!pecaUnica || q === 1) && valorCents !== null && (compra ? valorCents > 0 : valorCents >= 0)
     && (!item.produto || (titulo.trim() && nome.trim() && precoCents !== null && precoCents > 0));
 
   async function salvar(e: FormEvent) {
@@ -338,7 +338,7 @@ function CorrigirModal({ loteId, item, onFechar, onOk }: { loteId: string; item:
           <Field label="Preço de venda (R$)" hint="Se o produto já tiver outras entradas, o preço muda pela tela do produto."><input inputMode="decimal" value={preco} onChange={(e) => setPreco(e.target.value)} /></Field>
         </>}
         <Field label="Quantidade" hint={pecaUnica ? 'Peça única: 1 unidade.' : undefined}><input inputMode="numeric" value={qtd} disabled={pecaUnica} onChange={(e) => setQtd(e.target.value.replace(/\D/g, '').slice(0, 4))} /></Field>
-        <Field label="Valor atribuído (unitário, R$)"><input inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} /></Field>
+        <Field label="Valor atribuído (unitário, R$)" hint={compra ? 'Lote de compra: o custo unitário pago (maior que zero).' : undefined}><input inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} /></Field>
         <Field label="Estoque de destino"><select value={destino} onChange={(e) => setDestino(e.target.value as LocalEstoque)}><option value="BAZAR">Bazar</option><option value="DOACOES">Doações</option></select></Field>
         <ErrorAlert erro={erro} />
       </form>

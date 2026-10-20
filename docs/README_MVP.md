@@ -296,12 +296,12 @@ Segue o brandbook da instituição (`docs/marca/`):
 |---|---|
 | `tests/smoke.ts` (fluxos críticos e segurança) | 156 ok |
 | `tests/concorrencia.ts` (disputa da última peça, IDOR) | OK |
-| `tests/reteste-qa.ts` (regressão dos 12 tickets) | 36 ok |
+| `tests/reteste-qa.ts` (regressão dos 12 tickets) | 37 ok |
 | `tests/perfis.ts` (acesso de cada perfil, perfil personalizado, proteção dos perfis padrão) | 144 ok |
 | `tests/cpf.ts` (CPF: dígitos, limite em reais, obrigatório, só no comprovante, trava entre vendas, limpeza do mês) | 37 ok |
-| `tests/produto.ts` (Sprint 2: cadastro, devolução, aprovação, nova entrada, PEPS por produto, estorno, disputa da última unidade) | 47 ok |
+| `tests/produto.ts` (Sprint 2: cadastro, devolução, aprovação, nova entrada, PEPS por produto, estorno, disputa da última unidade) | 49 ok |
 | `database/04_testes_0003.sql` (tentativas de violar regras do banco) | 0 falha |
-| `database/08_testes_0009.sql` (regras do produto e da aprovação no banco) | 0 falha |
+| `database/08_testes_0009.sql` (regras do produto e da aprovação no banco) | 32 de 32 (35 com o papel da API) |
 | `database/07_manutencao_rotina.sql` (conferência de saldo e prestação de contas) | 0 divergência |
 | Telas no navegador (`apps/web/tests-ui/`: CPF, janelas do PDV, cadastro e aprovação de produtos) | 11, 14 e 19 ok |
 | Typecheck web + api e `npm audit` | 0 erros, 0 vulnerabilidades |

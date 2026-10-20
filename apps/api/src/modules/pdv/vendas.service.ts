@@ -166,7 +166,7 @@ async function montarPedidos(tx: Tx, porCodigo: Map<string, { qtd: number; desc:
     for (const [codigo, c] of porCodigo) {
       const p = achados.get(codigo);
       if (!p) throw new AppError(409, 'Código não encontrado', 'CODIGO_INEXISTENTE', codigo);
-      if (p.pecaUnica && c.qtd > 1) throw new AppError(409, 'A mesma peça aparece duas vezes na venda', 'CODIGO_DUPLICADO', codigo); // peça única: 1 unidade
+      if (p.pecaUnica && c.qtd > 1) throw new AppError(409, 'Peça única: só 1 unidade por venda', 'CODIGO_DUPLICADO', codigo);
       pedidos.push({ chave: p.id, forma: 'CODIGO', nome: `${codigo} — ${p.nome}`, categoriaId: p.categoriaId, quantidade: c.qtd, precoCents: toCents(p.precoVenda), descontoCents: c.desc, pecaUnica: p.pecaUnica });
     }
   }

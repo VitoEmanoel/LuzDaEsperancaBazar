@@ -192,6 +192,7 @@ for (const [tipo, lista] of Object.entries(cadastros)) {
   });
   rota('POST', `/${tipo}`, tipo === 'parceiros' ? ['cadastros.gerenciar', 'parceiros.criar'] : ['cadastros.gerenciar'], ({ user, body }) => {
     exigir(body?.nome?.trim(), 'nome');
+    const ja = lista.find((x) => x.id === body.id); if (ja) return ok(dtoCadastro(tipo, ja)); // reenvio com o mesmo id
     if (lista.some((x) => x.nome.toLowerCase() === body.nome.trim().toLowerCase())) return problem(409, 'Já existe um cadastro com este nome', 'NOME_DUPLICADO');
     const invalido = validarCadastro(tipo, body); if (invalido) return invalido;
     const novo = { ...(tipo === 'parceiros' ? { tipo: 'OUTRO' } : {}), ...body, id: body.id ?? uid(), nome: body.nome.trim(), ativo: true };
@@ -509,7 +510,13 @@ function processarVenda(id: string, req: VendaRequest, user: UsuarioDb): VendaDb
   const snap = db.itens.map((i) => ({ i, s: { ...i.saldo } })); const movLen = db.movs.length;
   try {
     const alocacoes: VendaDb['alocacoes'] = []; const linhas: Venda['itens'] = [];
+    // o mesmo código repetido soma (como na API real): uma linha por produto
+    const itensReq: VendaRequest['itens'] = [];
     for (const it of req.itens) {
+      const igual = 'codigo' in it ? itensReq.find((x) => 'codigo' in x && x.codigo.toUpperCase() === it.codigo.toUpperCase()) : undefined;
+      if (igual) igual.quantidade += it.quantidade; else itensReq.push({ ...it });
+    }
+    for (const it of itensReq) {
       if ('codigo' in it) {
         // produto pelo código: PEPS entre as entradas aprovadas com saldo no Bazar (S2-10)
         const p = db.produtos.find((x) => x.codigo === it.codigo.toUpperCase());
@@ -791,7 +798,7 @@ function relatorio(tipo: string, q: URLSearchParams): RelatorioResposta {
       for (const l of db.lotes) {
         const chave = (modo === 'parceiro' ? nomeParc(l.parceiroId) : nomeCamp(l.campanhaId)) ?? '(sem ' + modo + ')';
         const g = grupos.get(chave) ?? { recebidos: 0, descartados: 0, valorAtribuido: 0, vendidos: 0, receita: 0, emEstoque: 0 };
-        const itens = db.itens.filter((i) => i.loteId === l.id);
+        const itens = db.itens.filter((i) => i.loteId === l.id && i.status === 'APROVADO'); // só o aprovado foi recebido (Sprint 2)
         if (noPeriodo(l.recebidoEm, q)) {
           g.recebidos! += itens.reduce((s, i) => s + i.quantidadeInicial, 0);
           g.descartados! += db.descartes.filter((d) => d.loteId === l.id && !d.revertido).length;

@@ -23,10 +23,10 @@ Testes ponta a ponta (banco de **teste** vazio + seed, API rodando):
 ```bash
 API_URL=http://localhost:3000/api/v1 ADMIN_INITIAL_PASSWORD=... npm run test:smoke        # 156 verificações (o smoke vem primeiro: define a senha do admin e cria os usuários)
 API_URL=http://localhost:3000/api/v1 npm run test:concorrencia                            # dois caixas disputando peça, saldo e sangria (espere ~1 minuto depois do smoke: o login aceita 10 por minuto)
-API_URL=http://localhost:3000/api/v1 npm run test:reteste                                 # 36 verificações dos tickets do QA (depois do smoke)
+API_URL=http://localhost:3000/api/v1 npm run test:reteste                                 # 37 verificações dos tickets do QA (depois do smoke)
 API_URL=http://localhost:3000/api/v1 npm run test:perfis                                  # 144 verificações de acesso por perfil (depois do smoke)
 API_URL=http://localhost:3000/api/v1 npm run test:cpf                                     # 37 verificações do CPF na venda (depois do smoke)
-API_URL=http://localhost:3000/api/v1 npm run test:produto                                 # 47 verificações do produto, do cadastro no lote e da aprovação (Sprint 2, depois do smoke)
+API_URL=http://localhost:3000/api/v1 npm run test:produto                                 # 49 verificações do produto, do cadastro no lote e da aprovação (Sprint 2, depois do smoke)
 npm run typecheck && npm run audit --prefix ../..                                                       # 0 erros, 0 vulnerabilidades
 ```
 

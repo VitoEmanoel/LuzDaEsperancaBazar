@@ -172,7 +172,10 @@ export function PdvPage() {
       // Peça fora do catálogo carregado (cadastrada depois): confirma no servidor.
       try {
         const r = await estoqueApi.porCodigo(c);
-        if (r.controle === 'ETIQUETADO' && r.saldoBazar > 0) item = { itemId: r.id, codigo: r.codigo!, descricao: r.descricao, preco: r.preco };
+        if (r.controle === 'ETIQUETADO' && r.saldoBazar > 0) {
+          item = { itemId: r.id, codigo: r.codigo!, descricao: r.descricao, preco: r.preco };
+          void sessao.recarregarCatalogo().catch(() => {}); // traz o produto novo (com o saldo e a peça única) para o próximo bip
+        }
         else if (r.saldoDoacoes > 0) foraDoBazar = true;
       } catch { /* trata abaixo como não encontrado */ }
     }

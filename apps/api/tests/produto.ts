@@ -93,6 +93,10 @@ async function main() {
   const cor = await est.patch(`/lotes/${loteA.id}/itens/${itA.data.id}`, { quantidade: 4, produto: { preco: '8.00' } });
   check(cor.status === 200 && cor.data.status === 'CADASTRADO' && cor.data.quantidade === 4 && cor.data.produto.preco === '8.00' && !cor.data.motivoDevolucao, 'Estoquista corrige e o item volta a cadastrado', cor.data);
   check((await est.patch(`/lotes/${loteA.id}/itens/${vestido.data.id}`, { quantidade: 2 })).data?.code === 'PECA_UNICA_QTD', 'correção não deixa peça única com 2 unidades');
+  const vira = await est.patch(`/lotes/${loteA.id}/itens/${vestido.data.id}`, { quantidade: 2, produto: { pecaUnica: false } });
+  check(vira.status === 200 && vira.data.quantidade === 2 && vira.data.produto.pecaUnica === false, 'na mesma correção deixa de ser peça única e passa a 2 unidades', vira.data);
+  const volta = await est.patch(`/lotes/${loteA.id}/itens/${vestido.data.id}`, { quantidade: 1, produto: { pecaUnica: true } });
+  check(volta.status === 200 && volta.data.quantidade === 1 && volta.data.produto.pecaUnica === true, 'e volta a peça única com 1 unidade', volta.data);
 
   console.log('Aprovação: o saldo só sobe aqui (S2-05, S2-09)');
   const apr = await admin.post(`/itens/${itA.data.id}/aprovar`);

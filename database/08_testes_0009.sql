@@ -112,10 +112,29 @@ SELECT pg_temp.espera('o preço do produto muda', (SELECT preco_venda FROM produ
 SELECT pg_temp.espera_erro('produto não se exclui', $$DELETE FROM produto WHERE id = '20000000-0000-4000-8000-0000000000b2'$$, 'EXCLUSAO_PROIBIDA');
 SELECT pg_temp.espera_erro('preço do produto maior que zero', $$UPDATE produto SET preco_venda = 0 WHERE id = '20000000-0000-4000-8000-0000000000b2'$$, 'ck_produto_preco');
 
+SELECT pg_temp.espera_erro('código do produto só com letras maiúsculas e números',
+  format($$INSERT INTO produto (id, codigo, titulo_etiqueta, nome, categoria_id, preco_venda, criado_por_id, atualizado_em) VALUES (gen_random_uuid(), 'tst 1', 'X', 'X', %L, 1, %L, now())$$, :'cat', :'u'),
+  'ck_produto_codigo');
+SELECT pg_temp.espera_erro('produto com unidade aprovada não muda de categoria',
+  format($$UPDATE produto SET categoria_id = %L WHERE id = '20000000-0000-4000-8000-0000000000b2'$$, :'cat2'), 'CATEGORIA_DO_PRODUTO');
+INSERT INTO produto (id, codigo, titulo_etiqueta, nome, categoria_id, preco_venda, peca_unica, criado_por_id, atualizado_em)
+VALUES ('20000000-0000-4000-8000-0000000000b3', 'TST0003', 'Copo', 'Copo de vidro', :'cat', 3, false, :'u', now());
+INSERT INTO item (id, lote_id, categoria_id, tipo_controle, produto_id, valor_atribuido, quantidade_inicial, criado_por_id, local_destino_id) VALUES
+  ('20000000-0000-4000-8000-0000000000a3', '20000000-0000-4000-8000-000000000001', :'cat', 'ETIQUETADO', '20000000-0000-4000-8000-0000000000b3', 1, 2, :'u', 2);
+SELECT pg_temp.espera_erro('produto com entrada de 2 unidades não vira peça única',
+  $$UPDATE produto SET peca_unica = true WHERE id = '20000000-0000-4000-8000-0000000000b3'$$, 'PECA_UNICA_QTD');
+SELECT pg_temp.espera_erro('a ENTRADA da aprovação vai para o local escolhido no cadastro',
+  format($$UPDATE item SET status = 'APROVADO', aprovado_por_id = %L, aprovado_em = now() WHERE id = '20000000-0000-4000-8000-0000000000a3';
+           INSERT INTO movimentacao (item_id, tipo, local_destino_id, quantidade, usuario_id) VALUES ('20000000-0000-4000-8000-0000000000a3', 'ENTRADA', 1, 2, %L);
+           SET CONSTRAINTS ALL IMMEDIATE$$, :'u', :'u'), 'ITEM_SEM_ENTRADA');
+SET CONSTRAINTS ALL DEFERRED;
+
 -- E. lote
 SELECT pg_temp.espera_erro('doação exige parceiro',
   format($$INSERT INTO lote_entrada (tipo, campanha_id, recebido_em, recebido_por_id) SELECT 'DOACAO', id, now(), %L FROM campanha LIMIT 1$$, :'u'),
   'PARCEIRO_OBRIGATORIO');
+SELECT pg_temp.espera_erro('lote não vira doação sem parceiro depois de criado',
+  $$UPDATE lote_entrada SET parceiro_id = NULL, campanha_id = (SELECT id FROM campanha LIMIT 1) WHERE id = '20000000-0000-4000-8000-000000000001'$$, 'PARCEIRO_OBRIGATORIO');
 SELECT pg_temp.espera('equação da prestação de contas fecha em todos os lotes', NOT EXISTS (
   SELECT 1 FROM vw_prestacao_contas_lote
    WHERE itens_aprovados <> itens_vendidos + em_estoque_bazar + em_estoque_doacoes + itens_baixados - ajustes_liquidos));
