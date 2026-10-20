@@ -42,10 +42,10 @@ O MVP é hoje um **monolito single-tenant** (uma instituição por instalação:
 |---|---|---|
 | **Administrador** | Tudo: cadastros, usuários, perfis, parâmetros, regra fiscal, relatórios, financeiro, cancelamentos, LGPD, auditoria, e abrir caixa (para pagar contas e receber fiado com o dinheiro da gaveta) | Backoffice |
 | **Vendedor** | Abre/fecha o próprio caixa, vende, sangria/suprimento, cadastro rápido de cliente para fiado | PDV em tela cheia (entra direto nele) |
-| **Estoquista** | Registra lotes de doação, cadastra itens (com etiqueta), transfere entre estoques, consulta estoque e relatórios de estoque | Backoffice → Entradas e Estoque |
-| **Financeiro** | Contas a pagar e a receber, resumo financeiro, relatórios, consulta de estoque | Backoffice → Financeiro |
+| **Estoquista** | Registra lotes de doação, cadastra itens (com etiqueta), **aprova e devolve o que outra pessoa cadastrou** (Sprint 3), muda o preço do produto, transfere entre estoques, consulta estoque, custo e relatórios de estoque | Backoffice → Entradas e Estoque |
+| **Financeiro** | Contas a pagar e a receber, resumo financeiro, relatórios, consulta de estoque, de lotes e de produtos (só leitura), custo e **desconto no produto** (Sprint 3) | Backoffice → Financeiro |
 
-Os perfis são **compostos por 24 permissões** (ex.: `caixa.operar`, `estoque.transferir`, `relatorios.consultar`), e o administrador pode criar novos. O menu só esconde o que o usuário não usaria; **quem decide é sempre o servidor**.
+Os perfis são **compostos por 29 permissões** (ex.: `caixa.operar`, `estoque.transferir`, `relatorios.consultar`, `custo.consultar`). O Administrador cria perfis novos em **Administração › Perfis e permissões**: as permissões aparecem em português, agrupadas por área (Vendas e caixa, Entradas e estoque, Financeiro, Relatórios, Administração), com "marcar todas" por grupo; um perfil pode nascer como **cópia** de outro; o perfil criado por engano é **desativado** (só sem usuário ativo; os padrão nunca), e o nome fica livre. Outro Administrador é só um usuário com o perfil Administrador. O menu só esconde o que o usuário não usaria; **quem decide é sempre o servidor**.
 
 ---
 
@@ -114,17 +114,18 @@ Cada domínio tem **o mesmo nome no front e no back** (ex.: `features/financeiro
      - **Por categoria:** itens comuns em quantidade, como antes (o preço é o da categoria).
      Em todos: **valor atribuído unitário** (compra: o **custo**) e o estoque de destino (Bazar ou Doações), usado na aprovação.
    - **Descartar:** um registro por item, com motivo. Descartado nunca entra no estoque.
-3. **Aprovar** (só o Administrador, `produtos.aprovar`): aprova item a item ou o lote inteiro; o estoque recebe a quantidade no local escolhido. **Devolver** exige motivo: o item fica "devolvido", o estoquista corrige (quantidade, valor, destino e, se o produto nasceu nessa entrada, título, nome e preço) e ele volta para a aprovação. Aprovado não volta atrás. Tudo na auditoria.
+3. **Aprovar** (Administrador e Estoquista, `produtos.aprovar`; Sprint 3, P-16): aprova item a item, o lote inteiro ou pela fila **Aprovação de produtos** (`/aprovacoes`, todos os lotes); o estoque recebe a quantidade no local escolhido. **Quem cadastrou não aprova nem devolve o próprio item** (outra pessoa confere; só o perfil Administrador pode o próprio): ao aprovar o lote, os itens da própria pessoa ficam para outra. Vale na API e no banco (`AUTO_APROVACAO`). **Devolver** exige motivo: o item fica "devolvido", o estoquista corrige (quantidade, valor, destino e, se o produto nasceu nessa entrada, título, nome e preço) e ele volta para a aprovação. Aprovado não volta atrás. Tudo na auditoria.
 4. **Etiquetas** Code 39 impressas pelo navegador: título curto, preço atual e código do produto.
 5. **Encerrar o lote.** Lote encerrado não aceita item novo (RN-28), mas os itens dele ainda são aprovados, devolvidos e corrigidos; reabrir ou reverter descarte exige permissão e motivo, e vai para a auditoria. Item de descarte revertido também passa pela aprovação.
 
 ### 5.2 Estoque duplo (Bazar ⇄ Doações)
 
-- **Posição** (`/estoque`) com filtros por estoque, categoria, parceiro e campanha.
-- **Histórico do item** (`/estoque/itens/:id`): linha do tempo de tudo o que aconteceu com ele.
-- **Transferência** entre Bazar e Doações, com motivo e usuário registrados.
-- **Baixa, ajuste e preço**: baixa por motivo, ajuste de inventário, mudança de preço do produto (vale para todas as unidades e entradas) ou da categoria — sempre com motivo e auditoria. Cada linha do estoque é uma entrada (lote) de um produto; transferir pelo código só funciona quando o produto tem uma entrada só (senão, escolha a entrada na lista).
-- **Carga inicial** por planilha (CSV/XLSX), tudo ou nada; aceita "Doações", "doacoes", "DOAÇÕES".
+- **Estoque numa tela só** (`/estoque`, Sprint 3) com filtros por estoque, categoria, parceiro e campanha, e as colunas **Quantidade no Bazar**, **Quantidade em Doações** e **Total**. As ações ficam na própria linha: **Baixa** (com motivo cadastrado) e **Ajuste** de inventário — **só de saída** (o estoque só sobe por entrada aprovada; o banco recusa ajuste de entrada) — para o Administrador; **Preço** do produto para o Administrador e o Estoquista (`produtos.preco`). O preço padrão da categoria fica no botão do topo. Tudo com motivo e auditoria. Cada linha é uma entrada (lote) de um produto.
+- **Custo** (valor atribuído) só para quem tem `custo.consultar` (Administrador, Estoquista, Financeiro): a API não manda o custo a quem não pode ver (o PDV nunca recebe), nem a coluna nos relatórios.
+- **Produto** (`/estoque/produtos/:id`): dados (editáveis por quem cadastra; o código, a categoria e a peça única não mudam aqui), preço, desconto, as entradas com o saldo de cada uma e o histórico (movimentações, preço, desconto, edição). O **histórico da entrada** por categoria continua em `/estoque/itens/:id`.
+- **Desconto no produto** (Financeiro e Administrador, `produtos.desconto`): percentual ou **preço promocional**, com motivo e **validade opcional** (sem data, vale até alguém encerrar; com data, até o fim daquele dia). O PDV, o estoque e a venda usam o **preço efetivo** (`fn_preco_efetivo`, a mesma conta em todo lugar); o desconto manual do PDV pode somar, calculado sobre o preço já com desconto e dentro do limite do perfil (o desconto do produto não conta nesse limite). Se o preço baixar até o promocional, a promoção acaba sozinha. A venda guarda o preço sem desconto e o desconto do produto, e o relatório de vendas mostra o **desconto do produto** e o **desconto no PDV** em colunas separadas.
+- **Transferência** entre Bazar e Doações, com motivo e usuário registrados; produto de várias unidades transfere em quantidade, e um código com várias entradas pede a escolha da entrada.
+- **Carga inicial** por planilha (CSV/XLSX), em **Administração › Carga inicial**, tudo ou nada; aceita "Doações", "doacoes", "DOAÇÕES".
 
 **Regra de ouro:** ninguém escreve no saldo. Toda mudança é uma linha em `movimentacao`, e um trigger do banco atualiza o saldo. Garante: saldo nunca negativo (RN-06/07), só vende do Bazar (RN-10), histórico imutável — nada se apaga (RN-11/24).
 
@@ -294,16 +295,19 @@ Segue o brandbook da instituição (`docs/marca/`):
 
 | Bateria | Resultado atual |
 |---|---|
-| `tests/smoke.ts` (fluxos críticos e segurança) | 156 ok |
+| `tests/smoke.ts` (fluxos críticos e segurança) | 157 ok |
 | `tests/concorrencia.ts` (disputa da última peça, IDOR) | OK |
 | `tests/reteste-qa.ts` (regressão dos 12 tickets) | 37 ok |
-| `tests/perfis.ts` (acesso de cada perfil, perfil personalizado, proteção dos perfis padrão) | 144 ok |
+| `tests/perfis.ts` (acesso de cada perfil, perfil personalizado, proteção dos perfis padrão, custo escondido, desativação) | 200 ok |
 | `tests/cpf.ts` (CPF: dígitos, limite em reais, obrigatório, só no comprovante, trava entre vendas, limpeza do mês) | 37 ok |
 | `tests/produto.ts` (Sprint 2: cadastro, devolução, aprovação, nova entrada, PEPS por produto, estorno, disputa da última unidade) | 49 ok |
-| `database/04_testes_0003.sql` (tentativas de violar regras do banco) | 0 falha |
+| `tests/sprint3.ts` (Sprint 3: aprovação por outra pessoa, fila, ajuste só de saída, produto, custo, preço, desconto no PDV e na venda, relatórios, auditoria do parceiro) | 46 ok |
+| `database/04_testes_0003.sql` (tentativas de violar regras do banco) | 23 de 23 (28 com o papel da API) |
 | `database/08_testes_0009.sql` (regras do produto e da aprovação no banco) | 32 de 32 (35 com o papel da API) |
+| `database/09_testes_0010.sql` (Sprint 3: quem aprova e devolve, ajuste só de saída, desconto e preço efetivo, perfis, auditoria do parceiro) | 34 de 34 |
 | `database/07_manutencao_rotina.sql` (conferência de saldo e prestação de contas) | 0 divergência |
 | Telas no navegador (`apps/web/tests-ui/`: CPF, janelas do PDV, cadastro e aprovação de produtos) | 11, 14 e 19 ok |
+| Telas da Sprint 3 no navegador (Chrome por CDP, sistema real) | 20 + 9 (perfis pela tela) + 11 (correções do QA e impressão do caixa) ok |
 | Typecheck web + api e `npm audit` | 0 erros, 0 vulnerabilidades |
 
 Teste de volume (`05_carga_volume_teste.sql`): cerca de 5 anos simulados — 64 mil itens, 129 mil movimentações, 60 mil vendas.
@@ -326,7 +330,7 @@ psql -d bazar -v senha_api="..." -f database/03_seguranca_papeis.sql
 npm run dev:api                              # http://localhost:3000/api/v1
 
 # Testes, em banco de TESTE, nesta ordem:
-npm run test:smoke && npm run test:concorrencia && npm run test:reteste && npm run test:perfis && npm run test:cpf && npm run test:produto   # espere ~1 minuto entre as baterias: o login aceita 10 por minuto
+npm run test:smoke && npm run test:concorrencia && npm run test:reteste && npm run test:perfis && npm run test:cpf && npm run test:produto && npm run test:sprint3   # espere ~1 minuto entre as baterias: o login aceita 10 por minuto
 ```
 
 **Produção:** atrás de proxy com TLS (`TRUST_PROXY=true`), segredos vindos do cofre, pasta de uploads em volume com backup, `03_seguranca_papeis.sql` após cada deploy e `07_manutencao_rotina.sql` diariamente.
