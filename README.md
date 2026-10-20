@@ -97,7 +97,7 @@ aparelho de caixa e os **usuários** (Vendedor, Estoquista, Financeiro ou um per
 | `npm run typecheck` | `tsc` nos dois workspaces |
 | `npm run audit` | `npm audit --audit-level=high` em todas as dependências |
 | `npm run db:deploy` / `db:seed` | migrações Prisma e carga inicial |
-| `npm run test:smoke` / `test:concorrencia` / `test:reteste` / `test:perfis` | testes ponta a ponta da API (banco de teste); `test:reteste` cobre os tickets do QA; `test:perfis` confere o acesso de cada perfil. O login aceita 10 tentativas por minuto: espere um minuto entre as baterias |
+| `npm run test:smoke` / `test:concorrencia` / `test:reteste` / `test:perfis` / `test:cpf` / `test:produto` | testes ponta a ponta da API (banco de teste); `test:reteste` cobre os tickets do QA; `test:perfis` confere o acesso de cada perfil; `test:produto` cobre o produto, o cadastro no lote e a aprovação (Sprint 2). O login aceita 10 tentativas por minuto: espere um minuto entre as baterias |
 
 Detalhes de cada parte: [`apps/web/README.md`](apps/web/README.md), [`apps/api/README.md`](apps/api/README.md),
 [`database/README.md`](database/README.md). Identidade visual: [`docs/marca/identidade-visual.md`](docs/marca/identidade-visual.md).
