@@ -14,7 +14,7 @@ import { Badge, Empty, ErrorAlert, Field, MoneyText, PageHeader, TabelaRolavel, 
 import { Modal } from '../../../shared/components/Modal';
 import { useAuth } from '../../auth/AuthContext';
 import { fromCents, toCents, tryCents } from '../../../shared/lib/money';
-import { formatDate, maskPhone } from '../../../shared/lib/format';
+import { formatDate, maskPhone, normalizarDocumento } from '../../../shared/lib/format';
 import { uuid } from '../../../shared/lib/uuid';
 import { useToast } from '../../../shared/components/Toast';
 
@@ -39,7 +39,7 @@ const CONFIG: Record<Tipo, { titulo: string; campos: Campo[] }> = {
   parceiros: { titulo: 'Parceiros', campos: [
     { chave: 'nome', rotulo: 'Nome', tipo: 'text' },
     { chave: 'tipo', rotulo: 'Tipo', tipo: 'select', opcoes: TIPOS_PARCEIRO },
-    { chave: 'documento', rotulo: 'CPF ou CNPJ', tipo: 'doc', opcional: true, chaveExibicao: 'documentoExibicao', hint: 'Opcional. Só números (11 ou 14 dígitos).' },
+    { chave: 'documento', rotulo: 'CPF ou CNPJ', tipo: 'doc', opcional: true, chaveExibicao: 'documentoExibicao', hint: 'Opcional. CPF com 11 dígitos ou CNPJ com 14 caracteres (o CNPJ novo pode ter letras).' },
   ] },
   campanhas: { titulo: 'Campanhas', campos: [{ chave: 'nome', rotulo: 'Nome', tipo: 'text' }, { chave: 'inicio', rotulo: 'Início', tipo: 'date' }, { chave: 'fim', rotulo: 'Fim', tipo: 'date' }] },
   'motivos-descarte': { titulo: 'Motivos de descarte', campos: [{ chave: 'nome', rotulo: 'Nome', tipo: 'text' }] },
@@ -144,7 +144,8 @@ function EditarModal({ tipo, campos, registro, onFechar, onOk }: { tipo: Tipo; c
     const v = vals[c.chave];
     if (c.tipo === 'text' && String(v).trim().length < 2) return 'Mínimo de 2 caracteres';
     if (c.tipo === 'tel' && digitos(v).length < 10) return 'Telefone com DDD';
-    if (c.tipo === 'doc' && digitos(v) && ![11, 14].includes(digitos(v).length)) return 'CPF tem 11 dígitos; CNPJ, 14';
+    const doc = c.tipo === 'doc' ? normalizarDocumento(String(v ?? '')) : '';
+    if (doc && !/^(\d{11}|[0-9A-Z]{12}\d{2})$/.test(doc)) return 'CPF tem 11 dígitos; CNPJ, 14 caracteres (os 2 últimos são números)';
     if (c.tipo === 'money') {
       const cents = String(v).trim() ? tryCents(String(v)) : null;
       if (String(v).trim() && (cents === null || cents < 0)) return 'Valor inválido';
@@ -162,7 +163,7 @@ function EditarModal({ tipo, campos, registro, onFechar, onOk }: { tipo: Tipo; c
       if (c.tipo === 'money') { if (String(v).trim()) dados[c.chave] = fromCents(toCents(String(v))); return; }
       if (c.tipo === 'bool') { dados[c.chave] = v; return; }
       if (c.tipo === 'date') { dados[c.chave] = v || undefined; return; }
-      if (c.tipo === 'doc') { if (digitos(v)) dados[c.chave] = digitos(v); return; } // vazio = mantém o atual
+      if (c.tipo === 'doc') { if (normalizarDocumento(String(v ?? ''))) dados[c.chave] = normalizarDocumento(String(v ?? '')); return; } // vazio = mantém o atual
       dados[c.chave] = String(v).trim();
     });
     return dados;
@@ -209,9 +210,9 @@ function EditarModal({ tipo, campos, registro, onFechar, onOk }: { tipo: Tipo; c
           <Field key={c.chave} label={c.rotulo} hint={atual} erro={erroCampo}>
             {c.tipo === 'select'
               ? <select value={String(vals[c.chave])} onChange={(e) => set(e.target.value)}>{c.opcoes!.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
-              : <input type={c.tipo === 'date' ? 'date' : c.tipo === 'tel' ? 'tel' : 'text'} inputMode={c.tipo === 'money' ? 'decimal' : c.tipo === 'doc' ? 'numeric' : undefined}
-                  value={String(vals[c.chave])} onChange={(e) => set(c.tipo === 'doc' ? e.target.value.replace(/\D/g, '').slice(0, 14) : e.target.value)}
-                  maxLength={c.tipo === 'doc' ? 14 : 120} autoComplete="off" aria-invalid={!!erroCampo} />}
+              : <input type={c.tipo === 'date' ? 'date' : c.tipo === 'tel' ? 'tel' : 'text'} inputMode={c.tipo === 'money' ? 'decimal' : undefined}
+                  value={String(vals[c.chave])} onChange={(e) => set(c.tipo === 'doc' ? normalizarDocumento(e.target.value).slice(0, 14) : e.target.value)}
+                  maxLength={c.tipo === 'doc' ? 18 : 120} autoComplete="off" aria-invalid={!!erroCampo} />}
           </Field>
         );
       })}

@@ -15,6 +15,7 @@ import { useAsync } from '../../../shared/hooks/useAsync';
 import { Badge, ErrorAlert, Field, MoneyText, PageHeader, TabelaRolavel } from '../../../shared/components/ui';
 import { ConfirmMotivo } from '../../../shared/components/ConfirmMotivo';
 import { Modal } from '../../../shared/components/Modal';
+import { ImportarPlanilhaModal } from '../components/ImportarPlanilhaModal';
 import { Can } from '../../auth/guards';
 import { useAuth } from '../../auth/AuthContext';
 import { formatDateTime } from '../../../shared/lib/format';
@@ -41,6 +42,7 @@ export function TriagemPage() {
   const [devolver, setDevolver] = useState<ItemLote | null>(null);
   const [corrigir, setCorrigir] = useState<ItemLote | null>(null);
   const [aprovando, setAprovando] = useState(false);
+  const [importar, setImportar] = useState(false);
 
   const l = lote.data;
   const categorias = ops.data?.[0] ?? [];
@@ -81,6 +83,7 @@ export function TriagemPage() {
         {/* as etiquetas do lote abrem na tela Imprimir etiquetas, uma por unidade (S4-04) */}
         {can('etiquetas.imprimir') && etiquetaveis.length > 0 && <Link className="btn" to={caminhoEtiquetas(etiquetaveis)}>Imprimir etiquetas ({etiquetaveis.reduce((s, e) => s + e.quantidade, 0)})</Link>}
         {conferiveis > 0 && <button className="btn btn-primary" disabled={aprovando} onClick={aprovarLote}>Aprovar lote ({conferiveis})</button>}
+        {aberto && registra && <button className="btn" onClick={() => setImportar(true)}>Importar planilha</button>}
         {aberto ? registra && <button className="btn" onClick={encerrar}>Encerrar lote</button>
           : <Can perm="triagem.reabrir"><button className="btn" onClick={() => setReabrir(true)}>Reabrir lote</button></Can>}
       </PageHeader>
@@ -88,6 +91,7 @@ export function TriagemPage() {
         {[l.parceiroNome, l.campanhaNome].filter(Boolean).join(' · ')} · recebido em {formatDateTime(l.recebidoEm)} {l.documento && `· ${l.documento}`}{' '}
         {aberto ? <Badge tom="alerta">Recebendo cadastro</Badge> : <Badge tom="ok">Encerrado</Badge>}
       </p>
+      {l.observacao && <p className="card"><strong>Observação do lote:</strong> {l.observacao}</p>}
       <p className="hint">Os itens cadastrados só entram no estoque depois que outra pessoa confere e aprova (o Administrador ou outro Estoquista).</p>
       <div className="contadores" aria-live="polite">
         <div className="card"><span>No estoque (unidades)</span><strong>{l.aprovados}</strong></div>
@@ -104,6 +108,8 @@ export function TriagemPage() {
           <FormDescartar loteId={id} categorias={categorias} motivos={motivos} onOk={() => lote.reload()} />
         </div>
       )}
+
+      {importar && <ImportarPlanilhaModal loteId={id} compra={l.tipo === 'COMPRA'} onFechar={(importou) => { setImportar(false); if (importou) void lote.reload(); }} />}
 
       <section>
         <h2>Itens do lote</h2>

@@ -1,6 +1,6 @@
 /** EST — estoque (saldo sempre vem de vw_saldo_estoque no servidor). */
 import { http } from '../../shared/api/http';
-import type { AjusteRequest, BaixaRequest, CamposProduto, CargaInicialResultado, EtiquetasPreparadas, HistoricoEvento, ItemEstoque, LocalEstoque, LocalDate, Money, Page, PedidoEtiquetas, ProdutoDetalhe, TamanhoRolo, TipoDesconto, TransferenciaRequest } from '../../shared/api/types';
+import type { AjusteRequest, BaixaRequest, CamposProduto, EtiquetasPreparadas, HistoricoEvento, ItemEstoque, LocalEstoque, LocalDate, Money, Page, PedidoEtiquetas, ProdutoDetalhe, ResultadoImportacao, TamanhoRolo, TipoDesconto, TransferenciaRequest } from '../../shared/api/types';
 
 export const estoqueApi = {
   listar: (q: { local?: LocalEstoque; categoriaId?: string; parceiroId?: string; campanhaId?: string; loteId?: string; busca?: string; page?: number }) =>
@@ -25,6 +25,6 @@ export const estoqueApi = {
   imprimirEtiquetas: (p: PedidoEtiquetas) => http.post<EtiquetasPreparadas>('/etiquetas/impressoes', p),
   cargaInicial: (arquivo: File) => {
     const fd = new FormData(); fd.append('arquivo', arquivo);
-    return http.upload<CargaInicialResultado>('/carga-inicial', fd);
+    return http.upload<ResultadoImportacao>('/carga-inicial', fd);
   },
 };

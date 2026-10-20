@@ -5,7 +5,8 @@ import { importacoesApi, parametrosApi } from '../admin.api';
 import { regrasFiscaisApi } from '../../relatorios/relatorios.api';
 import { terminaisApi } from '../../caixa/caixa.api';
 import { errorMessage } from '../../../shared/api/http';
-import type { CargaInicialResultado, ImportacaoResultado, Instituicao, RegraFiscal } from '../../../shared/api/types';
+import type { Instituicao, RegraFiscal, ResultadoImportacao } from '../../../shared/api/types';
+import { BaixarModelo, ResultadoImportacaoView } from '../../../shared/components/Importacao';
 import { estoqueApi } from '../../estoque/estoque.api';
 import { useAsync } from '../../../shared/hooks/useAsync';
 import { Badge, ErrorAlert, Field, TabelaRolavel } from '../../../shared/components/ui';
@@ -114,50 +115,46 @@ export function RegrasFiscaisTab() {
 export function ImportacaoTab() {
   const [tipo, setTipo] = useState<'categorias' | 'parceiros' | 'campanhas' | 'clientes'>('parceiros');
   const [arquivo, setArquivo] = useState<File | null>(null);
-  const [res, setRes] = useState<ImportacaoResultado | null>(null);
+  const [res, setRes] = useState<ResultadoImportacao | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  const [enviando, setEnviando] = useState(false);
   async function enviar() {
-    if (!arquivo) return; setErro(null); setRes(null);
-    try { setRes(await importacoesApi.importar(tipo, arquivo)); } catch (e) { setErro(errorMessage(e)); }
+    if (!arquivo || enviando) return;
+    setEnviando(true); setErro(null); setRes(null);
+    try { setRes(await importacoesApi.importar(tipo, arquivo)); } catch (e) { setErro(errorMessage(e)); } finally { setEnviando(false); }
   }
   return (
     <section className="narrow card">
-      <p>Importação de cadastros por planilha. Duplicados são listados <strong>sem gravar</strong>.</p>
-      <Field label="Tipo"><select value={tipo} onChange={(e) => setTipo(e.target.value as typeof tipo)}><option value="parceiros">Parceiros</option><option value="campanhas">Campanhas</option><option value="categorias">Categorias</option><option value="clientes">Clientes</option></select></Field>
+      <p>Importação de cadastros por planilha. As linhas certas são gravadas; as erradas e as que já existem voltam com o motivo.</p>
+      <Field label="Tipo"><select value={tipo} onChange={(e) => { setTipo(e.target.value as typeof tipo); setRes(null); }}><option value="parceiros">Parceiros</option><option value="campanhas">Campanhas</option><option value="categorias">Categorias</option><option value="clientes">Clientes</option></select></Field>
+      <BaixarModelo tipo={tipo} />
       <Field label="Planilha (XLSX/CSV)"><input type="file" accept=".xlsx,.csv" onChange={(e) => setArquivo(e.target.files?.[0] ?? null)} /></Field>
-      <button className="btn btn-primary" disabled={!arquivo} onClick={enviar}>Validar e importar</button>
+      <button className="btn btn-primary" disabled={!arquivo || enviando} onClick={enviar}>{enviando ? 'Importando…' : 'Importar'}</button>
       <ErrorAlert erro={erro} />
-      {res && (
-        <div className={`alert ${res.gravado ? 'alert-ok' : 'alert-warn'}`}>
-          {res.gravado ? `${res.inseridos} registro(s) importado(s).` : 'Nada foi gravado.'}
-          {res.duplicados.length > 0 && <ul>{res.duplicados.map((d) => <li key={d.linha}>Linha {d.linha}: “{d.valor}” já existe</li>)}</ul>}
-          {res.erros.length > 0 && <ul>{res.erros.map((d) => <li key={d.linha}>Linha {d.linha}: {d.mensagem}</li>)}</ul>}
-        </div>
-      )}
+      {res && <ResultadoImportacaoView r={res} />}
     </section>
   );
 }
 
-/** Carga inicial do estoque por planilha (S3-07: área do Administrador). Tudo ou nada: com qualquer erro, nada é gravado. */
+/** Carga inicial do estoque por planilha (S3-07: área do Administrador). Como todas as importações (S5-05), grava as linhas certas. */
 export function CargaInicialTab() {
   const [arquivo, setArquivo] = useState<File | null>(null);
-  const [res, setRes] = useState<CargaInicialResultado | null>(null);
+  const [res, setRes] = useState<ResultadoImportacao | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   async function enviar() {
-    if (!arquivo) return;
+    if (!arquivo || enviando) return;
     setEnviando(true); setErro(null); setRes(null);
     try { setRes(await estoqueApi.cargaInicial(arquivo)); } catch (e) { setErro(errorMessage(e)); } finally { setEnviando(false); }
   }
   return (
     <section className="narrow card">
-      <p>Envie a planilha (XLSX ou CSV) com o saldo inicial do estoque. Os itens já entram aprovados. Se houver qualquer erro, <strong>nada é gravado</strong> e o sistema lista os erros por linha.</p>
+      <p>Envie a planilha (XLSX ou CSV) com o saldo inicial do estoque. Os itens já entram aprovados. As linhas certas são gravadas; as erradas voltam com o motivo, para corrigir e enviar só elas de novo.</p>
+      <BaixarModelo tipo="carga-inicial" />
       <Field label="Planilha"><input type="file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(e) => setArquivo(e.target.files?.[0] ?? null)} /></Field>
-      <button className="btn btn-primary" disabled={!arquivo || enviando} onClick={enviar}>{enviando ? 'Validando…' : 'Enviar'}</button>
+      <button className="btn btn-primary" disabled={!arquivo || enviando} onClick={enviar}>{enviando ? 'Importando…' : 'Enviar'}</button>
       <ErrorAlert erro={erro} />
-      {res && (res.gravado ? <div className="alert alert-ok">Carga gravada: {res.linhas} linha(s).</div> : (
-        <div className="alert alert-error"><p>Nada foi gravado. Corrija e reenvie:</p><ul>{res.erros.map((e) => <li key={e.linha}>Linha {e.linha}: {e.mensagem}</li>)}</ul></div>
-      ))}
+      {res && <ResultadoImportacaoView r={res} aceitasTexto="no estoque (já aprovadas)" />}
     </section>
   );
 }

@@ -53,7 +53,7 @@ const DESCRICOES: Record<Permissao, string> = {
   'auditoria.consultar': 'Trilha de auditoria', 'cadastros.gerenciar': 'Categorias, parceiros, campanhas, motivos, importação',
   'cadastros.consultar': 'Consultar cadastros', 'clientes.gerenciar': 'Clientes', 'parametros.gerenciar': 'Parâmetros e dados da instituição',
   'entrada.registrar': 'Lotes, cadastro dos produtos do lote, descartes, encerrar o lote', 'triagem.reabrir': 'Reabrir lote, reverter descarte',
-  'produtos.aprovar': 'Aprovar ou devolver os produtos cadastrados nos lotes', 'parceiros.criar': 'Criar parceiro (doador) ao registrar o lote',
+  'produtos.aprovar': 'Aprovar ou devolver os produtos cadastrados nos lotes', 'parceiros.criar': 'Criar parceiro (doador ou fornecedor) ao registrar o lote ou a compra',
   'estoque.consultar': 'Estoque, produtos e lotes (só leitura)', 'estoque.transferir': 'Transferir entre bazar e doações',
   'estoque.ajustar': 'Baixa, ajuste de saída, preço da categoria, carga inicial',
   'custo.consultar': 'Ver o custo (valor atribuído) dos produtos e do estoque', 'produtos.preco': 'Alterar o preço de venda do produto',
@@ -207,12 +207,13 @@ function pick(o: any, keys: string[]) { const r: any = {}; keys.forEach((k) => {
 // ---------------- CAD ----------------
 /** Mesmas regras do servidor (apps/api/src/shared/documento.ts) — a API simulada não pode ser mais permissiva. */
 function docValido(d: string): boolean {
-  if (!/^(\d{11}|\d{14})$/.test(d) || /^(\d)\1+$/.test(d)) return false;
-  const dv = (base: string, pesos: number[]) => { const r = pesos.reduce((s, p, i) => s + Number(base[i]) * p, 0) % 11; return r < 2 ? 0 : 11 - r; };
+  if (!/^(\d{11}|[0-9A-Z]{12}\d{2})$/.test(d) || /^(.)\1+$/.test(d)) return false;
+  // CNPJ alfanumérico: cada caractere vale o código ASCII menos 48 (o dígito vale ele mesmo)
+  const dv = (base: string, pesos: number[]) => { const r = pesos.reduce((s, p, i) => s + (base.charCodeAt(i) - 48) * p, 0) % 11; return r < 2 ? 0 : 11 - r; };
   if (d.length === 11) return dv(d, [10, 9, 8, 7, 6, 5, 4, 3, 2]) === Number(d[9]) && dv(d, [11, 10, 9, 8, 7, 6, 5, 4, 3, 2]) === Number(d[10]);
   return dv(d, [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]) === Number(d[12]) && dv(d, [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]) === Number(d[13]);
 }
-const exibirDoc = (d?: string) => (!d ? undefined : d.length === 14 ? d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5') : `•••.•••.••${d.slice(8, 9)}-${d.slice(9)}`);
+const exibirDoc = (d?: string) => (!d ? undefined : d.length === 14 ? d.replace(/^(.{2})(.{3})(.{3})(.{4})(\d{2})$/, '$1.$2.$3/$4-$5') : `•••.•••.••${d.slice(8, 9)}-${d.slice(9)}`);
 const erroCampo = (campo: string, mensagem: string) => ({ status: 400, headers: { 'content-type': 'application/problem+json' }, body: { type: 'about:blank', status: 400, title: 'Dados inválidos', code: 'VALIDACAO', detail: `${campo}: ${mensagem}`, errors: [{ campo, mensagem }] } });
 function validarCadastro(tipo: string, dados: any, atual?: any): TransportResponse | null {
   if (tipo === 'categorias') {
@@ -295,7 +296,7 @@ function loteDto(l: (typeof db.lotes)[number]) {
   const itens = db.itens.filter((i) => i.loteId === l.id);
   return {
     id: l.id, numero: l.numero, tipo: l.tipo, parceiroId: l.parceiroId, parceiroNome: nomeParc(l.parceiroId), campanhaId: l.campanhaId, campanhaNome: nomeCamp(l.campanhaId),
-    documento: l.documento, temAnexo: l.temAnexo, recebidoEm: l.recebidoEm, status: l.status,
+    documento: l.documento, observacao: (l as { observacao?: string }).observacao, temAnexo: l.temAnexo, recebidoEm: l.recebidoEm, status: l.status,
     aprovados: itens.filter((i) => i.status === 'APROVADO').reduce((s, i) => s + i.quantidadeInicial, 0),
     pendentes: itens.filter((i) => i.status === 'CADASTRADO').length, devolvidos: itens.filter((i) => i.status === 'DEVOLVIDO').length,
     descartados: db.descartes.filter((d) => d.loteId === l.id && !d.revertido).length,
@@ -314,8 +315,9 @@ rota('GET', '/lotes/:id', LEITURA_LOTES, ({ user, params }) => {
     descartes: db.descartes.filter((d) => d.loteId === l.id).map((d) => ({ id: d.id, categoriaNome: nomeCat(d.categoriaId), motivoNome: db.motivosDescarte.find((m) => m.id === d.motivoId)?.nome ?? '—', registradoEm: d.registradoEm, revertido: d.revertido })),
   });
 });
-rota('POST', '/lotes', ['entrada.registrar'], ({ user, body }) => {
+rota('POST', '/lotes', ['entrada.registrar', 'contas_pagar.gerenciar'], ({ user, body }) => {
   exigir(['DOACAO', 'COMPRA', 'SALDO_INICIAL'].includes(body?.tipo), 'tipo');
+  if (body.tipo !== 'COMPRA' && !perfilDe(user).permissoes.includes('entrada.registrar')) return problem(403, 'Sem permissão de entrada: só é possível lançar compra'); // S5-11
   if (!body.parceiroId) return problem(400, 'Informe o parceiro (doador) do lote', 'PARCEIRO_OBRIGATORIO'); // RN-04 (S2-06): campanha opcional
   if (body.tipo === 'COMPRA') {
     if (!perfilDe(user).permissoes.includes('contas_pagar.gerenciar')) return problem(403, 'Registrar compra exige permissão de contas a pagar');
@@ -327,8 +329,9 @@ rota('POST', '/lotes', ['entrada.registrar'], ({ user, body }) => {
   if (body.tipo === 'COMPRA') db.contasPagar.push({ id: uid(), descricao: `Compra — lote ${l.numero}`, categoriaDespesaId: db.categoriasDespesa[1]!.id, categoriaDespesaNome: db.categoriasDespesa[1]!.nome, valor: body.valorCompra, vencimento: body.vencimento ?? localDate(now()), status: body.pago ? 'PAGA' : 'ABERTA', pagaEm: body.pago ? now() : undefined });
   auditar(user, 'LOTE_CRIADO', 'lote_entrada', l.id); return ok(loteDto(l), 201);
 });
-rota('POST', '/lotes/:id/documento', ['entrada.registrar'], ({ params, body }) => {
+rota('POST', '/lotes/:id/documento', ['entrada.registrar', 'contas_pagar.gerenciar'], ({ user, params, body }) => {
   const l = db.lotes.find((x) => x.id === params.id); if (!l) return problem(404, 'Lote não encontrado');
+  if (l.tipo !== 'COMPRA' && !perfilDe(user).permissoes.includes('entrada.registrar')) return problem(403, 'Sem permissão de entrada: só anexa documento de compra');
   const f = (body as FormData).get('arquivo') as File | null;
   if (!f) return problem(400, 'Arquivo obrigatório');
   if (f.size > 5 * 1024 * 1024) return problem(413, 'Arquivo maior que 5 MB', 'ANEXO_GRANDE');
@@ -649,10 +652,26 @@ rota('PATCH', '/categorias/:id/preco', ['estoque.ajustar'], ({ user, params, bod
   c.precoPadrao = fromCents(toCents(body.preco)); db.itens.filter((i) => i.categoriaId === c.id && i.controle === 'CATEGORIA').forEach((i) => { i.preco = toCents(body.preco); });
   auditar(user, 'PRECO_CATEGORIA', 'categoria', c.id); return { status: 204, headers: {}, body: null };
 });
-rota('POST', '/carga-inicial', ['estoque.ajustar'], ({ body }) => {
+// Demonstração (S5-05): grava as linhas válidas no estoque e devolve as recusadas, como o sistema real (só CSV aqui)
+rota('POST', '/carga-inicial', ['estoque.ajustar'], async ({ body }) => {
   const f = (body as FormData).get('arquivo') as File | null; if (!f) return problem(400, 'Arquivo obrigatório');
-  // Simulação: sempre devolve 2 erros por linha e NÃO grava nada (tudo ou nada).
-  return ok({ gravado: false, linhas: 12, erros: [{ linha: 4, mensagem: 'Categoria "Brinquedos" não cadastrada' }, { linha: 9, mensagem: 'Preço inválido: "dez"' }] });
+  if (!/\.csv$/i.test(f.name)) return problem(415, 'Na demonstração, envie a planilha em CSV (o sistema real aceita também XLSX)', 'TIPO_INVALIDO');
+  const { linhas, sep, cab } = await lerCsvDemo(f);
+  const aceitas: unknown[] = [], recusadas: unknown[] = [];
+  linhas.slice(1).forEach((l, k) => {
+    const v = valoresCsv(cab, l, sep), linha = k + 2, nome = v.descricao || v.categoria || '';
+    const cat = db.categorias.find((c) => c.nome.toLowerCase() === (v.categoria ?? '').toLowerCase());
+    const qtd = Number(v.quantidade), precoTxt = (v.preco ?? '').replace(',', '.'), preco = /^\d+(\.\d{1,2})?$/.test(precoTxt) ? toCents(precoTxt) : 0;
+    const local = (v.estoque ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+    const e = [!cat && `Categoria "${v.categoria ?? ''}" não cadastrada`, !(Number.isInteger(qtd) && qtd > 0) && 'Quantidade inválida', !(preco > 0) && 'Preço inválido',
+      !['BAZAR', 'DOACOES'].includes(local) && 'Estoque deve ser BAZAR ou DOACOES'].filter(Boolean);
+    if (e.length) { recusadas.push({ linha, nome, motivo: e.join('; ') }); return; }
+    const it: ItemDb = { id: uid(), descricao: v.descricao || `${cat!.nome} (saldo inicial)`, categoriaId: cat!.id, controle: 'CATEGORIA', preco, loteId: db.lotes[0]!.id, criadoEm: now(), quantidadeInicial: qtd,
+      localInicial: local as LocalEstoque, saldo: { BAZAR: local === 'BAZAR' ? qtd : 0, DOACOES: local === 'DOACOES' ? qtd : 0 }, status: 'APROVADO' };
+    db.itens.push(it);
+    aceitas.push({ linha, nome: it.descricao, quantidade: qtd });
+  });
+  return ok({ total: linhas.length - 1, aceitas, recusadas });
 });
 
 // ---------------- PDV ----------------
@@ -892,7 +911,11 @@ rota('POST', '/caixas/:id/fechar', ['caixa.operar'], ({ user, params, body }) =>
   Object.assign(c, { status: 'FECHADO', fechadoEm: now(), esperado: fromCents(esp), contado: fromCents(contado), diferenca: fromCents(dif), observacao: body.observacao });
   auditar(user, 'CAIXA_FECHADO', 'caixa_sessao', c.id); return ok(caixaDto(c));
 });
-rota('GET', '/caixas', ['relatorios.consultar'], ({ query }) => ok(paginar(db.caixas.filter((c) => noPeriodo(c.abertoEm, query)).sort((a, b) => b.abertoEm.localeCompare(a.abertoEm)).map(caixaDto), query)));
+rota('GET', '/caixas', ['relatorios.consultar'], ({ query }) => ok(paginar(db.caixas
+  .filter((c) => noPeriodo(c.abertoEm, query) && (!query.get('status') || c.status === query.get('status'))
+    && (query.get('comDiferenca') !== 'true' || (c.status === 'FECHADO' && toCents(c.diferenca ?? '0') !== 0)))
+  .sort((a, b) => b.abertoEm.localeCompare(a.abertoEm)).map(caixaDto), query)));
+rota('GET', '/caixas/:id/resumo', ['caixa.operar', 'relatorios.consultar'], ({ user, params }) => { const c = caixaVisivel(user, params.id!); return ok({ caixa: caixaDto(c), ...previa(c) }); });
 
 // ---------------- FIN ----------------
 rota('GET', '/contas-pagar', ['contas_pagar.gerenciar'], ({ query }) => ok(paginar(db.contasPagar.filter((c) => !query.get('status') || c.status === query.get('status')).sort((a, b) => a.vencimento.localeCompare(b.vencimento)), query)));
@@ -955,7 +978,202 @@ rota('GET', '/financeiro/resumo', ['relatorios.consultar'], ({ query }) => {
   const receb = db.recebimentos.filter((r) => !r.estornado && noPeriodo(r.recebidoEm, query)).reduce((s, r) => s + toCents(r.valor), 0);
   const saidas = db.contasPagar.filter((c) => c.status === 'PAGA' && c.pagaEm && noPeriodo(c.pagaEm, query)).reduce((s, c) => s + toCents(c.valor), 0);
   const entradas = porForma.DINHEIRO + porForma.PIX + porForma.CARTAO_DEBITO + porForma.CARTAO_CREDITO + receb;
-  return ok({ de: query.get('de'), ate: query.get('ate'), entradasPorForma: Object.fromEntries(FORMAS.map((f) => [f, fromCents(porForma[f])])), recebimentosFiado: fromCents(receb), saidas: fromCents(saidas), resultado: fromCents(entradas - saidas) });
+  return ok({ de: query.get('de'), ate: query.get('ate'), entradasPorForma: Object.fromEntries(FORMAS.map((f) => [f, fromCents(porForma[f])])), recebimentosFiado: fromCents(receb), saidas: fromCents(saidas), reembolsos: '0.00', resultado: fromCents(entradas - saidas) });
+});
+rota('GET', '/financeiro/resumo.pdf', ['relatorios.consultar'], () => {
+  // Demonstração: um PDF mínimo. O sistema real gera o PDF completo no servidor.
+  const pdf = '%PDF-1.1\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 320 120]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n4 0 obj<</Length 60>>stream\nBT /F1 12 Tf 20 60 Td (Demonstracao: o PDF real vem do servidor) Tj ET\nendstream endobj\n5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\ntrailer<</Root 1 0 R/Size 6>>\n%%EOF';
+  return { status: 200, headers: { 'content-type': 'application/pdf' }, body: new Blob([pdf], { type: 'application/pdf' }) };
+});
+
+// ---------------- PAINEL (dashboards e fluxo de caixa, Sprint 5) ----------------
+// Demonstração: as mesmas respostas da API real, calculadas sobre os dados em memória (mais simples).
+const diasEntre = (de: string, ate: string) => { const r: string[] = []; for (let d = new Date(`${de}T12:00:00`); localDate(d.toISOString()) <= ate; d.setDate(d.getDate() + 1)) r.push(localDate(d.toISOString())); return r; };
+const hojeLocal = () => localDate(now());
+const somaDia = (dia: string, arr: { quando: string; valor: number }[]) => arr.filter((x) => localDate(x.quando) === dia).reduce((s, x) => s + x.valor, 0);
+function contasPainel() {
+  const hoje = hojeLocal(), lim = localDate(new Date(Date.now() + 7 * 864e5).toISOString());
+  const abertas = db.contasPagar.filter((c) => c.status === 'ABERTA').sort((a, b) => a.vencimento.localeCompare(b.vencimento));
+  const grupo = (l: typeof abertas) => ({ quantidade: l.length, valor: fromCents(l.reduce((s, c) => s + toCents(c.valor), 0)), itens: l.slice(0, 5).map((c) => ({ id: c.id, descricao: c.descricao, valor: c.valor, vencimento: c.vencimento })) });
+  return { vencidas: grupo(abertas.filter((c) => c.vencimento < hoje)), proximos7Dias: grupo(abertas.filter((c) => c.vencimento >= hoje && c.vencimento <= lim)) };
+}
+function fiadoPainel() {
+  const hoje = hojeLocal(); const abertas = db.contasReceber.filter((c) => c.status === 'ABERTA' || c.status === 'PARCIAL');
+  return { aberto: fromCents(abertas.reduce((s, c) => s + toCents(c.saldo), 0)), vencido: fromCents(abertas.filter((c) => c.vencimento < hoje).reduce((s, c) => s + toCents(c.saldo), 0)) };
+}
+const filaPainel = () => ({ lotesEmCadastro: db.lotes.filter((l) => l.status !== 'TRIADO').length, itensAguardandoAprovacao: db.itens.filter((i) => i.status === 'CADASTRADO').length });
+function fluxoMock(de: string, ate: string, forma?: string | null) {
+  const vendas = db.vendas.filter((v) => v.status === 'CONCLUIDA').flatMap((v) => v.pagamentos.filter((p) => p.forma !== 'FIADO' && (!forma || p.forma === forma)).map((p) => ({ quando: v.ocorridaEm, valor: toCents(p.valor) })));
+  const receb = db.recebimentos.filter((r) => !r.estornado && (!forma || (r as any).forma === forma)).map((r) => ({ quando: r.recebidoEm, valor: toCents(r.valor) }));
+  const pagas = db.contasPagar.filter((c) => c.status === 'PAGA' && c.pagaEm).map((c) => ({ quando: c.pagaEm!, valor: toCents(c.valor) }));
+  return diasEntre(de, ate).map((dia) => ({ dia, entradas: somaDia(dia, vendas) + somaDia(dia, receb), saidas: somaDia(dia, pagas) }));
+}
+rota('GET', '/painel/admin', ['auditoria.consultar'], ({ query }) => {
+  const de = query.get('de')!, ate = query.get('ate')!, op = query.get('operadorId'), forma = query.get('forma');
+  const vendas = db.vendas.filter((v) => v.status === 'CONCLUIDA' && noPeriodo(v.ocorridaEm, query) && (!op || v.operadorId === op));
+  const pags = vendas.flatMap((v) => v.pagamentos.filter((p) => !forma || p.forma === forma).map((p) => ({ v, forma: p.forma, valor: toCents(p.valor) })));
+  const total = pags.reduce((s, p) => s + p.valor, 0), qtd = new Set(pags.map((p) => p.v.id)).size;
+  const itens = db.itens.filter((i) => i.status === 'APROVADO');
+  return ok({
+    de, ate,
+    vendas: { total: fromCents(total), quantidade: qtd, ticketMedio: fromCents(qtd ? Math.round(total / qtd) : 0),
+      porForma: Object.fromEntries(FORMAS.map((f) => [f, fromCents(pags.filter((p) => p.forma === f).reduce((s, p) => s + p.valor, 0))])),
+      porDia: diasEntre(de, ate).map((dia) => ({ dia, total: fromCents(pags.filter((p) => localDate(p.v.ocorridaEm) === dia).reduce((s, p) => s + p.valor, 0)), quantidade: new Set(pags.filter((p) => localDate(p.v.ocorridaEm) === dia).map((p) => p.v.id)).size })) },
+    caixasAbertos: db.caixas.filter((c) => c.status === 'ABERTO').map((c) => ({ id: c.id, terminalNome: c.terminalNome, operadorNome: c.operadorNome, abertoEm: c.abertoEm, esperadoDinheiro: previa(c).esperadoDinheiro })),
+    entrada: filaPainel(),
+    estoque: { itensBazar: itens.reduce((s, i) => s + i.saldo.BAZAR, 0), itensDoacoes: itens.reduce((s, i) => s + i.saldo.DOACOES, 0),
+      valorPotencial: fromCents(itens.reduce((s, i) => s + (i.saldo.BAZAR + i.saldo.DOACOES) * i.preco, 0)), valorAtribuido: fromCents(itens.reduce((s, i) => s + (i.saldo.BAZAR + i.saldo.DOACOES) * (i.valorAtribuido ?? i.preco), 0)) },
+    contasPagar: contasPainel(), fiado: fiadoPainel(),
+    eventos: db.vendas.filter((v) => v.status === 'CANCELADA').slice(-10).reverse().map((v) => ({ id: v.id, tipo: 'VENDA_CANCELADA', quando: v.ocorridaEm, descricao: `Venda nº ${v.numero} cancelada`, valor: v.total })),
+  });
+});
+rota('GET', '/painel/estoque', ['estoque.consultar'], ({ query }) => {
+  const de = query.get('de')!, ate = query.get('ate')!, cat = query.get('categoriaId'), parc = query.get('parceiroId');
+  const itens = db.itens.filter((i) => (!cat || i.categoriaId === cat) && (!parc || db.lotes.find((l) => l.id === i.loteId)?.parceiroId === parc));
+  const aprovados = itens.filter((i) => i.status === 'APROVADO');
+  const categorias = db.categorias.map((c) => ({ categoriaId: c.id, categoria: c.nome, bazar: aprovados.filter((i) => i.categoriaId === c.id).reduce((s, i) => s + i.saldo.BAZAR, 0), doacoes: aprovados.filter((i) => i.categoriaId === c.id).reduce((s, i) => s + i.saldo.DOACOES, 0) }))
+    .filter((c) => c.bazar + c.doacoes > 0).sort((a, b) => (b.bazar + b.doacoes) - (a.bazar + a.doacoes));
+  const entradas = db.movs.filter((m) => m.tipo === 'ENTRADA' && itens.some((i) => i.id === m.itemId)).map((m) => ({ quando: m.ocorridoEm, valor: m.quantidade }));
+  const hoje = hojeLocal(), semana = localDate(new Date(Date.now() - 6 * 864e5).toISOString());
+  const limite = Number(db.parametros.find((p) => p.chave === 'estoque.pouco_saldo')?.valor ?? 5);
+  const pouco = db.produtos.filter((p) => !p.pecaUnica && (!cat || p.categoriaId === cat)).map((p) => {
+    const its = db.itens.filter((i) => i.produtoId === p.id && i.status === 'APROVADO');
+    return { p, n: its.length, saldo: its.reduce((s, i) => s + i.saldo.BAZAR + i.saldo.DOACOES, 0) };
+  }).filter((x) => x.n > 0 && x.saldo <= limite).sort((a, b) => a.saldo - b.saldo).slice(0, 20);
+  return ok({
+    de, ate, categorias, itensBazar: categorias.reduce((s, c) => s + c.bazar, 0), itensDoacoes: categorias.reduce((s, c) => s + c.doacoes, 0),
+    entrada: filaPainel(),
+    entradasHoje: entradas.filter((e) => localDate(e.quando) === hoje).reduce((s, e) => s + e.valor, 0),
+    entradas7Dias: entradas.filter((e) => localDate(e.quando) >= semana).reduce((s, e) => s + e.valor, 0),
+    entradasPorDia: diasEntre(de, ate).map((dia) => ({ dia, quantidade: somaDia(dia, entradas) })),
+    descartes: db.descartes.filter((d) => !d.revertido && noPeriodo(d.registradoEm, query) && (!cat || d.categoriaId === cat)).length,
+    poucoSaldo: { limite, itens: pouco.map(({ p, saldo }) => ({ produtoId: p.id, codigo: p.codigo, nome: p.nome, categoria: nomeCat(p.categoriaId), saldo })) },
+    ultimasMovimentacoes: [...db.movs].filter((m) => itens.some((i) => i.id === m.itemId)).sort((a, b) => b.ocorridoEm.localeCompare(a.ocorridoEm)).slice(0, 10)
+      .map((m) => ({ id: m.id, tipo: m.tipo, quantidade: m.quantidade, quando: m.ocorridoEm, descricao: m.descricao, destino: m.local === 'BAZAR' ? 'Bazar' : m.local === 'DOACOES' ? 'Doações' : undefined, usuarioNome: m.usuarioNome })),
+  });
+});
+rota('GET', '/painel/financeiro', ['relatorios.consultar'], ({ query }) => {
+  const de = query.get('de')!, ate = query.get('ate')!, hoje = hojeLocal();
+  const res = (a: string, b: string) => { const f = fluxoMock(a, b); const e = f.reduce((s, x) => s + x.entradas, 0), sa = f.reduce((s, x) => s + x.saidas, 0); return { entradas: fromCents(e), saidas: fromCents(sa), resultado: fromCents(e - sa) }; };
+  const vendas = db.vendas.filter((v) => v.status === 'CONCLUIDA' && noPeriodo(v.ocorridaEm, query));
+  const fechados = db.caixas.filter((c) => c.status === 'FECHADO' && c.fechadoEm && noPeriodo(c.fechadoEm, query) && toCents(c.diferenca ?? '0') !== 0);
+  return ok({
+    de, ate, hoje: res(hoje, hoje), mes: res(`${hoje.slice(0, 8)}01`, hoje),
+    periodo: { ...res(de, ate), entradasPorForma: Object.fromEntries(FORMAS.map((f) => [f, fromCents(vendas.flatMap((v) => v.pagamentos).filter((p) => p.forma === f).reduce((s, p) => s + toCents(p.valor), 0))])),
+      recebimentosFiado: fromCents(db.recebimentos.filter((r) => !r.estornado && noPeriodo(r.recebidoEm, query)).reduce((s, r) => s + toCents(r.valor), 0)) },
+    porDia: fluxoMock(de, ate, query.get('forma')).map((x) => ({ dia: x.dia, entradas: fromCents(x.entradas), saidas: fromCents(x.saidas) })),
+    contasPagar: contasPainel(), fiado: fiadoPainel(),
+    caixasComDiferenca: { quantidade: fechados.length, itens: fechados.slice(0, 8).map((c) => ({ id: c.id, terminalNome: c.terminalNome, operadorNome: c.operadorNome, fechadoEm: c.fechadoEm!, diferenca: c.diferenca! })) },
+    reembolsos: { quantidade: 0, valor: '0.00' },
+  });
+});
+rota('GET', '/financeiro/fluxo-caixa', ['relatorios.consultar'], ({ query }) => {
+  const de = query.get('de')!, ate = query.get('ate')!, hoje = hojeLocal();
+  let acumulado = 0;
+  const pagar = db.contasPagar.filter((c) => c.status === 'ABERTA'), receber = db.contasReceber.filter((c) => c.status === 'ABERTA' || c.status === 'PARCIAL');
+  const dias = fluxoMock(de, ate).map((x) => {
+    const futuro = x.dia > hoje, e = futuro ? 0 : x.entradas, sa = futuro ? 0 : x.saidas;
+    const aR = x.dia >= hoje ? receber.filter((c) => c.vencimento === x.dia).reduce((s, c) => s + toCents(c.saldo), 0) : 0;
+    const aP = x.dia >= hoje ? pagar.filter((c) => c.vencimento === x.dia).reduce((s, c) => s + toCents(c.valor), 0) : 0;
+    acumulado += e - sa + aR - aP;
+    return { dia: x.dia, entradas: fromCents(e), saidas: fromCents(sa), aReceber: fromCents(aR), aPagar: fromCents(aP), saldoDoDia: fromCents(e - sa + aR - aP), acumulado: fromCents(acumulado) };
+  });
+  const soma = (k: 'entradas' | 'saidas' | 'aReceber' | 'aPagar') => fromCents(dias.reduce((s, d) => s + toCents(d[k]), 0));
+  return ok({ de, ate, hoje, dias, totais: { entradas: soma('entradas'), saidas: soma('saidas'), aReceber: soma('aReceber'), aPagar: soma('aPagar'), saldo: fromCents(acumulado) },
+    atrasados: { aPagar: fromCents(pagar.filter((c) => c.vencimento < hoje).reduce((s, c) => s + toCents(c.valor), 0)), aReceber: fromCents(receber.filter((c) => c.vencimento < hoje).reduce((s, c) => s + toCents(c.saldo), 0)) } });
+});
+/** Demonstração: lê o CSV (o sistema real lê também XLSX); devolve as linhas, o separador e o cabeçalho normalizado. */
+async function lerCsvDemo(f: File) {
+  const linhas = (await f.text()).replace(/^\uFEFF/, '').split(/\r?\n/).filter((l) => l.trim());
+  const sep = (linhas[0]!.match(/;/g)?.length ?? 0) >= (linhas[0]!.match(/,/g)?.length ?? 0) ? ';' : ',';
+  const cab = linhas[0]!.split(sep).map((h) => h.trim().replace(/^"|"$/g, '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '_'));
+  return { linhas, sep, cab };
+}
+const valoresCsv = (cab: string[], l: string, sep: string) => Object.fromEntries(cab.map((h, j) => [h, (l.split(sep)[j] ?? '').trim().replace(/^"|"$/g, '')]));
+// Modelos (S5-02): na demonstração só o CSV; o sistema real gera também o XLSX
+const MODELOS_DEMO: Record<string, string[]> = {
+  lote: ['titulo_etiqueta;nome;categoria;preco;quantidade;valor_atribuido;estoque;peca_unica;codigo', 'Caneca branca;Caneca de porcelana branca;Utensílios;7,00;6;2,00;Bazar;não;', ';;;;4;1,50;Doações;;BZ000006'],
+  categorias: ['nome;preco_padrao;venda_por_categoria', 'Roupa adulto;10,00;sim'],
+  parceiros: ['nome;tipo;documento;cidade', 'Loja Exemplo;LOJA;12.ABC.345/01DE-35;Parnaíba'],
+  campanhas: ['nome;inicio;fim', 'Campanha do Agasalho;2026-05-01;2026-07-31'],
+  clientes: ['nome;telefone', 'Cliente Exemplo;(86) 90000-0000'],
+  'carga-inicial': ['categoria;quantidade;preco;estoque;controle;valor_atribuido;descricao', 'Roupa adulto;30;10,00;Bazar;categoria;10,00;'],
+};
+// Demonstração da NF-e (S5-04): a nota de exemplo e a importação simplificada (o sistema real confere muito mais: DTD,
+// dígito da chave, protocolo, destinatário). Antes de /modelos/:tipo, porque o roteador usa a primeira rota que casa.
+const chavesNfe = new Set<string>();
+const dvChaveDemo = (b: string) => { let s = 0; for (let i = 0; i < 43; i++) s += (b.charCodeAt(42 - i) - 48) * (2 + (i % 8)); const r = s % 11; return r < 2 ? 0 : 11 - r; };
+rota('GET', '/modelos/nfe', ['contas_pagar.gerenciar'], () => {
+  const nNF = String(Math.floor(Math.random() * 999_999) + 1), hoje = localDate(now()), venc = localDate(new Date(Date.now() + 30 * 86_400_000).toISOString());
+  const base = `22${hoje.slice(2, 4)}${hoje.slice(5, 7)}12ABC34501DE3555001${nNF.padStart(9, '0')}1${String(Math.floor(Math.random() * 99_999_999)).padStart(8, '0')}`;
+  const chave = base + dvChaveDemo(base);
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<!-- MODELO DE EXEMPLO: nota fictícia de homologação (sem valor fiscal). -->\n<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><NFe><infNFe Id="NFe${chave}" versao="4.00"><ide><mod>55</mod><serie>1</serie><nNF>${nNF}</nNF><dhEmi>${hoje}T10:00:00-03:00</dhEmi><tpNF>1</tpNF><tpAmb>2</tpAmb></ide><emit><CNPJ>12ABC34501DE35</CNPJ><xNome>Fornecedor Exemplo Ltda</xNome><enderEmit><xMun>Parnaíba</xMun></enderEmit></emit><dest><CNPJ>11222333000181</CNPJ></dest><det nItem="1"><prod><xProd>Cabide de plástico (pacote com 10)</xProd><uCom>PCT</uCom><qCom>20.0000</qCom><vUnCom>12.50</vUnCom><vProd>250.00</vProd></prod></det><det nItem="2"><prod><xProd>Saco plástico para roupas</xProd><uCom>RL</uCom><qCom>5.0000</qCom><vUnCom>30.00</vUnCom><vProd>150.00</vProd></prod></det><total><ICMSTot><vNF>400.00</vNF></ICMSTot></total><cobr><dup><nDup>001</nDup><dVenc>${venc}</dVenc><vDup>400.00</vDup></dup></cobr></infNFe></NFe><protNFe versao="4.00"><infProt><chNFe>${chave}</chNFe><cStat>100</cStat></infProt></protNFe></nfeProc>\n`;
+  return { status: 200, headers: { 'content-type': 'application/xml' }, body: new Blob([xml], { type: 'application/xml' }) };
+});
+rota('POST', '/lotes/nfe', ['contas_pagar.gerenciar'], async ({ user, body }) => {
+  const f = (body as FormData).get('arquivo') as File | null; if (!f) return problem(400, 'Arquivo obrigatório');
+  const recusa = (motivo: string, code = 'NFE_INVALIDA') => problem(400, 'NF-e recusada', code, motivo);
+  const txt = await f.text();
+  if (/<!DOCTYPE|<!ENTITY/i.test(txt)) return recusa('O XML tem declarações (DTD) que uma NF-e não tem.');
+  const x = new DOMParser().parseFromString(txt, 'application/xml');
+  if (x.getElementsByTagName('parsererror').length) return recusa('O XML está corrompido ou incompleto.');
+  const tag = (n: string, raiz: Element | Document = x) => raiz.getElementsByTagName(n)[0]?.textContent?.trim() ?? '';
+  const inf = x.getElementsByTagName('infNFe')[0]; if (!inf) return recusa('O arquivo não é uma NF-e.');
+  if (!x.getElementsByTagName('protNFe').length) return recusa('A nota não tem o protocolo de autorização da SEFAZ. Peça ao fornecedor o XML autorizado.', 'NFE_SEM_PROTOCOLO');
+  const chave = (inf.getAttribute('Id') ?? '').replace(/^NFe/, '');
+  if (!/^[0-9]{6}[0-9A-Z]{14}[0-9]{24}$/.test(chave) || dvChaveDemo(chave.slice(0, 43)) !== Number(chave[43])) return recusa('A chave de acesso da nota é inválida.');
+  if (['101', '135', '151', '155'].includes(tag('cStat'))) return recusa('A nota foi cancelada.', 'NFE_CANCELADA');
+  if (tag('mod') !== '55') return recusa('É uma NFC-e (cupom fiscal) ou outro modelo, não uma NF-e de compra.');
+  if (chavesNfe.has(chave)) return problem(409, 'Esta nota já foi importada', 'NFE_JA_IMPORTADA');
+  const emit = x.getElementsByTagName('emit')[0]!, documento = tag('CNPJ', emit).toUpperCase() || tag('CPF', emit), nome = tag('xNome', emit).slice(0, 120);
+  let p = db.parceiros.find((q) => (q as { documento?: string }).documento === documento);
+  const novo = !p;
+  if (!p) { p = { id: uid(), nome, ativo: true, documento, tipo: 'EMPRESA' } as never; db.parceiros.push(p!); }
+  const valor = tag('vNF'), emissao = tag('dhEmi').slice(0, 10), datas = [...x.getElementsByTagName('dVenc')].map((d) => d.textContent ?? '').sort();
+  const vencimento = datas[0] ?? emissao, numero = tag('nNF'), serie = tag('serie');
+  const produtos = [...x.getElementsByTagName('det')].map((d, i) => ({ item: Number(d.getAttribute('nItem')) || i + 1, nome: tag('xProd', d), quantidade: tag('qCom', d), unidade: tag('uCom', d), valorUnitario: tag('vUnCom', d), valorTotal: tag('vProd', d) }));
+  const observacao = `NF-e ${numero} série ${serie}: ${produtos.map((q) => `${Number(q.quantidade)} ${q.unidade} ${q.nome}`).join('; ')}`.slice(0, 500);
+  const l = { id: uid(), numero: ++db.seq.lote, tipo: 'COMPRA' as const, parceiroId: p!.id, documento: `${numero}/${serie}`, observacao, temAnexo: false, recebidoEm: now(), status: 'ABERTO' as const, valorCompra: toCents(valor) };
+  db.lotes.push(l); chavesNfe.add(chave);
+  db.contasPagar.push({ id: uid(), descricao: `Compra — lote ${l.numero} (NF-e ${numero})`, categoriaDespesaId: db.categoriasDespesa[1]!.id, categoriaDespesaNome: db.categoriasDespesa[1]!.nome, valor, vencimento, status: 'ABERTA' });
+  auditar(user, 'NFE_IMPORTADA', 'lote_entrada', l.id);
+  return ok({ lote: loteDto(l), fornecedor: { nome: p!.nome, novo }, numero, serie, emissao, valor, vencimento, parcelas: datas.length, produtos }, 201);
+});
+rota('GET', '/modelos/:tipo', ['entrada.registrar', 'cadastros.gerenciar', 'estoque.ajustar'], ({ params, query }) => {
+  const m = MODELOS_DEMO[params.tipo!]; if (!m) return problem(404, 'Modelo inexistente');
+  if (query.get('formato') === 'xlsx') return problem(415, 'Na demonstração, baixe o modelo em CSV (o sistema real gera também o XLSX)', 'TIPO_INVALIDO');
+  return { status: 200, headers: { 'content-type': 'text/csv' }, body: new Blob(['\uFEFF' + m.join('\r\n')], { type: 'text/csv' }) };
+});
+
+// Importação de planilha no lote (S5-03): na demonstração só CSV; cada linha passa pelo mesmo cadastro de item simulado
+rota('POST', '/lotes/:id/importacao', ['entrada.registrar'], async ({ user, params, body, query }) => {
+  const f = (body as FormData).get('arquivo') as File | null;
+  if (!f) return problem(400, 'Arquivo obrigatório');
+  if (!/\.csv$/i.test(f.name)) return problem(415, 'Na demonstração, envie a planilha em CSV (o sistema real aceita também XLSX)', 'TIPO_INVALIDO');
+  const { linhas, sep, cab } = await lerCsvDemo(f);
+  const cadastrar = rotas.find((r) => r.method === 'POST' && r.re.test(`/lotes/${params.id}/itens`))!;
+  const aceitas: unknown[] = [], recusadas: unknown[] = [];
+  const dinheiro = (v = '') => v.replace(/\s|R\$/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.');
+  for (const [k, l] of linhas.slice(1).entries()) {
+    const v = valoresCsv(cab, l, sep);
+    const linha = k + 2, nome = v.nome || v.codigo || '';
+    const cat = db.categorias.find((c) => c.ativo && c.nome.toLowerCase() === (v.categoria ?? '').toLowerCase());
+    const prod = v.codigo ? db.produtos.find((p) => p.codigo === v.codigo!.toUpperCase()) : undefined;
+    if (v.codigo && !prod) { recusadas.push({ linha, nome, motivo: `Produto ${v.codigo} inexistente ou inativo` }); continue; }
+    if (!prod && !cat) { recusadas.push({ linha, nome, motivo: v.categoria ? `Categoria "${v.categoria}" não existe ou está inativa` : 'Informe a categoria' }); continue; }
+    const est = (v.estoque ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase();
+    if (est && !['BAZAR', 'DOACOES'].includes(est)) { recusadas.push({ linha, nome, motivo: 'Estoque deve ser Bazar ou Doações' }); continue; }
+    const id = uid();
+    const corpo = { id, categoriaId: prod?.categoriaId ?? cat!.id, controle: 'ETIQUETADO', quantidade: /^\d+$/.test(v.quantidade ?? '') ? Number(v.quantidade) : NaN, valorAtribuido: dinheiro(v.valor_atribuido) || undefined, localDestino: est || 'BAZAR',
+      ...(prod ? { produtoId: prod.id } : { produto: { tituloEtiqueta: v.titulo_etiqueta || nome.slice(0, 40), nome: v.nome, preco: dinheiro(v.preco), pecaUnica: /^(s|sim|true|1)$/i.test(v.peca_unica ?? '') } }) };
+    try {
+      const r = await cadastrar.h({ user, params, body: corpo, query } as any);
+      if (r.status >= 400) { recusadas.push({ linha, nome, motivo: (r.body as any)?.detail ?? (r.body as any)?.title ?? 'Linha inválida' }); continue; }
+      const it = db.itens.find((i) => i.id === id)!;
+      aceitas.push({ linha, itemId: id, codigo: it.codigo, nome: it.descricao, quantidade: it.quantidadeInicial });
+    } catch (e) { recusadas.push({ linha, nome, motivo: e instanceof Falha ? ((e.r.body as any)?.detail ?? (e.r.body as any)?.title) : 'Linha inválida' }); }
+  }
+  return ok({ total: linhas.length - 1, aceitas, recusadas });
 });
 
 // ---------------- FIS ----------------
@@ -1079,9 +1297,25 @@ rota('PUT', '/parametros', ['parametros.gerenciar'], ({ user, body }) => {
   for (const v of body?.valores ?? []) { const p = db.parametros.find((x) => x.chave === v.chave); if (!p) return problem(400, `Parâmetro desconhecido: ${v.chave}`); if (p.tipo === 'number' && !/^\d+$/.test(v.valor)) return problem(400, `Valor inválido para ${p.descricao}`); p.valor = v.valor; }
   auditar(user, 'PARAMETROS_ALTERADOS', 'parametro', '*'); return ok(db.parametros);
 });
-rota('POST', '/importacoes/:tipo', ['cadastros.gerenciar'], ({ body }) => {
-  const f = (body as FormData).get('arquivo'); if (!f) return problem(400, 'Arquivo obrigatório');
-  return ok({ gravado: false, inseridos: 0, duplicados: [{ linha: 3, valor: 'Roupa adulto' }], erros: [] });
+// Demonstração (S5-05): grava as linhas válidas; nome já cadastrado volta como recusado (só CSV aqui)
+rota('POST', '/importacoes/:tipo', ['cadastros.gerenciar'], async ({ body, params }) => {
+  const f = (body as FormData).get('arquivo') as File | null; if (!f) return problem(400, 'Arquivo obrigatório');
+  if (!/\.csv$/i.test(f.name)) return problem(415, 'Na demonstração, envie a planilha em CSV (o sistema real aceita também XLSX)', 'TIPO_INVALIDO');
+  const lista = ({ categorias: db.categorias, parceiros: db.parceiros, campanhas: db.campanhas, clientes: db.clientes } as Record<string, { nome: string }[]>)[params.tipo!];
+  if (!lista) return problem(404, 'Tipo de importação inexistente');
+  const { linhas, sep, cab } = await lerCsvDemo(f);
+  if (!cab.includes('nome')) return problem(400, 'Planilha fora do modelo', 'PLANILHA_INVALIDA', 'Coluna obrigatória ausente: nome');
+  const aceitas: unknown[] = [], recusadas: unknown[] = [];
+  linhas.slice(1).forEach((l, k) => {
+    const v = valoresCsv(cab, l, sep), linha = k + 2, nome = (v.nome ?? '').trim();
+    if (nome.length < 2) { recusadas.push({ linha, nome, motivo: 'nome: obrigatório (2 a 120 caracteres)' }); return; }
+    const tel = (v.telefone ?? '').replace(/\D/g, '');
+    if (params.tipo === 'clientes' && !/^\d{10,11}$/.test(tel)) { recusadas.push({ linha, nome, motivo: 'telefone: obrigatório, com DDD' }); return; }
+    if (lista.some((x) => x.nome.toLowerCase() === nome.toLowerCase())) { recusadas.push({ linha, nome, motivo: 'já cadastrado' }); return; }
+    lista.push({ id: uid(), nome, ativo: true, ...(params.tipo === 'clientes' ? { telefone: tel } : {}), ...(params.tipo === 'parceiros' ? { tipo: (v.tipo ?? '').toUpperCase() || 'OUTRO' } : {}) } as never);
+    aceitas.push({ linha, nome });
+  });
+  return ok({ total: linhas.length - 1, aceitas, recusadas });
 });
 
 // ---------------- dispatcher ----------------

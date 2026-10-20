@@ -114,6 +114,8 @@ export interface LoteEntrada {
   campanhaId?: Uuid; campanhaNome?: string;
   documento?: string;
   temAnexo: boolean;
+  /** Na NF-e importada (S5-04), a lista dos produtos da nota, para o estoque cadastrar. */
+  observacao?: string;
   recebidoEm: IsoDateTime;
   status: 'ABERTO' | 'TRIADO';
   /** Unidades aprovadas pelo Administrador (só elas estão no estoque e na prestação de contas). */
@@ -221,7 +223,6 @@ export interface ProdutoDetalhe extends CamposProduto {
   id: Uuid; codigo: string; categoriaId: Uuid; categoriaNome: string; precoEfetivo: Money; desconto?: DescontoProduto;
   ativo: boolean; criadoEm: IsoDateTime; saldoBazar: number; saldoDoacoes: number; entradas: ProdutoEntrada[]; eventos: ProdutoEvento[];
 }
-export interface CargaInicialResultado { gravado: boolean; linhas: number; erros: { linha: number; mensagem: string }[] }
 
 // ---------- PDV ----------
 export interface CatalogoPdv {
@@ -320,6 +321,73 @@ export interface ResumoFinanceiro {
   de: LocalDate; ate: LocalDate;
   entradasPorForma: Record<FormaPagamento, Money>;
   recebimentosFiado: Money; saidas: Money; resultado: Money;
+  /** reembolsos em dinheiro de caixa fechado: já saíram das vendas, não descontam de novo */
+  reembolsos: Money;
+}
+
+/**
+ * Resultado de toda importação de planilha (S5-05, P-19): as linhas válidas são gravadas (aceitas) e as erradas voltam
+ * com a linha e o motivo (recusadas). O lote também traz o item criado, o código e a quantidade.
+ */
+export interface ResultadoImportacao {
+  total: number;
+  aceitas: { linha: number; nome: string; itemId?: Uuid; codigo?: string; quantidade?: number }[];
+  recusadas: { linha: number; nome: string; motivo: string }[];
+}
+export type TipoModelo = 'lote' | 'categorias' | 'parceiros' | 'campanhas' | 'clientes' | 'carga-inicial';
+
+/**
+ * NF-e importada (S5-04, P-20): a nota inteira vira um lote de compra com a conta a pagar (ou é recusada inteira, com o
+ * motivo). Os produtos vêm só para conferência: o estoque os cadastra depois no lote.
+ */
+export interface ResultadoNfe {
+  lote: LoteEntrada;
+  fornecedor: { nome: string; novo: boolean };
+  numero: string; serie: string; emissao: LocalDate; valor: Money; vencimento: LocalDate; parcelas: number;
+  produtos: { item: number; nome: string; quantidade: string; unidade: string; valorUnitario: string; valorTotal: string }[];
+}
+
+// ---------- PAINEL (dashboards e fluxo de caixa, Sprint 5) ----------
+export interface ContasResumo { quantidade: number; valor: Money; itens: { id: Uuid; descricao: string; valor: Money; vencimento: LocalDate }[] }
+export interface ContasAPagarPainel { vencidas: ContasResumo; proximos7Dias: ContasResumo }
+export interface FilaEntrada { lotesEmCadastro: number; itensAguardandoAprovacao: number }
+export interface EventoSensivel { id: string; tipo: 'VENDA_CANCELADA' | 'RECEBIMENTO_ESTORNADO' | 'REEMBOLSO' | 'DIFERENCA_CAIXA'; quando: IsoDateTime; descricao: string; valor: Money }
+export interface PainelAdmin {
+  de: LocalDate; ate: LocalDate;
+  vendas: { total: Money; quantidade: number; ticketMedio: Money; porForma: Record<FormaPagamento, Money>; porDia: { dia: LocalDate; total: Money; quantidade: number }[] };
+  caixasAbertos: { id: Uuid; terminalNome: string; operadorNome: string; abertoEm: IsoDateTime; esperadoDinheiro: Money }[];
+  entrada: FilaEntrada;
+  estoque: { itensBazar: number; itensDoacoes: number; valorPotencial: Money; /** só com a permissão de ver custo */ valorAtribuido?: Money };
+  contasPagar: ContasAPagarPainel;
+  fiado: { aberto: Money; vencido: Money };
+  eventos: EventoSensivel[];
+}
+export interface PainelEstoque {
+  de: LocalDate; ate: LocalDate;
+  categorias: { categoriaId: Uuid; categoria: string; bazar: number; doacoes: number }[];
+  itensBazar: number; itensDoacoes: number;
+  entrada: FilaEntrada; entradasHoje: number; entradas7Dias: number;
+  entradasPorDia: { dia: LocalDate; quantidade: number }[];
+  descartes: number;
+  poucoSaldo: { limite: number; itens: { produtoId: Uuid; codigo: string; nome: string; categoria: string; saldo: number }[] };
+  ultimasMovimentacoes: { id: string; tipo: string; quantidade: number; quando: IsoDateTime; descricao: string; origem?: string; destino?: string; usuarioNome: string }[];
+}
+export interface ResultadoPeriodo { entradas: Money; saidas: Money; resultado: Money }
+export interface PainelFinanceiro {
+  de: LocalDate; ate: LocalDate;
+  hoje: ResultadoPeriodo; mes: ResultadoPeriodo;
+  periodo: ResultadoPeriodo & { entradasPorForma: Record<FormaPagamento, Money>; recebimentosFiado: Money };
+  porDia: { dia: LocalDate; entradas: Money; saidas: Money }[];
+  contasPagar: ContasAPagarPainel;
+  fiado: { aberto: Money; vencido: Money };
+  caixasComDiferenca: { quantidade: number; itens: { id: Uuid; terminalNome: string; operadorNome: string; fechadoEm: IsoDateTime; diferenca: Money }[] };
+  reembolsos: { quantidade: number; valor: Money };
+}
+export interface FluxoCaixa {
+  de: LocalDate; ate: LocalDate; hoje: LocalDate;
+  dias: { dia: LocalDate; entradas: Money; saidas: Money; aReceber: Money; aPagar: Money; saldoDoDia: Money; acumulado: Money }[];
+  totais: { entradas: Money; saidas: Money; aReceber: Money; aPagar: Money; saldo: Money };
+  atrasados: { aPagar: Money; aReceber: Money };
 }
 
 // ---------- FIS ----------
@@ -341,4 +409,3 @@ export interface RelatorioResposta extends RelatorioSecao { blocos?: RelatorioSe
 
 // ---------- ADM ----------
 export interface Parametro { chave: string; valor: string; descricao: string; tipo: 'number' | 'text' | 'bool' }
-export interface ImportacaoResultado { gravado: boolean; inseridos: number; duplicados: { linha: number; valor: string }[]; erros: { linha: number; mensagem: string }[] }

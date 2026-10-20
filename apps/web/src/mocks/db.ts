@@ -51,7 +51,7 @@ const PERFIL_ADMIN = PERFIL_ADMIN_ID, PERFIL_VENDEDOR = sid('perfcxa'), PERFIL_E
 const vendedorPerms: Permissao[] = ['caixa.operar', 'clientes.gerenciar'];
 // 0010 (Sprint 3): o Estoquista vê o custo, muda o preço e aprova (não o próprio); o Financeiro vê o custo e dá desconto
 const estoquistaPerms: Permissao[] = ['entrada.registrar', 'estoque.consultar', 'estoque.transferir', 'cadastros.consultar', 'relatorios.estoque', 'parceiros.criar', 'custo.consultar', 'produtos.preco', 'produtos.aprovar', 'etiquetas.imprimir'];
-const financeiroPerms: Permissao[] = ['contas_pagar.gerenciar', 'contas_receber.receber', 'contas_receber.lancar', 'relatorios.consultar', 'relatorios.estoque', 'estoque.consultar', 'custo.consultar', 'produtos.desconto'];
+const financeiroPerms: Permissao[] = ['parceiros.criar', 'contas_pagar.gerenciar', 'contas_receber.receber', 'contas_receber.lancar', 'relatorios.consultar', 'relatorios.estoque', 'estoque.consultar', 'custo.consultar', 'produtos.desconto'];
 
 const catRoupaAd = sid('catroup'), catRoupaInf = sid('catinf'), catCalc = sid('catcalc'), catLivro = sid('catliv'), catUtens = sid('catute'), catPeca = sid('catpeca');
 const parcNI = sid('parcni'), parcA = sid('parca'), parcB = sid('parcb');
@@ -143,6 +143,7 @@ export const db = {
     { chave: 'cpf.obrigatorio', valor: '0', descricao: 'CPF obrigatório na venda', tipo: 'bool' },
     { chave: 'etiqueta.altura_mm', valor: '30', descricao: 'Altura da etiqueta do rolo, em milímetros', tipo: 'number' },
     { chave: 'etiqueta.largura_mm', valor: '50', descricao: 'Largura da etiqueta do rolo, em milímetros', tipo: 'number' },
+    { chave: 'estoque.pouco_saldo', valor: '5', descricao: 'Pouco saldo: o dashboard do Estoque avisa o produto com esta quantidade ou menos', tipo: 'number' },
   ] as Parametro[],
   auditoria: [] as AuditoriaRegistro[],
 };
@@ -176,3 +177,63 @@ addItem({ descricao: 'Calçados (lote 2)', categoriaId: catCalc, controle: 'CATE
 db.descartes.push({ id: sid('desc'), loteId: lote1, categoriaId: catRoupaAd, motivoId: mdDanif, registradoEm: dias(-19), revertido: false });
 
 export const FORMAS: FormaPagamento[] = ['DINHEIRO', 'PIX', 'CARTAO_DEBITO', 'CARTAO_CREDITO', 'FIADO'];
+
+// ---------- Dados de exemplo dos últimos 30 dias (Sprint 5: os painéis, os gráficos e o fluxo de caixa já abrem com números) ----------
+// Tudo inventado e sempre igual (sequência fixa): caixas fechados por dia, vendas, contas pagas, fiado recebido e entradas no estoque.
+{
+  let semente = 7;
+  const sorteio = () => { semente = (semente * 48271) % 2147483647; return semente / 2147483647; };
+  const reais = (c: number) => (c / 100).toFixed(2);
+  const vendedor = db.usuarios.find((u) => u.login === 'vendedor')!;
+  const NOMES: [string, string, number][] = [['Roupa adulto', 'Roupa adulto (lote 1)', 1000], ['Livros', 'Livros (lote 1)', 300], ['Calçados', 'Calçados (lote 2)', 1500], ['Caneca de porcelana branca', 'Caneca', 700], ['Roupa infantil', 'Roupa infantil', 500]];
+  let numero = 0;
+  for (let d = -29; d <= -1; d++) {
+    if (new Date(Date.now() + d * 86_400_000).getDay() === 0) continue; // domingo fechado
+    const abertoEm = new Date(new Date(dias(d)).setHours(8, 30, 0, 0)).toISOString();
+    const fechadoEm = new Date(new Date(dias(d)).setHours(17, 45, 0, 0)).toISOString();
+    const caixa: CaixaDb = { id: sid('cxex'), terminalId: term1, terminalNome: 'Caixa 1 — Balcão', operadorId: vendedor.id, operadorNome: vendedor.nome, abertoEm, fundoTroco: '50.00', status: 'FECHADO', lancamentos: [] };
+    let dinheiro = 0;
+    const qtd = 3 + Math.floor(sorteio() * 7);
+    for (let k = 0; k < qtd; k++) {
+      const [desc, , preco] = NOMES[Math.floor(sorteio() * NOMES.length)]!;
+      const un = 1 + Math.floor(sorteio() * 4), total = preco * un;
+      const r = sorteio();
+      const forma: FormaPagamento = r < 0.35 ? 'DINHEIRO' : r < 0.75 ? 'PIX' : r < 0.85 ? 'CARTAO_DEBITO' : r < 0.95 ? 'CARTAO_CREDITO' : 'FIADO';
+      const cancelada = sorteio() < 0.03;
+      if (forma === 'DINHEIRO' && !cancelada) dinheiro += total;
+      const ocorridaEm = new Date(new Date(abertoEm).getTime() + (k + 1) * 50 * 60_000).toISOString();
+      db.vendas.push({
+        id: sid('vdex'), numero: ++numero, ocorridaEm, status: cancelada ? 'CANCELADA' : 'CONCLUIDA', subtotal: reais(total), desconto: '0.00', total: reais(total), troco: '0.00',
+        itens: [{ descricao: desc, quantidade: un, precoUnitario: reais(preco), total: reais(total) }],
+        pagamentos: [{ forma, valor: reais(total), ...(forma === 'DINHEIRO' ? { valorRecebido: reais(total) } : {}) }],
+        operadorNome: vendedor.nome, caixaId: caixa.id, terminalId: term1, operadorId: vendedor.id, alocacoes: [],
+        ...(forma === 'FIADO' ? { clienteId: cli2, clienteNome: 'João Fictício' } : {}),
+      });
+    }
+    // duas conferências com diferença no mês (uma faltou, outra sobrou)
+    const esperado = 5000 + dinheiro, dif = d === -12 ? -350 : d === -5 ? 200 : 0;
+    Object.assign(caixa, { fechadoEm, esperado: reais(esperado), contado: reais(esperado + dif), diferenca: reais(dif), ...(dif ? { observacao: dif < 0 ? 'Faltou troco na conferência' : 'Sobra de moedas' } : {}) });
+    db.caixas.push(caixa);
+  }
+  db.seq.venda = Math.max(db.seq.venda, numero);
+  // contas já pagas no mês e mais algumas a vencer
+  const pagas: [string, string, string, number][] = [['Conta de água — setembro', 'Material de consumo', '64.30', -26], ['Aluguel do salão', 'Material de consumo', '400.00', -20], ['Conta de energia — agosto', 'Energia', '172.90', -15], ['Material de limpeza', 'Material de consumo', '58.75', -9], ['Sacolas recicladas', 'Material de consumo', '45.00', -4]];
+  for (const [descricao, cat, valor, d] of pagas) {
+    const categoria = db.categoriasDespesa.find((c) => c.nome === cat)!;
+    db.contasPagar.push({ id: sid('cpex'), descricao, categoriaDespesaId: categoria.id, categoriaDespesaNome: categoria.nome, valor, vencimento: data(d), status: 'PAGA', pagaEm: dias(d) });
+  }
+  db.contasPagar.push({ id: sid('cpex'), descricao: 'Internet — outubro', categoriaDespesaId: despMaterial, categoriaDespesaNome: 'Material de consumo', valor: '99.90', vencimento: data(3), status: 'ABERTA' });
+  db.contasPagar.push({ id: sid('cpex'), descricao: 'Reforma da vitrine', categoriaDespesaId: despMaterial, categoriaDespesaNome: 'Material de consumo', valor: '250.00', vencimento: data(12), status: 'ABERTA' });
+  // fiado: uma conta recebida em parte e outra a receber
+  const crJoao = { id: sid('crex'), clienteId: cli2, clienteNome: 'João Fictício', descricao: 'Compras de setembro', valor: '80.00', saldo: '30.00', vencimento: data(-6), status: 'PARCIAL' as const };
+  db.contasReceber.push(crJoao, { id: sid('crex'), clienteId: cli3, clienteNome: 'Rita Teste', descricao: 'Compra fiada', valor: '36.00', saldo: '36.00', vencimento: data(6), status: 'ABERTA' });
+  db.recebimentos.push({ id: sid('rcex'), contaReceberId: crJoao.id, valor: '50.00', recebidoEm: dias(-8), estornado: false, forma: 'PIX' });
+  // estoque: produtos de várias unidades com pouco saldo e entradas em dias diferentes
+  const entradas: [string, string, number, number, number][] = [['Copo de vidro', 'Copo de vidro liso', 300, 3, -25], ['Panela de alumínio', 'Panela de alumínio média', 2500, 2, -17], ['Toalha de banho', 'Toalha de banho', 1200, 9, -11], ['Livro infantil', 'Livro infantil ilustrado', 800, 4, -6], ['Tênis', 'Tênis infantil', 2000, 1, -2]];
+  entradas.forEach(([titulo, nome, preco, qtd, d], i) => {
+    const pr = addProduto({ codigo: `BZ${String(20 + i).padStart(6, '0')}`, tituloEtiqueta: titulo, nome, categoriaId: i === 3 ? catLivro : catUtens, preco, pecaUnica: false });
+    const it = addItem({ codigo: pr.codigo, descricao: nome, categoriaId: pr.categoriaId, controle: 'ETIQUETADO', preco, valorAtribuido: Math.round(preco / 3), loteId: lote1, quantidadeInicial: qtd, localInicial: i === 2 ? 'DOACOES' : 'BAZAR', produtoId: pr.id });
+    it.criadoEm = dias(d);
+    db.movs.filter((m) => m.itemId === it.id).forEach((m) => { m.ocorridoEm = dias(d); });
+  });
+}
