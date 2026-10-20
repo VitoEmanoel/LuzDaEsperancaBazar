@@ -11,8 +11,9 @@ import { useAsync } from '../../../shared/hooks/useAsync';
 import { useAuth } from '../../auth/AuthContext';
 import { Empty, ErrorAlert, Field, MoneyText, PageHeader, Pagination, PrecoText, TabelaRolavel } from '../../../shared/components/ui';
 import { BaixaAjusteModal, PrecoCategoriaModal, PrecoProdutoModal } from '../components/AcoesEstoque';
+import { caminhoEtiquetas } from '../etiquetas';
 
-type Acao = { tipo: 'baixa' | 'ajuste' | 'preco'; item: ItemEstoque } | { tipo: 'precoCategoria' } | null;
+type Acao = { tipo: 'baixa' | 'ajuste' | 'preco'; item: ItemEstoque } | { tipo: 'precoCategoria'; categoriaId?: string } | null;
 
 export function EstoquePage() {
   const { can } = useAuth();
@@ -26,7 +27,10 @@ export function EstoquePage() {
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => { setF({ ...f, [k]: e.target.value }); setPage(1); };
   const verCusto = can('custo.consultar');
   const ajusta = can('estoque.ajustar');
-  const temAcoes = ajusta || can('produtos.preco');
+  const imprime = can('etiquetas.imprimir');
+  const temAcoes = ajusta || can('produtos.preco') || imprime;
+  // etiqueta é do produto: uma por unidade em estoque (S4-04)
+  const etiquetaDe = (i: ItemEstoque) => ({ produtoId: i.produtoId!, quantidade: i.saldoBazar + i.saldoDoacoes });
   async function feito() { setAcao(null); await lista.reload(); }
 
   return (
@@ -43,6 +47,9 @@ export function EstoquePage() {
         <button className="btn">Filtrar</button>
       </form>
       <ErrorAlert erro={erro} />
+      {imprime && !!data?.items.some((i) => i.produtoId) && (
+        <p><Link className="btn" to={caminhoEtiquetas(data.items.filter((i) => i.produtoId).map(etiquetaDe))}>Etiquetas dos produtos desta lista</Link></p>
+      )}
       {carregando ? <p>Carregando…</p> : !data?.items.length ? <Empty /> : (
         <TabelaRolavel><table className="table">
           <thead><tr>
@@ -62,10 +69,15 @@ export function EstoquePage() {
               {verCusto && <td className="num"><MoneyText value={i.valorAtribuido} /></td>}
               <td className="num">{i.saldoBazar}</td><td className="num">{i.saldoDoacoes}</td><td className="num"><strong>{i.saldoBazar + i.saldoDoacoes}</strong></td>
               {/* sem botão nesta linha, a célula fica vazia (no celular ela some do cartão) */}
-              {temAcoes && <td>{(ajusta || (can('produtos.preco') && i.produtoId)) && <div className="actions">
+              {/* por categoria não tem código nem preço próprio: o preço é o da categoria (o botão já abre com ela) e não há etiqueta */}
+              {temAcoes && <td>{(ajusta || !i.produtoId || can('produtos.preco') || imprime) && <div className="actions">
                 {ajusta && <button className="btn btn-sm" onClick={() => setAcao({ tipo: 'baixa', item: i })}>Baixa</button>}
                 {ajusta && <button className="btn btn-sm" onClick={() => setAcao({ tipo: 'ajuste', item: i })}>Ajuste</button>}
                 {can('produtos.preco') && i.produtoId && <button className="btn btn-sm" onClick={() => setAcao({ tipo: 'preco', item: i })}>Preço</button>}
+                {imprime && i.produtoId && <Link className="btn btn-sm" to={caminhoEtiquetas([etiquetaDe(i)])}>Etiqueta</Link>}
+                {!i.produtoId && (ajusta
+                  ? <button className="btn btn-sm" onClick={() => setAcao({ tipo: 'precoCategoria', categoriaId: i.categoriaId })} aria-label={`Preço da categoria ${i.categoriaNome}`}>Preço da categoria</button>
+                  : <small className="muted">Preço da categoria, sem etiqueta</small>)}
               </div>}</td>}
             </tr>
           ))}</tbody>
@@ -77,7 +89,7 @@ export function EstoquePage() {
       {acao?.tipo === 'preco' && acao.item.produtoId && (
         <PrecoProdutoModal produtoId={acao.item.produtoId} descricao={acao.item.descricao} precoAtual={acao.item.precoSemDesconto ?? acao.item.preco} onFechar={() => setAcao(null)} onOk={feito} />
       )}
-      {acao?.tipo === 'precoCategoria' && <PrecoCategoriaModal onFechar={() => setAcao(null)} onOk={feito} />}
+      {acao?.tipo === 'precoCategoria' && <PrecoCategoriaModal categoriaInicial={acao.categoriaId} onFechar={() => setAcao(null)} onOk={feito} />}
     </div>
   );
 }

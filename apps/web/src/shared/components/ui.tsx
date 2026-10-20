@@ -1,5 +1,5 @@
 /** Peças pequenas de UI reutilizadas em todas as telas. */
-import { useLayoutEffect, useRef, useState, type InputHTMLAttributes, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type InputHTMLAttributes, type ReactNode } from 'react';
 import { formatMoney, type Money } from '../lib/money';
 
 export function Field({ label, children, hint, erro }: { label: string; children: ReactNode; hint?: string; erro?: string | null }) {
@@ -13,16 +13,27 @@ export function Field({ label, children, hint, erro }: { label: string; children
   );
 }
 
-/** Campo de senha com botão para mostrar o que foi digitado (conferir a senha, principalmente no celular). */
-export function CampoSenha(props: Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>) {
+/**
+ * Campo de senha com rótulo e botão para mostrar o que foi digitado (conferir a senha, principalmente no celular).
+ * O rótulo é ligado ao campo pelo id e o botão fica FORA dele: o leitor de tela lê só "Senha" (S4-20),
+ * e não "Senha Mostrar a senha" como quando o botão ficava dentro do <label> do Field.
+ */
+export function CampoSenha({ label, hint, ...props }: Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | 'id'> & { label: string; hint?: string }) {
   const [ver, setVer] = useState(false);
+  const id = useId();
   return (
-    <span className="campo-senha">
-      <input {...props} type={ver ? 'text' : 'password'} autoCapitalize="none" autoCorrect="off" spellCheck={false} />
-      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setVer(!ver)} aria-pressed={ver} aria-label={ver ? 'Esconder a senha' : 'Mostrar a senha'}>
-        {ver ? 'Esconder' : 'Mostrar'}
-      </button>
-    </span>
+    <div className="field">
+      <label className="field-rotulo" htmlFor={id}>{label}</label>
+      <span className="campo-senha">
+        <input {...props} id={id} type={ver ? 'text' : 'password'} autoCapitalize="none" autoCorrect="off" spellCheck={false}
+          aria-describedby={[props['aria-describedby'], hint && `${id}-dica`].filter(Boolean).join(' ') || undefined} />
+        {/* o nome muda (Mostrar/Esconder) e já diz o estado: sem aria-pressed, que pede nome fixo */}
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setVer(!ver)} aria-label={ver ? 'Esconder a senha' : 'Mostrar a senha'}>
+          {ver ? 'Esconder' : 'Mostrar'}
+        </button>
+      </span>
+      {hint && <small className="hint" id={`${id}-dica`}>{hint}</small>}
+    </div>
   );
 }
 

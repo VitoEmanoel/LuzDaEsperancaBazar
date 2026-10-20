@@ -35,7 +35,7 @@ export const PERMISSOES = [
   'usuarios.gerenciar', 'perfis.gerenciar', 'auditoria.consultar',
   'cadastros.gerenciar', 'cadastros.consultar', 'clientes.gerenciar', 'parametros.gerenciar',
   'entrada.registrar', 'triagem.reabrir', 'produtos.aprovar', 'parceiros.criar',
-  'estoque.consultar', 'estoque.transferir', 'estoque.ajustar', 'custo.consultar', 'produtos.preco', 'produtos.desconto',
+  'estoque.consultar', 'estoque.transferir', 'estoque.ajustar', 'custo.consultar', 'produtos.preco', 'produtos.desconto', 'etiquetas.imprimir',
   'caixa.operar', 'venda.cancelar', 'venda.desconto_autorizar', 'terminais.gerenciar',
   'contas_pagar.gerenciar', 'contas_receber.receber', 'contas_receber.lancar', 'recebimento.estornar',
   'relatorios.consultar', 'relatorios.estoque', 'fiscal.gerenciar', 'privacidade.gerenciar',
@@ -173,7 +173,12 @@ export interface LoteDetalhe extends LoteEntrada {
   itens: ItemLote[];
   descartes: { id: Uuid; categoriaNome: string; motivoNome: string; registradoEm: IsoDateTime; revertido: boolean }[];
 }
-export interface Etiqueta { itemId: Uuid; codigo: string; descricao: string; preco: Money }
+/** Etiqueta do produto (S4-02): título curto, código BZ e o preço normal (P-18); `quantidade` = cópias. */
+export interface EtiquetaProduto { produtoId: Uuid; codigo: string; titulo: string; nome: string; preco: Money; quantidade: number }
+export interface PedidoEtiquetas { produtos: { produtoId: Uuid; quantidade: number }[] }
+/** Tamanho do rolo em milímetros (parâmetros do Admin, S4-01). */
+export interface TamanhoRolo { larguraMm: number; alturaMm: number }
+export interface EtiquetasPreparadas extends TamanhoRolo { itens: EtiquetaProduto[] }
 
 // ---------- EST ----------
 export interface ItemEstoque {

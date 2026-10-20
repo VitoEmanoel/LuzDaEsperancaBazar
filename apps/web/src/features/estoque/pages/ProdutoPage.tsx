@@ -13,6 +13,7 @@ import { Badge, ErrorAlert, Field, MoneyText, PageHeader, PrecoText, TabelaRolav
 import { Modal } from '../../../shared/components/Modal';
 import { useToast } from '../../../shared/components/Toast';
 import { PrecoProdutoModal } from '../components/AcoesEstoque';
+import { caminhoEtiquetas } from '../etiquetas';
 import { formatDate, formatDateTime, todayLocal } from '../../../shared/lib/format';
 import { formatMoney, fromCents, tryCents } from '../../../shared/lib/money';
 
@@ -21,7 +22,7 @@ const LOCAL = { BAZAR: 'Bazar', DOACOES: 'Doações' } as const;
 const MOV: Record<string, string> = {
   ENTRADA: 'Entrada (aprovação)', TRANSFERENCIA: 'Transferência', VENDA: 'Venda', ESTORNO_VENDA: 'Estorno de venda', BAIXA: 'Baixa',
   AJUSTE_ENTRADA: 'Ajuste de inventário (+)', AJUSTE_SAIDA: 'Ajuste de inventário (−)',
-  PRODUTO_CRIADO: 'Produto cadastrado', PRECO_PRODUTO: 'Preço alterado', DESCONTO_PRODUTO: 'Desconto', DESCONTO_PRODUTO_ENCERRADO: 'Desconto encerrado', PRODUTO_ALTERADO: 'Dados alterados',
+  PRODUTO_CRIADO: 'Produto cadastrado', PRECO_PRODUTO: 'Preço alterado', DESCONTO_PRODUTO: 'Desconto', DESCONTO_PRODUTO_ENCERRADO: 'Desconto encerrado', PRODUTO_ALTERADO: 'Dados alterados', ETIQUETAS_IMPRESSAS: 'Etiquetas impressas',
 };
 const CAMPOS: [keyof ProdutoDetalhe & string, string][] = [
   ['tituloEtiqueta', 'Título da etiqueta'], ['nome', 'Nome'], ['marca', 'Marca'], ['modelo', 'Modelo'], ['ano', 'Ano'],
@@ -38,6 +39,7 @@ function detalheEvento(e: ProdutoEvento): string {
   if (e.tipo === 'PRECO_PRODUTO') return `${formatMoney(String(e.antes?.preco ?? '0'))} → ${formatMoney(String(d.preco ?? '0'))}${d.motivo ? ` · ${d.motivo}` : ''}`;
   if (e.tipo === 'DESCONTO_PRODUTO') return `${d.tipo === 'PERCENTUAL' ? `${String(d.valor).replace('.', ',')}%` : `preço promocional ${formatMoney(String(d.valor))}`}${d.ate ? ` até ${formatDate(String(d.ate))}` : ''} · ${d.motivo ?? ''}`;
   if (e.tipo === 'DESCONTO_PRODUTO_ENCERRADO') return String(d.motivo ?? '');
+  if (e.tipo === 'ETIQUETAS_IMPRESSAS') return `${d.quantidade} etiqueta(s), rolo ${d.rolo ?? ''} mm`;
   if (e.tipo === 'PRODUTO_ALTERADO') return Object.keys(d).map((k) => CAMPOS.find(([c]) => c === k)?.[1] ?? k).join(', ');
   return '';
 }
@@ -59,6 +61,7 @@ export function ProdutoPage() {
         {can('produtos.preco') && <button className="btn" onClick={() => setJanela('preco')}>Alterar preço</button>}
         {can('produtos.desconto') && <button className="btn" onClick={() => setJanela('desconto')}>{d.desconto ? 'Trocar desconto' : 'Dar desconto'}</button>}
         {can('produtos.desconto') && d.desconto && <button className="btn" onClick={() => setJanela('encerrar')}>Encerrar desconto</button>}
+        {can('etiquetas.imprimir') && <Link className="btn" to={caminhoEtiquetas([{ produtoId: d.id, quantidade: d.saldoBazar + d.saldoDoacoes }])}>Imprimir etiquetas</Link>}
       </PageHeader>
       <p className="muted">Código <strong>{d.codigo}</strong> · {d.categoriaNome}{d.pecaUnica && <> · <Badge tom="info">Peça única</Badge></>}</p>
 

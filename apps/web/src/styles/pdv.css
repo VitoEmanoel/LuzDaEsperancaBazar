@@ -59,12 +59,19 @@
 .comprovante .total { font-weight: 700; font-size: 1.15rem; }
 .aviso-nao-fiscal { font-weight: 800; border: 2px solid var(--text); text-align: center; padding: .25rem; }
 
-/* Etiquetas (sempre preto no branco para leitura do código) */
-.etiquetas { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .5rem; }
-.etiqueta { border: 1px dashed var(--border-strong); padding: .5rem; text-align: center; background: #fff; color: #000; border-radius: 4px; }
-.etiqueta .barcode svg { max-width: 100%; height: 44px; fill: #000; }
-.etq-desc { font-size: .9rem; }
-.etq-rodape { display: flex; justify-content: space-between; }
+/* Etiqueta do produto (S4-02): em milímetros, no tamanho do rolo, sempre preto no branco para o leitor */
+.etiqueta { box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; background: #fff; color: #000;
+  font-family: Arial, Helvetica, sans-serif; border: 1px dashed var(--border-strong); }
+.etq-titulo { font-size: calc(2.8mm * var(--etq-k, 1)); line-height: 1.15; font-weight: 700; max-height: calc(1.15em * var(--etq-linhas, 2)); overflow: hidden; overflow-wrap: anywhere; }
+.etiqueta .barcode { flex: 1; min-height: 5mm; margin: .6mm auto; display: block; }
+.etiqueta .barcode svg { display: block; width: 100%; height: 100%; fill: #000; }
+.etq-rodape { display: flex; justify-content: space-between; align-items: baseline; gap: 1mm; }
+.etq-codigo { font-size: calc(2.6mm * var(--etq-k, 1)); letter-spacing: .2mm; }
+.etq-preco { font-size: calc(4.2mm * var(--etq-k, 1)); white-space: nowrap; }
+.etiquetas-previa { display: flex; flex-wrap: wrap; gap: 1rem; }
+.etiquetas-previa figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: .25rem; }
+.etiquetas-previa figcaption { font-weight: 700; }
+.etiquetas-papel { display: none; }
 
 @media (max-width: 900px) {
   .pdv-body { grid-template-columns: 1fr; }

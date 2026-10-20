@@ -23,6 +23,7 @@ const MENU: { grupo: string; cor: 'coral' | 'laranja' | 'sol' | 'ceu' | 'roxo'; 
     // baixa, ajuste e preço viraram ações na lista do Estoque (S3-02)
     { to: '/estoque', rotulo: 'Estoque', perms: ['estoque.consultar'] },
     { to: '/estoque/transferir', rotulo: 'Transferência', perms: ['estoque.transferir'] },
+    { to: '/estoque/etiquetas', rotulo: 'Imprimir etiquetas', perms: ['etiquetas.imprimir'] },
   ] },
   { grupo: 'Financeiro', cor: 'sol', itens: [
     { to: '/financeiro/pagar', rotulo: 'Contas a pagar', perms: ['contas_pagar.gerenciar'] },

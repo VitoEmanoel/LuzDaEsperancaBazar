@@ -18,7 +18,7 @@ const foco = () => page.evaluate(() => { const a = document.activeElement; retur
 const dentro = async () => page.evaluate(() => !!document.activeElement?.closest('[role=dialog]'));
 try {
   await page.goto(`${URL}/login`);
-  await page.getByLabel('Usuário').fill('vendedor'); await page.locator('input[type="password"]').fill('Vendedor@123');
+  await page.getByLabel('Usuário').fill('vendedor'); await page.getByLabel('Senha', { exact: true }).fill('Vendedor@123');
   await page.getByRole('button', { name: 'Entrar' }).click();
   await page.waitForURL(/\/pdv/, { timeout: 15000 });
   await Promise.race([page.locator('.cat-btn').first().waitFor({ timeout: 15000 }), page.getByRole('heading', { name: 'Abrir caixa' }).waitFor({ timeout: 15000 })]);

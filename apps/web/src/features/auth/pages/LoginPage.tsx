@@ -57,9 +57,7 @@ export function LoginPage() {
         <Field label="Usuário">
           <input value={usuario} onChange={(e) => setUsuario(e.target.value)} autoComplete="username" autoFocus required maxLength={60} />
         </Field>
-        <Field label="Senha">
-          <CampoSenha value={senha} onChange={(e) => setSenha(e.target.value)} autoComplete="current-password" required maxLength={128} />
-        </Field>
+        <CampoSenha label="Senha" value={senha} onChange={(e) => setSenha(e.target.value)} autoComplete="current-password" required maxLength={128} />
         <ErrorAlert erro={erro} />
         <button className="btn btn-primary btn-block btn-lg" disabled={enviando || !usuario || !senha}>{enviando ? 'Entrando…' : 'Entrar'}</button>
       </form>
