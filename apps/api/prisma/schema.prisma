@@ -54,6 +54,13 @@ enum TipoControle {
   CATEGORIA
 }
 
+/// Estado da entrada de um produto no lote (0009): o saldo só sobe na aprovação.
+enum StatusItem {
+  CADASTRADO
+  DEVOLVIDO
+  APROVADO
+}
+
 enum TipoMovimentacao {
   ENTRADA
   TRANSFERENCIA
@@ -231,6 +238,8 @@ model Usuario {
   recebimentoEstornadoPor    Recebimento[]            @relation("RecebimentoEstornadoPor")
   contaPagarCriadaPor        ContaPagar[]             @relation("ContaPagarCriadaPor")
   regraFiscalCriadaPor       RegraFiscal[]            @relation("RegraFiscalCriadaPor")
+  produtoCriadoPor           Produto[]                @relation("ProdutoCriadoPor")
+  itemAprovadoPor            Item[]                   @relation("ItemAprovadoPor")
 
   @@map("usuario")
 }
@@ -293,6 +302,7 @@ model Categoria {
   atualizadoEm      DateTime @updatedAt @map("atualizado_em") @db.Timestamptz(3)
 
   itens     Item[]
+  produtos  Produto[]
   descartes Descarte[]
   regras    RegraFiscal[]
 
@@ -426,11 +436,50 @@ model LoteEntrada {
   @@map("lote_entrada")
 }
 
+/// Produto de código único (0009): várias unidades, várias entradas (itens) em lotes diferentes.
+/// O preço é do produto e vale para todas as unidades; peça única tem uma entrada só, de 1 unidade.
+model Produto {
+  id             String   @id @default(uuid()) @db.Uuid
+  codigo         String   @unique
+  tituloEtiqueta String   @map("titulo_etiqueta")
+  nome           String
+  categoriaId    String   @map("categoria_id") @db.Uuid
+  precoVenda     Decimal  @map("preco_venda") @db.Decimal(10, 2)
+  pecaUnica      Boolean  @default(false) @map("peca_unica")
+  modelo         String?
+  marca          String?
+  ano            Int?
+  tipo           String?
+  tamanho        String?
+  cor            String?
+  condicao       String?
+  ativo          Boolean  @default(true)
+  criadoPorId    String   @map("criado_por_id") @db.Uuid
+  criadoEm       DateTime @default(now()) @map("criado_em") @db.Timestamptz(3)
+  atualizadoEm   DateTime @updatedAt @map("atualizado_em") @db.Timestamptz(3)
+
+  categoria Categoria @relation(fields: [categoriaId], references: [id])
+  criadoPor Usuario   @relation("ProdutoCriadoPor", fields: [criadoPorId], references: [id], onDelete: Restrict)
+  itens     Item[]
+
+  @@index([categoriaId])
+  @@index([nome])
+  @@map("produto")
+}
+
+/// Entrada de mercadoria num lote: de um produto (`ETIQUETADO`) ou por categoria (`CATEGORIA`).
+/// `codigoBarras` e `precoVenda` só nos itens anteriores à 0009; nos novos, código e preço vêm do produto.
 model Item {
   id                String       @id @default(uuid()) @db.Uuid
   loteId            String       @map("lote_id") @db.Uuid
   categoriaId       String       @map("categoria_id") @db.Uuid
   tipoControle      TipoControle @map("tipo_controle")
+  produtoId         String?      @map("produto_id") @db.Uuid
+  status            StatusItem   @default(CADASTRADO)
+  localDestinoId    Int          @map("local_destino_id")
+  motivoDevolucao   String?      @map("motivo_devolucao")
+  aprovadoPorId     String?      @map("aprovado_por_id") @db.Uuid
+  aprovadoEm        DateTime?    @map("aprovado_em") @db.Timestamptz(3)
   codigoBarras      String?      @unique @map("codigo_barras")
   descricao         String?
   valorAtribuido    Decimal      @map("valor_atribuido") @db.Decimal(10, 2)
@@ -442,15 +491,20 @@ model Item {
 
   lote           LoteEntrada    @relation(fields: [loteId], references: [id])
   categoria      Categoria      @relation(fields: [categoriaId], references: [id])
+  produto        Produto?       @relation(fields: [produtoId], references: [id], onDelete: Restrict)
+  localDestino   LocalEstoque   @relation("ItemLocalDestino", fields: [localDestinoId], references: [id])
   descarteOrigem Descarte?      @relation("ItemDescarteOrigem", fields: [descarteOrigemId], references: [id])
   movimentacoes  Movimentacao[]
   vendaItens     VendaItem[]
   regras         RegraFiscal[]
   saldos         SaldoEstoque[]
   criadoPor      Usuario        @relation("ItemCriadoPor", fields: [criadoPorId], references: [id], onDelete: Restrict)
+  aprovadoPor    Usuario?       @relation("ItemAprovadoPor", fields: [aprovadoPorId], references: [id], onDelete: Restrict)
 
   @@index([loteId])
   @@index([categoriaId, tipoControle])
+  @@index([produtoId])
+  @@index([status])
   @@map("item")
 }
 
@@ -489,6 +543,7 @@ model LocalEstoque {
   saidas   Movimentacao[] @relation("MovOrigem")
   saldos   SaldoEstoque[]
   entradas Movimentacao[] @relation("MovDestino")
+  itens    Item[]         @relation("ItemLocalDestino")
 
   @@map("local_estoque")
 }

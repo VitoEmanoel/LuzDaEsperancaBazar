@@ -158,7 +158,9 @@ export async function rotasCadastros(app: FastifyInstance) {
       return (await def.listar(f)).map(def.dto);
     });
 
-    app.post(`/${tipo}`, { config: { acesso: ['cadastros.gerenciar'] } }, async (req, reply) => {
+    // S2-06: o Estoquista cria o parceiro na hora de registrar o lote (sem editar nem desativar)
+    const criar: Permissao[] = tipo === 'parceiros' ? ['cadastros.gerenciar', 'parceiros.criar'] : ['cadastros.gerenciar'];
+    app.post(`/${tipo}`, { config: { acesso: criar } }, async (req, reply) => {
       const u = exigirUsuario(req);
       const nome = String((req.body as AnyRow | null)?.nome ?? '').trim();
       const id = (req.body as AnyRow | null)?.id;

@@ -98,27 +98,32 @@ Cada domínio tem **o mesmo nome no front e no back** (ex.: `features/financeiro
 
 ## 5. Funcionalidades — como acontecem
 
-### 5.1 Entrada e triagem de doações
+### 5.1 Entrada de doações: cadastro e aprovação (Sprint 2)
 
-**Fluxo:** lote recebido → triagem item a item → aprovado (vai ao estoque) ou descartado (nunca entra) → lote encerrado.
+**Fluxo:** lote recebido → o estoquista cadastra os produtos do lote (ficam **aguardando aprovação**, sem estoque) → o **Administrador aprova** item a item ou o lote inteiro (só aí o estoque recebe) ou **devolve com motivo** (o estoquista corrige e reenvia) → descartados nunca entram → lote encerrado. Desenho em `docs/arquitetura/produto-e-aprovacao.md`.
 
 1. **Registrar o lote** (`/entradas/novo`) com tipo:
-   - **Doação** — exige parceiro e/ou campanha (RN-04);
+   - **Doação** — exige o **parceiro** (doador); a campanha é opcional (RN-04, S2-06). Sem doador conhecido, use "Doador não identificado". O estoquista **cria o parceiro na hora** (permissão `parceiros.criar`; editar e desativar continuam com o Administrador);
    - **Compra** — exige fornecedor e valor pago, e **gera automaticamente uma conta a pagar** (RN-05);
-   - **Saldo inicial** — só pela carga inicial da implantação.
+   - **Saldo inicial** — só pela carga inicial da implantação (o Administrador carrega; os itens já entram aprovados).
    Pode anexar o documento do lote (PDF/imagem; o servidor confere o tipo real).
-2. **Triar** (`/entradas/:id/triagem`), em duas colunas:
-   - **Aprovar:** categoria; controle **etiquetado** (peça única, ganha código `BZ000001`…) ou **por categoria** (itens comuns em quantidade); preço; **valor atribuído unitário** (doação: sugere o preço; compra: obrigatório o **custo**); estoque de destino (Bazar ou Doações).
+2. **Cadastrar os produtos do lote** (`/entradas/:id/triagem`), em duas colunas:
+   - **Cadastrar**, de três jeitos:
+     - **Produto novo:** ganha um **código único** `BZ` + 6 dígitos (a mesma sequência das peças antigas: as etiquetas já impressas valem). Obrigatórios: título da etiqueta (até 40 letras), nome, categoria, preço, quantidade e valor atribuído; marca, modelo, ano, tipo, tamanho, cor e condição são opcionais (P-06). **Peça única** tem 1 unidade e não recebe nova entrada.
+     - **Produto que já existe:** nova entrada do mesmo código em outro lote (busca por código ou nome). **Não muda o preço**, que é do produto (P-14).
+     - **Por categoria:** itens comuns em quantidade, como antes (o preço é o da categoria).
+     Em todos: **valor atribuído unitário** (compra: o **custo**) e o estoque de destino (Bazar ou Doações), usado na aprovação.
    - **Descartar:** um registro por item, com motivo. Descartado nunca entra no estoque.
-3. **Etiquetas** Code 39 impressas pelo navegador.
-4. **Encerrar o lote.** Lote triado não aceita registros (RN-28); reabrir ou reverter descarte exige permissão e motivo, e vai para a auditoria.
+3. **Aprovar** (só o Administrador, `produtos.aprovar`): aprova item a item ou o lote inteiro; o estoque recebe a quantidade no local escolhido. **Devolver** exige motivo: o item fica "devolvido", o estoquista corrige (quantidade, valor, destino e, se o produto nasceu nessa entrada, título, nome e preço) e ele volta para a aprovação. Aprovado não volta atrás. Tudo na auditoria.
+4. **Etiquetas** Code 39 impressas pelo navegador: título curto, preço atual e código do produto.
+5. **Encerrar o lote.** Lote encerrado não aceita item novo (RN-28), mas os itens dele ainda são aprovados, devolvidos e corrigidos; reabrir ou reverter descarte exige permissão e motivo, e vai para a auditoria. Item de descarte revertido também passa pela aprovação.
 
 ### 5.2 Estoque duplo (Bazar ⇄ Doações)
 
 - **Posição** (`/estoque`) com filtros por estoque, categoria, parceiro e campanha.
 - **Histórico do item** (`/estoque/itens/:id`): linha do tempo de tudo o que aconteceu com ele.
 - **Transferência** entre Bazar e Doações, com motivo e usuário registrados.
-- **Baixa, ajuste e preço**: baixa por motivo, ajuste de inventário, mudança de preço da peça ou da categoria — sempre com motivo e auditoria.
+- **Baixa, ajuste e preço**: baixa por motivo, ajuste de inventário, mudança de preço do produto (vale para todas as unidades e entradas) ou da categoria — sempre com motivo e auditoria. Cada linha do estoque é uma entrada (lote) de um produto; transferir pelo código só funciona quando o produto tem uma entrada só (senão, escolha a entrada na lista).
 - **Carga inicial** por planilha (CSV/XLSX), tudo ou nada; aceita "Doações", "doacoes", "DOAÇÕES".
 
 **Regra de ouro:** ninguém escreve no saldo. Toda mudança é uma linha em `movimentacao`, e um trigger do banco atualiza o saldo. Garante: saldo nunca negativo (RN-06/07), só vende do Bazar (RN-10), histórico imutável — nada se apaga (RN-11/24).
@@ -127,7 +132,7 @@ Cada domínio tem **o mesmo nome no front e no back** (ex.: `features/financeiro
 
 Tela cheia, pensada para leitor de código e tablet de 10".
 
-- **Leitura de código:** campo sempre focado; leitor USB funciona como teclado (Enter); feedback sonoro e visual.
+- **Leitura de código:** campo sempre focado; leitor USB funciona como teclado (Enter); feedback sonoro e visual. Bipar de novo um produto de várias unidades soma uma unidade na mesma linha (até o saldo do Bazar); peça única não entra duas vezes.
 - **Venda por categoria:** botões com preço para itens comuns, com quantidade (F2).
 - **Atalhos:** F2 quantidade · F4 pagamento · Esc remove o último · F6 sangria/suprimento.
 - **Pagamento** (F4): o operador **digita quanto recebeu em cada forma** (dinheiro, PIX, débito, crédito) e o sistema faz a conta: mostra o que falta e, em dinheiro, o **troco** (conta de R$ 20 paga com nota de R$ 100: troco de R$ 80). A venda só finaliza quando a soma cobre o total. PIX e cartão não aceitam receber mais do que falta. No fiado o valor digitado é o que fica na conta do cliente (RN-15). Desconto só até o limite do perfil (o Vendedor padrão não dá desconto).
@@ -137,7 +142,7 @@ Tela cheia, pensada para leitor de código e tablet de 10".
 - **Fiado:** exige cliente e vencimento; **cadastro rápido de cliente** com ciência do aviso de privacidade (LGPD); se o telefone já existe, pergunta "É a mesma pessoa?".
 - **Comprovante não fiscal** com nome, CNPJ e endereço da instituição (impressão 80 mm).
 - **O servidor recalcula tudo** (preço, subtotal, desconto, total, troco); a tela é só conferência.
-- **PEPS** na venda por categoria, com desempate fixo (RN-09). Dois caixas disputando a última peça: só um vende (testado).
+- **PEPS** na venda por categoria **e por produto** (S2-10): as unidades saem da entrada aprovada mais antiga, com desempate fixo (RN-09), e cada entrada consumida vira uma linha da venda — a receita continua atribuída ao parceiro de cada lote. Dois caixas disputando a última unidade: só um vende (testado). Cancelar a venda devolve as unidades às entradas de onde saíram.
 
 ### 5.4 Sem modo offline
 
@@ -202,9 +207,12 @@ Categorias, parceiros, campanhas, motivos de descarte e de baixa, categorias de 
 ## 6. Ciclo de vida de uma doação
 
 ```
-Doador/Campanha ──► Lote de entrada ──► Triagem ─┬─► Descarte (motivo) ──► fim
-                                                  │
-                                                  └─► Item aprovado
+Doador/Campanha ──► Lote de entrada ──► Cadastro ─┬─► Descarte (motivo) ──► fim
+                                                   │
+                                                   └─► Aguardando aprovação ◄─┐ devolve com motivo
+                                                          │      └────────────┘ (estoquista corrige)
+                                                          ▼ Administrador aprova
+                                                       Item aprovado
                                                          │
                                        ┌─────────────────┴─────────────────┐
                                        ▼                                   ▼
@@ -228,7 +236,11 @@ As regras críticas são validadas **duas vezes**: na API e no banco (defesa em 
 | Regra | API | Banco |
 |---|---|---|
 | Saldo nunca negativo; só vende do Bazar | trava `FOR UPDATE` | `tg_valida_movimentacao` |
-| Peça etiquetada tem quantidade 1 | validação | `ck_item_etiquetado` |
+| Peça única tem 1 unidade e uma entrada só | validação | `tg_item_produto`, `tg_valida_movimentacao` |
+| Estoque só sobe na aprovação; item não aprovado não movimenta | `POST /itens/:id/aprovar` | `tg_item_exige_entrada`, `tg_valida_movimentacao` |
+| Aprovado não volta; devolvido não é aprovado sem reenvio | `lotes.routes.ts` | `tg_item_imutavel`, `ck_item_aprovacao`, `ck_item_devolucao` |
+| Doação exige parceiro | `POST /lotes` | `tg_lote_doacao_exige_parceiro` |
+| Código do produto não muda; produto não se apaga | — | `tg_produto_imutavel`, `tg_produto_sem_exclusao` |
 | Fiado exige cliente e conta a receber | `vendas.service.ts` | `tg_valida_venda_completa` |
 | Pagamentos = total; troco só em dinheiro | servidor recalcula | `ck_pagamento_*`, `ck_venda_totais` |
 | Um caixa aberto por terminal e por operador | `POST /caixas` | índices únicos parciais |
@@ -282,14 +294,16 @@ Segue o brandbook da instituição (`docs/marca/`):
 
 | Bateria | Resultado atual |
 |---|---|
-| `tests/smoke.ts` (fluxos críticos e segurança) | 151 ok |
+| `tests/smoke.ts` (fluxos críticos e segurança) | 156 ok |
 | `tests/concorrencia.ts` (disputa da última peça, IDOR) | OK |
-| `tests/reteste-qa.ts` (regressão dos 12 tickets) | 36 ok |
-| `tests/perfis.ts` (acesso de cada perfil, perfil personalizado, proteção dos perfis padrão) | 120 ok |
+| `tests/reteste-qa.ts` (regressão dos 12 tickets) | 37 ok |
+| `tests/perfis.ts` (acesso de cada perfil, perfil personalizado, proteção dos perfis padrão) | 144 ok |
 | `tests/cpf.ts` (CPF: dígitos, limite em reais, obrigatório, só no comprovante, trava entre vendas, limpeza do mês) | 37 ok |
+| `tests/produto.ts` (Sprint 2: cadastro, devolução, aprovação, nova entrada, PEPS por produto, estorno, disputa da última unidade) | 49 ok |
 | `database/04_testes_0003.sql` (tentativas de violar regras do banco) | 0 falha |
+| `database/08_testes_0009.sql` (regras do produto e da aprovação no banco) | 32 de 32 (35 com o papel da API) |
 | `database/07_manutencao_rotina.sql` (conferência de saldo e prestação de contas) | 0 divergência |
-| E2E no navegador (comprovante, cadastros, relatórios) | a refazer após a Sprint 1 |
+| Telas no navegador (`apps/web/tests-ui/`: CPF, janelas do PDV, cadastro e aprovação de produtos) | 11, 14 e 19 ok |
 | Typecheck web + api e `npm audit` | 0 erros, 0 vulnerabilidades |
 
 Teste de volume (`05_carga_volume_teste.sql`): cerca de 5 anos simulados — 64 mil itens, 129 mil movimentações, 60 mil vendas.
@@ -312,7 +326,7 @@ psql -d bazar -v senha_api="..." -f database/03_seguranca_papeis.sql
 npm run dev:api                              # http://localhost:3000/api/v1
 
 # Testes, em banco de TESTE, nesta ordem:
-npm run test:smoke && npm run test:concorrencia && npm run test:reteste && npm run test:perfis && npm run test:cpf   # espere ~1 minuto entre as baterias: o login aceita 10 por minuto
+npm run test:smoke && npm run test:concorrencia && npm run test:reteste && npm run test:perfis && npm run test:cpf && npm run test:produto   # espere ~1 minuto entre as baterias: o login aceita 10 por minuto
 ```
 
 **Produção:** atrás de proxy com TLS (`TRUST_PROXY=true`), segredos vindos do cofre, pasta de uploads em volume com backup, `03_seguranca_papeis.sql` após cada deploy e `07_manutencao_rotina.sql` diariamente.

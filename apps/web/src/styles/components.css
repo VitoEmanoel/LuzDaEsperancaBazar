@@ -80,9 +80,14 @@ a.alert:hover { filter: brightness(.98); color: var(--text); }
   width: 100%; border-collapse: separate; border-spacing: 0; background: var(--surface);
   border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 1rem;
 }
+/* Caixa da tabela (TabelaRolavel): em qualquer largura, a tabela que não cabe rola dentro dela */
+.tabela-rolavel { overflow-x: auto; margin-bottom: 1rem; border-radius: var(--radius); }
+.tabela-rolavel > .table { margin-bottom: 0; }
 .table th, .table td { padding: .65rem .8rem; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
 .table tbody tr:last-child td { border-bottom: 0; }
 .table th { background: var(--surface-2); font-size: .82rem; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); }
+/* Título de coluna numérica pode quebrar linha (o valor não): a tabela não fica larga por causa do cabeçalho */
+.table th.num { white-space: normal; }
 .table tbody tr:hover td { background: color-mix(in srgb, var(--primary-soft) 55%, transparent); }
 .table.compact td, .table.compact th { padding: .4rem .6rem; font-size: .92rem; }
 .table caption { text-align: left; font-family: var(--fonte-titulo); font-weight: 600; color: var(--heading); padding: .5rem 0; }

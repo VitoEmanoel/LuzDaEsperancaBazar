@@ -7,7 +7,7 @@ import { terminaisApi } from '../../caixa/caixa.api';
 import { errorMessage } from '../../../shared/api/http';
 import type { ImportacaoResultado, Instituicao, RegraFiscal } from '../../../shared/api/types';
 import { useAsync } from '../../../shared/hooks/useAsync';
-import { Badge, ErrorAlert, Field } from '../../../shared/components/ui';
+import { Badge, ErrorAlert, Field, TabelaRolavel } from '../../../shared/components/ui';
 import { formatDate, todayLocal } from '../../../shared/lib/format';
 import { fromCents, tryCents } from '../../../shared/lib/money';
 import { uuid } from '../../../shared/lib/uuid';
@@ -30,9 +30,9 @@ export function TerminaisTab() {
     <section className="narrow">
       <div className="row"><Field label="Novo terminal"><input value={nome} onChange={(e) => setNome(e.target.value)} maxLength={60} /></Field><button className="btn btn-primary" onClick={criar}>Adicionar</button></div>
       <ErrorAlert erro={erro} />
-      <table className="table"><tbody>{data?.map((t) => (
+      <TabelaRolavel><table className="table"><tbody>{data?.map((t) => (
         <tr key={t.id}><td>{t.nome}</td><td>{t.ativo ? <Badge tom="ok">Ativo</Badge> : <Badge>Inativo</Badge>}</td><td><button className="btn btn-sm" onClick={() => alternar(t.id, t.ativo)}>{t.ativo ? 'Desativar' : 'Reativar'}</button></td></tr>
-      ))}</tbody></table>
+      ))}</tbody></table></TabelaRolavel>
     </section>
   );
 }
@@ -104,8 +104,8 @@ export function RegrasFiscaisTab() {
         <button className="btn btn-primary" onClick={criar}>Criar regra</button>
       </div>
       <ErrorAlert erro={regras.erro} />
-      <table className="table"><thead><tr><th>Alvo</th><th>Situação</th><th className="num">Alíquota</th><th>Vigência</th></tr></thead>
-        <tbody>{regras.data?.map((r) => <tr key={r.id}><td>{r.alvo}{r.alvoNome && ` — ${r.alvoNome}`}</td><td>{r.situacao}</td><td className="num">{r.aliquota.replace('.', ',')}%</td><td>{formatDate(r.vigenciaInicio)} → {r.vigenciaFim ? formatDate(r.vigenciaFim) : <Badge tom="ok">vigente</Badge>}</td></tr>)}</tbody></table>
+      <TabelaRolavel><table className="table"><thead><tr><th>Alvo</th><th>Situação</th><th className="num">Alíquota</th><th>Vigência</th></tr></thead>
+        <tbody>{regras.data?.map((r) => <tr key={r.id}><td>{r.alvo}{r.alvoNome && ` — ${r.alvoNome}`}</td><td>{r.situacao}</td><td className="num">{r.aliquota.replace('.', ',')}%</td><td>{formatDate(r.vigenciaInicio)} → {r.vigenciaFim ? formatDate(r.vigenciaFim) : <Badge tom="ok">vigente</Badge>}</td></tr>)}</tbody></table></TabelaRolavel>
     </section>
   );
 }

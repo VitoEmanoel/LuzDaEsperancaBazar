@@ -156,25 +156,25 @@ Perfis e visibilidade
 - [x] S1B-21 Testes do CPF (validação dos dígitos, limite e saldo em reais, soma entre vendas do mesmo CPF, virada do mês, venda cancelada devolve o saldo) e aviso de privacidade (LGPD) na tela
 - [x] S1B-15 Rodar a definição de pronto; análise das tarefas e QA pelo agy; atualizar a documentação *(feito: análise antes e revisão depois, duas rodadas; achados conferidos nos arquivos)*
 
-### Sprint 2 — Produto, lote e cadastro (09/11 a 15/11)
+### Sprint 2 — Produto, lote e cadastro (09/11 a 15/11) · concluída em 19/10/2026, aguardando validação do humano
 **Objetivo:** o produto com código único e várias unidades, e o cadastro separado da aprovação, no banco e na API.
 
-- [ ] S2-01 Ler o `schema.prisma` completo e desenhar o modelo: produto, entradas por lote e estados do item
-- [ ] S2-02 Tabela de produto com título da etiqueta, nome, modelo, marca, ano, tipo, tamanho, cor, condição, categoria e preço
-- [ ] S2-03 Gerar o código curto do produto (sequencial, compatível com Code 128), sem quebrar os códigos já existentes
-- [ ] S2-04 Migração nova ligando produto a lote e origem (parceiro ou campanha), com os estados **cadastrado** e **aprovado**
-- [ ] S2-05 Regras no banco: o saldo só sobe na aprovação; peça única continua com quantidade 1
-- [ ] S2-06 Parceiro obrigatório no lote (tela, API e banco); estoquista pode criar parceiro
-- [ ] S2-07 API: cadastrar produto no lote (fica "cadastrado", sem efeito no estoque)
-- [ ] S2-08 API: nova entrada para produto já existente (soma ao saldo por movimentação, com origem)
-- [ ] S2-09 API: aprovar item a item e o lote inteiro; devolver ao estoquista com motivo; tudo na auditoria
-- [ ] S2-10 Venda por PEPS sobre o produto, mantendo a atribuição da receita ao parceiro de origem
-- [ ] S2-11 Manter o descarte com motivo no cadastro do lote
-- [ ] S2-12 Tela Novo lote (com criação de parceiro na hora)
-- [ ] S2-13 Tela Cadastrar produtos do lote (substitui a triagem)
-- [ ] S2-14 Adaptar a prestação de contas e o conferidor de saldo (`07_manutencao_rotina.sql`) ao produto
-- [ ] S2-15 Testes: aprovação, devolução, PEPS por produto e duas vendas disputando a última unidade
-- [ ] S2-16 Rodar a definição de pronto; revisão pelo agy; atualizar a documentação
+- [x] S2-01 Ler o `schema.prisma` completo e desenhar o modelo: produto, entradas por lote e estados do item
+- [x] S2-02 Tabela de produto com título da etiqueta, nome, modelo, marca, ano, tipo, tamanho, cor, condição, categoria e preço
+- [x] S2-03 Gerar o código curto do produto (sequencial, compatível com Code 128), sem quebrar os códigos já existentes
+- [x] S2-04 Migração nova ligando produto a lote e origem (parceiro ou campanha), com os estados **cadastrado** e **aprovado**
+- [x] S2-05 Regras no banco: o saldo só sobe na aprovação; peça única continua com quantidade 1
+- [x] S2-06 Parceiro obrigatório no lote (tela, API e banco); estoquista pode criar parceiro
+- [x] S2-07 API: cadastrar produto no lote (fica "cadastrado", sem efeito no estoque)
+- [x] S2-08 API: nova entrada para produto já existente (soma ao saldo por movimentação, com origem)
+- [x] S2-09 API: aprovar item a item e o lote inteiro; devolver ao estoquista com motivo; tudo na auditoria
+- [x] S2-10 Venda por PEPS sobre o produto, mantendo a atribuição da receita ao parceiro de origem
+- [x] S2-11 Manter o descarte com motivo no cadastro do lote
+- [x] S2-12 Tela Novo lote (com criação de parceiro na hora)
+- [x] S2-13 Tela Cadastrar produtos do lote (substitui a triagem)
+- [x] S2-14 Adaptar a prestação de contas e o conferidor de saldo (`07_manutencao_rotina.sql`) ao produto
+- [x] S2-15 Testes: aprovação, devolução, PEPS por produto e duas vendas disputando a última unidade; e as lacunas achadas pelo QA em 19/10/2026: preço adulterado na venda, campo extra recusado, reenvio de recebimento com o mesmo id e corpo do erro no padrão RFC 9457
+- [x] S2-16 Rodar a definição de pronto; revisão pelo agy; atualizar a documentação
 
 ### Sprint 3 — Aprovação, estoque unificado e desconto (16/11 a 22/11)
 **Objetivo:** o Admin aprova; o estoque vira uma tela só; desconto no produto.
@@ -218,6 +218,7 @@ PDV e caixa
 - S4-15 ~~Fechamento com a **linha do tempo completa**: cada venda, sangria e suprimento, da abertura ao fechamento~~ → movida para a S1B-09
 - S4-16 ~~PDF do fechamento de caixa~~ → movida para a S1B-11
 - S4-17 ~~PDV responsivo (celular, tablet e computador)~~ → movida para a S1B-12
+- [ ] S4-19 Esc no PDV com o campo vazio pede confirmação antes de tirar uma unidade (P-13)
 - [ ] S4-18 Testes e rodar a definição de pronto; análise das tarefas e QA pelo agy; atualizar a documentação
 
 ### Sprint 5 — Importação, visões, dashboards e câmera (30/11 a 06/12)
@@ -293,14 +294,16 @@ Fechamento
 - [ ] P-03 Onde hospedar com HTTPS e quem mantém (bloqueia S5-13; a câmera no celular só abre com HTTPS)
 - [x] P-04 Valor recebido obrigatório: **em todas as formas de pagamento** (decidido pelo humano em 19/10/2026; vai para a S1B-04 a S1B-06)
 - [ ] P-05 Desconto: a validade é obrigatória ou opcional (S3-09)
-- [ ] P-06 Prefixo do código do produto e campos obrigatórios do cadastro (S2-03)
+- [x] P-06 Prefixo do código do produto e campos obrigatórios do cadastro (S2-03). Decidido em 19/10/2026: o código continua **`BZ` + 6 dígitos**, na mesma sequência de hoje (as etiquetas já impressas valem). Obrigatórios: **título da etiqueta, nome, categoria, preço, quantidade e valor atribuído**; modelo, marca, ano, tipo, tamanho, cor e condição são opcionais
 - [ ] P-07 Financeiro e Admin com consulta de lotes: confirmar que é só leitura (S3-12)
 - [ ] P-08 "Pouco saldo" no dashboard do Estoque: um valor único (sugestão: 5 unidades, configurável pelo Admin em Parâmetros) ou um valor por categoria (S5-15, S5-17)
 - [ ] P-09 O Vendedor pode **ver** o limite da sangria? Para bloquear com uma mensagem útil ("só há R$ X em dinheiro no caixa"), o sistema mostra o dinheiro da gaveta; isso desfaz o fechamento "às cegas". Confirmar (S1B-07)
 - [x] P-10 Pagar conta "com dinheiro do caixa" e receber fiado na gaveta exigem caixa aberto de quem faz. Decidido em 19/10/2026: o **Administrador** pode abrir caixa (S1B-16). O Financeiro continua sem caixa; se ele precisar dessas duas operações na gaveta, o Admin ou um perfil personalizado as faz
 - [ ] P-11 Recebimento de fiado em dinheiro no caixa: informar o valor recebido e calcular o troco, como na venda? Hoje o recebimento só tem o valor (achado do QA do agy)
 - [x] P-12 CPF e limite: o limite é em **valor (R$) por CPF por mês**, por exemplo R$ 2.000 ou R$ 5.000 (decidido pelo humano em 19/10/2026). **O Admin decide, em Parâmetros, se o CPF é obrigatório** (decidido em 19/10/2026). Se não for obrigatório, sem CPF o limite não vale para aquela venda.
-- [ ] P-13 Esc no PDV com o campo do código vazio tira uma unidade da última linha (é o atalho documentado); se isso atrapalhar, trocar por pedir confirmação
+- [x] P-13 Esc no PDV com o campo do código vazio tira uma unidade da última linha. Decidido em 19/10/2026: **pedir confirmação** antes de tirar (tarefa S4-19)
+- [x] P-14 Decisões da Sprint 2 (19/10/2026): a **venda por categoria continua** ao lado do produto de código único; item **devolvido** pelo Admin fica editável e o estoquista reenvia; a nova entrada **não muda o preço** (o preço é do produto; mudar é a S3-08); no lote de doação a **campanha é opcional** e o parceiro do lote não precisa ser o da campanha
+- [x] P-15 Admin sem segundo aprovador: decidido em 19/10/2026 que o cancelamento **pede motivo**. Já é assim para todos os perfis (mínimo de 5 caracteres, testado no smoke); nada a mudar
 
 ## 4. Riscos
 - **Prazo:** são 7 sprints de construção até a validação (a Sprint 1B e os dashboards acrescentaram uma semana; o plano termina na semana de 14/12 a 20/12). Os itens marcados como corte possível saem primeiro; se a Sprint 1B ficar grande, as tarefas S1B-09 a S1B-12 voltam para a Sprint 4.

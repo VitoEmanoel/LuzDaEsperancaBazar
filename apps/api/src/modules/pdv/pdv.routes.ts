@@ -39,10 +39,12 @@ export async function rotasPdv(app: FastifyInstance) {
           SELECT 1 FROM item i JOIN vw_saldo_estoque s ON s.item_id = i.id AND s.local_id = 1 AND s.saldo > 0
           WHERE i.categoria_id = c.id AND i.tipo_controle = 'CATEGORIA')
         ORDER BY c.nome`,
-      prisma.$queryRaw<{ id: string; codigo_barras: string; descricao: string | null; preco_venda: string }[]>`
-        SELECT i.id::text, i.codigo_barras, i.descricao, i.preco_venda::text FROM item i
+      // um por produto com saldo no Bazar (somando as entradas aprovadas); o preço é o atual do produto
+      prisma.$queryRaw<{ id: string; codigo: string; nome: string; preco_venda: string; peca_unica: boolean; saldo_bazar: number }[]>`
+        SELECT pr.id::text, pr.codigo, pr.nome, pr.preco_venda::text, pr.peca_unica, sum(s.saldo)::int AS saldo_bazar
+        FROM produto pr JOIN item i ON i.produto_id = pr.id AND i.status = 'APROVADO'
         JOIN vw_saldo_estoque s ON s.item_id = i.id AND s.local_id = 1 AND s.saldo > 0
-        WHERE i.tipo_controle = 'ETIQUETADO' ORDER BY i.codigo_barras`,
+        GROUP BY pr.id ORDER BY pr.codigo`,
       // LGPD (minimização, recomendação do QA): só vai para o terminal quem tem fiado em aberto, fiado nos
       // últimos 180 dias ou cadastro recente (90 dias) — não a base inteira de clientes.
       prisma.cliente.findMany({
@@ -62,7 +64,8 @@ export async function rotasPdv(app: FastifyInstance) {
     ]);
     const corpo = {
       categorias: categorias.map((c) => ({ id: c.id, nome: c.nome, precoPadrao: c.preco_padrao ? Number(c.preco_padrao).toFixed(2) : '0.00', vendaPorCategoria: c.venda_por_categoria, ativo: c.ativa, saldoBazar: c.saldo_bazar })),
-      itensEtiquetados: etiquetadas.map((i) => ({ itemId: i.id, codigo: i.codigo_barras, descricao: i.descricao ?? '', preco: Number(i.preco_venda).toFixed(2) })),
+      // `itemId` é o id do produto (o PDV vende pelo código); `saldoBazar` e `pecaUnica` para o "restam N" (S4-08)
+      itensEtiquetados: etiquetadas.map((p) => ({ itemId: p.id, codigo: p.codigo, descricao: p.nome, preco: Number(p.preco_venda).toFixed(2), saldoBazar: p.saldo_bazar, pecaUnica: p.peca_unica })),
       clientesFiado: clientes,
       regrasFiscais: regras.map(regraDto),
       fiadoPrazoDias: prazo || undefined,

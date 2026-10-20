@@ -4,7 +4,7 @@ import { errorMessage } from '../../../shared/api/http';
 import { FORMAS_PAGAMENTO } from '../../../shared/api/types';
 import { useAsync } from '../../../shared/hooks/useAsync';
 import { Modal } from '../../../shared/components/Modal';
-import { ErrorAlert, MoneyText } from '../../../shared/components/ui';
+import { ErrorAlert, MoneyText, TabelaRolavel } from '../../../shared/components/ui';
 import { downloadBlob } from '../../../shared/lib/download';
 import { useToast } from '../../../shared/components/Toast';
 import { LinhaDoTempoCaixa } from './LinhaDoTempoCaixa';
@@ -22,7 +22,7 @@ export function ResumoCaixaModal({ aberto, caixaId, onFechar }: { aberto: boolea
       <p className="muted">O caixa continua aberto: isto é só a conferência até este momento.</p>
       <ErrorAlert erro={dados.erro} />
       {dados.carregando && !previa ? <p>Carregando…</p> : previa && tempo && (<>
-        <table className="table">
+        <TabelaRolavel><table className="table">
           <tbody>
             <tr><td>Fundo de troco</td><td className="num"><MoneyText value={previa.fundoTroco} /></td></tr>
             {FORMAS_PAGAMENTO.map((f) => <tr key={f.value}><td>Vendas — {f.label}</td><td className="num"><MoneyText value={previa.totaisPorForma[f.value]} /></td></tr>)}
@@ -30,7 +30,7 @@ export function ResumoCaixaModal({ aberto, caixaId, onFechar }: { aberto: boolea
             <tr><td>Sangrias</td><td className="num">− <MoneyText value={previa.sangrias} /></td></tr>
             <tr className="destaque"><td>Dinheiro na gaveta agora</td><td className="num"><MoneyText value={previa.esperadoDinheiro} /></td></tr>
           </tbody>
-        </table>
+        </table></TabelaRolavel>
         <p className="muted">{previa.quantidadeVendas} venda(s) neste caixa.</p>
         <h3>O que aconteceu desde a abertura</h3>
         <LinhaDoTempoCaixa eventos={tempo.eventos} />

@@ -1,6 +1,8 @@
 /**
- * ENT/TRI — lotes de entrada, anexo do documento, triagem (itens aprovados e descartes),
- * encerramento/reabertura, reversão de descarte e etiquetas (RF-ENT-01..03, RF-TRI-01..05).
+ * ENT/TRI — lotes de entrada, anexo do documento, cadastro dos produtos do lote e descartes,
+ * aprovação pelo Administrador, encerramento/reabertura, reversão de descarte e etiquetas
+ * (RF-ENT-01..03, RF-TRI-01..05; Sprint 2: docs/arquitetura/produto-e-aprovacao.md).
+ * O item nasce CADASTRADO e não mexe no estoque: a ENTRADA só é gravada na aprovação.
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -8,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileTypeFromBuffer } from 'file-type';
+import type { Prisma } from '../../generated/prisma/client.js';
 import { prisma, type Db, type Tx } from '../../shared/prisma.js';
 import { AppError, conflito, invalido, naoEncontrado, proibido } from '../../shared/errors.js';
 import { page, parse, skipTake, zData, zIdParam, zMoney, zMotivo, zPage, zPeriodo, zUuid } from '../../shared/http.js';
@@ -28,16 +31,23 @@ const RE_CHAVE_ARQUIVO = /^lotes\/[0-9a-f-]{36}\.(pdf|png|jpg)$/;
 // ---------------- DTO ----------------
 const loteInclude = { parceiro: { select: { nome: true } }, campanha: { select: { nome: true } }, contaPagar: { select: { status: true } } } as const;
 type LoteRow = Awaited<ReturnType<typeof prisma.loteEntrada.findFirstOrThrow<{ include: typeof loteInclude }>>>;
-interface Resumo { aprovados: number; descartados: number; valor: number }
+interface Resumo { aprovados: number; pendentes: number; devolvidos: number; descartados: number; valor: number }
 
+/** Só itens aprovados entram no recebido e no valor atribuído (cadastrados e devolvidos ainda não chegaram ao estoque). */
 async function resumos(db: Db, ids: string[]): Promise<Map<string, Resumo>> {
-  const m = new Map<string, Resumo>(ids.map((id) => [id, { aprovados: 0, descartados: 0, valor: 0 }]));
+  const m = new Map<string, Resumo>(ids.map((id) => [id, { aprovados: 0, pendentes: 0, devolvidos: 0, descartados: 0, valor: 0 }]));
   if (!ids.length) return m;
-  const itens = await db.item.groupBy({ by: ['loteId'], where: { loteId: { in: ids } }, _sum: { quantidadeInicial: true } });
+  const itens = await db.item.groupBy({ by: ['loteId', 'status'], where: { loteId: { in: ids } }, _sum: { quantidadeInicial: true }, _count: { _all: true } });
   const valores = await db.$queryRaw<{ lote_id: string; v: string }[]>`
-    SELECT lote_id::text, coalesce(sum(quantidade_inicial * valor_atribuido), 0)::text AS v FROM item WHERE lote_id = ANY(${ids}::uuid[]) GROUP BY lote_id`;
+    SELECT lote_id::text, coalesce(sum(quantidade_inicial * valor_atribuido), 0)::text AS v FROM item
+    WHERE lote_id = ANY(${ids}::uuid[]) AND status = 'APROVADO' GROUP BY lote_id`;
   const desc = await db.descarte.groupBy({ by: ['loteId'], where: { loteId: { in: ids }, revertidoEm: null }, _count: { _all: true } });
-  for (const i of itens) m.get(i.loteId)!.aprovados = i._sum.quantidadeInicial ?? 0;
+  for (const i of itens) {
+    const r = m.get(i.loteId)!;
+    if (i.status === 'APROVADO') r.aprovados = i._sum.quantidadeInicial ?? 0;
+    else if (i.status === 'CADASTRADO') r.pendentes = i._count._all;
+    else r.devolvidos = i._count._all;
+  }
   for (const v of valores) m.get(v.lote_id)!.valor = toCents(Number(v.v).toFixed(2));
   for (const d of desc) m.get(d.loteId)!.descartados = d._count._all;
   return m;
@@ -51,7 +61,7 @@ function loteDto(l: LoteRow, r: Resumo) {
     documento: l.documentoNumero ?? undefined, temAnexo: !!l.documentoArquivo,
     recebidoEm: l.recebidoEm.toISOString(),
     status: l.status === 'TRIADO' ? 'TRIADO' : 'ABERTO',
-    aprovados: r.aprovados, descartados: r.descartados, valorAtribuido: fromCents(r.valor),
+    aprovados: r.aprovados, pendentes: r.pendentes, devolvidos: r.devolvidos, descartados: r.descartados, valorAtribuido: fromCents(r.valor),
     valorCompra: moneyOpt(l.valorCompra),
     pago: l.contaPagar ? l.contaPagar.status === 'PAGA' : undefined,
   };
@@ -63,22 +73,52 @@ export async function obterLoteDto(db: Db, id: string) {
   return loteDto(l!, (await resumos(db, [id])).get(id)!);
 }
 
-type ItemRow = { id: string; codigoBarras: string | null; descricao: string | null; quantidadeInicial: number; precoVenda: { toFixed(n: number): string } | null; valorAtribuido: { toFixed(n: number): string }; categoria: { nome: string }; movimentacoes: { localDestinoId: number | null }[] };
-const itemTriagemDto = (i: ItemRow) => ({
-  id: i.id, codigo: i.codigoBarras ?? undefined, descricao: i.descricao ?? i.categoria.nome, categoriaNome: i.categoria.nome,
-  quantidade: i.quantidadeInicial, preco: money(i.precoVenda ?? i.valorAtribuido),
-  localDestino: LOCAL_COD[i.movimentacoes[0]?.localDestinoId ?? 1] ?? 'BAZAR',
+const itemTriagemInclude = { categoria: { select: { nome: true } }, produto: true } as const;
+type ItemRow = Prisma.ItemGetPayload<{ include: typeof itemTriagemInclude }>;
+const produtoDto = (p: NonNullable<ItemRow['produto']>) => ({
+  id: p.id, codigo: p.codigo, tituloEtiqueta: p.tituloEtiqueta, nome: p.nome, categoriaId: p.categoriaId, preco: money(p.precoVenda),
+  pecaUnica: p.pecaUnica, modelo: p.modelo ?? undefined, marca: p.marca ?? undefined, ano: p.ano ?? undefined, tipo: p.tipo ?? undefined,
+  tamanho: p.tamanho ?? undefined, cor: p.cor ?? undefined, condicao: p.condicao ?? undefined,
 });
-const itemTriagemInclude = { categoria: { select: { nome: true } }, movimentacoes: { where: { tipo: 'ENTRADA' as const }, select: { localDestinoId: true }, take: 1 } };
+const itemTriagemDto = (i: ItemRow) => ({
+  id: i.id, controle: i.tipoControle, codigo: i.produto?.codigo ?? i.codigoBarras ?? undefined,
+  descricao: i.descricao ?? i.produto?.nome ?? i.categoria.nome, categoriaId: i.categoriaId, categoriaNome: i.categoria.nome,
+  quantidade: i.quantidadeInicial, preco: money(i.produto?.precoVenda ?? i.precoVenda ?? i.valorAtribuido), valorAtribuido: money(i.valorAtribuido),
+  localDestino: LOCAL_COD[i.localDestinoId] ?? 'BAZAR',
+  status: i.status, motivoDevolucao: i.motivoDevolucao ?? undefined,
+  produto: i.produto ? produtoDto(i.produto) : undefined,
+});
 
 type DescRow = { id: string; registradoEm: Date; revertidoEm: Date | null; categoria: { nome: string }; motivo: { nome: string } };
 const descarteDto = (d: DescRow) => ({ id: d.id, categoriaNome: d.categoria.nome, motivoNome: d.motivo.nome, registradoEm: d.registradoEm.toISOString(), revertido: !!d.revertidoEm });
 const descInclude = { categoria: { select: { nome: true } }, motivo: { select: { nome: true } } } as const;
 
-/** Gera o próximo código de barras (BZ + 6 dígitos). */
+/** Gera o próximo código do produto (BZ + 6 dígitos, a mesma sequência das peças antigas: P-06). */
 export async function proximoCodigo(tx: Tx): Promise<string> {
   const [r] = await tx.$queryRaw<{ n: bigint }[]>`SELECT nextval('seq_codigo_barras') AS n`;
   return `BZ${String(r!.n).padStart(6, '0')}`;
+}
+
+/**
+ * Trava os itens SEMPRE na ordem do id — a mesma da venda e do estorno (fn_estorna_venda_cancelada),
+ * para duas transações nunca esperarem uma pela outra em ordem cruzada. Devolve o estado lido depois da trava.
+ */
+export async function travarItens(tx: Tx, ids: string[]): Promise<{ id: string; status: string }[]> {
+  if (!ids.length) return [];
+  return tx.$queryRaw<{ id: string; status: string }[]>`
+    SELECT id::text, status::text FROM item WHERE id = ANY(${ids}::uuid[]) ORDER BY id FOR UPDATE`;
+}
+
+/** Aprova um item já travado e CADASTRADO: o estoque recebe a quantidade no local escolhido no cadastro. */
+async function aprovarItem(tx: Tx, id: string, usuarioId: string, ip: string) {
+  const i = await tx.item.update({
+    where: { id }, data: { status: 'APROVADO', aprovadoPorId: usuarioId, aprovadoEm: new Date() },
+    select: { localDestinoId: true, quantidadeInicial: true, lote: { select: { numero: true } } },
+  });
+  await tx.movimentacao.create({
+    data: { itemId: id, tipo: 'ENTRADA', localDestinoId: i.localDestinoId, quantidade: i.quantidadeInicial, usuarioId, motivo: `Aprovação do lote ${i.lote.numero}` },
+  });
+  await auditar(tx, { usuarioId, ip }, 'ITEM_APROVADO', 'item', id, { status: 'CADASTRADO' }, { status: 'APROVADO', local: LOCAL_COD[i.localDestinoId], quantidade: i.quantidadeInicial });
 }
 
 // ---------------- esquemas ----------------
@@ -95,16 +135,51 @@ const zNovoLote = z.object({
   formaPagamento: z.enum(['DINHEIRO', 'PIX', 'CARTAO_DEBITO', 'CARTAO_CREDITO']).optional(),
   vencimento: zData.optional(),
 });
+const zPrecoPositivo = zMoney.refine((v) => toCents(v) > 0, 'preço deve ser maior que zero');
+const zOpcional = (max: number) => z.string().trim().max(max).optional().transform((v) => v || undefined);
+/** Campos do produto (P-06): título da etiqueta, nome e preço obrigatórios; o resto é opcional. */
+const zCamposProduto = z.object({
+  tituloEtiqueta: z.string().trim().min(1, 'obrigatório').max(40),
+  nome: z.string().trim().min(1, 'obrigatório').max(120),
+  preco: zPrecoPositivo,
+  pecaUnica: z.boolean().default(false),
+  modelo: zOpcional(60), marca: zOpcional(60), tipo: zOpcional(60), tamanho: zOpcional(30), cor: zOpcional(30), condicao: zOpcional(30),
+  ano: z.number().int().min(1800).max(2200).optional(),
+});
+/**
+ * Item do lote. `CATEGORIA`: como antes (o preço é o da categoria; `preco` só sugere o valor atribuído).
+ * `ETIQUETADO`: produto novo (`produto`) ou nova entrada de um produto que já existe (`produtoId`); valor atribuído obrigatório.
+ */
 const zItem = z.object({
   id: zUuid,
   categoriaId: zUuid,
   controle: z.enum(['ETIQUETADO', 'CATEGORIA']),
   quantidade: z.number().int().min(1).max(10_000),
-  preco: zMoney.refine((v) => toCents(v) > 0, 'preço deve ser maior que zero'),
+  preco: zPrecoPositivo.optional(),
   valorAtribuido: zMoney.optional(),
   descricao: z.string().trim().max(120).optional(),
   localDestino: z.enum(['BAZAR', 'DOACOES']),
   descarteOrigemId: zUuid.optional(),
+  produtoId: zUuid.optional(),
+  produto: zCamposProduto.optional(),
+}).superRefine((b, ctx) => {
+  const erro = (path: string, message: string) => ctx.addIssue({ code: z.ZodIssueCode.custom, path: [path], message });
+  if (b.controle === 'CATEGORIA') {
+    if (b.produtoId || b.produto) erro('controle', 'item por categoria não tem produto');
+    if (!b.preco && !b.valorAtribuido) erro('valorAtribuido', 'obrigatório');
+    return;
+  }
+  if (!b.produtoId === !b.produto) erro('produto', 'informe o produto novo ou o produto que já existe (produtoId), um dos dois');
+  if (!b.valorAtribuido) erro('valorAtribuido', 'obrigatório');
+});
+/** Correção de item cadastrado ou devolvido: só os campos enviados mudam. */
+const zCorrecao = z.object({
+  quantidade: z.number().int().min(1).max(10_000).optional(),
+  valorAtribuido: zMoney.optional(),
+  descricao: z.string().trim().max(120).optional(),
+  localDestino: z.enum(['BAZAR', 'DOACOES']).optional(),
+  categoriaId: zUuid.optional(),
+  produto: zCamposProduto.partial().optional(),
 });
 const zDescarte = z.object({ id: zUuid, categoriaId: zUuid, motivoId: zUuid, observacao: z.string().trim().max(500).optional(), descricao: z.string().trim().max(120).optional() });
 
@@ -142,7 +217,8 @@ export async function rotasLotes(app: FastifyInstance) {
     if (existente) return reply.code(200).send(await obterLoteDto(prisma, b.id)); // reenvio idempotente
 
     if (b.tipo === 'SALDO_INICIAL' && !tem(u, 'estoque.ajustar')) proibido('Lote de saldo inicial é criado pela carga inicial');
-    if (b.tipo === 'DOACAO' && !b.parceiroId && !b.campanhaId) throw new AppError(400, 'Informe parceiro e/ou campanha', 'ORIGEM_OBRIGATORIA'); // RN-04
+    // RN-04 (S2-06): doação exige o parceiro; a campanha é opcional. Sem saber quem doou: "Doador não identificado".
+    if (b.tipo === 'DOACAO' && !b.parceiroId) throw new AppError(400, 'Informe o parceiro (doador) do lote', 'PARCEIRO_OBRIGATORIO');
     if (b.tipo === 'COMPRA') {
       if (!tem(u, 'contas_pagar.gerenciar')) proibido('Registrar compra exige permissão de contas a pagar');
       if (!b.parceiroId) throw new AppError(400, 'Compra exige fornecedor', 'FORNECEDOR_OBRIGATORIO'); // RN-05
@@ -217,42 +293,194 @@ export async function rotasLotes(app: FastifyInstance) {
       .send(buf);
   });
 
-  // ---------------- triagem ----------------
+  // ---------------- cadastro dos produtos do lote (S2-07, S2-08) ----------------
   app.post('/lotes/:id/itens', { config: { acesso: ['entrada.registrar'] } }, async (req, reply) => {
     const u = exigirUsuario(req);
     const { id: loteId } = parse(zIdParam, req.params);
     const b = parse(zItem, req.body);
     const ja = await prisma.item.findUnique({ where: { id: b.id }, include: itemTriagemInclude });
     if (ja) {
-      if ((await prisma.item.findUnique({ where: { id: b.id }, select: { loteId: true } }))!.loteId !== loteId) conflito('ID_EM_USO', 'Identificador já usado em outro lote');
-      return reply.code(200).send(itemTriagemDto(ja));
+      if (ja.loteId !== loteId) conflito('ID_EM_USO', 'Identificador já usado em outro lote');
+      return reply.code(200).send(itemTriagemDto(ja)); // reenvio idempotente
     }
-    if (b.controle === 'ETIQUETADO' && b.quantidade !== 1) throw new AppError(400, 'Peça etiquetada tem quantidade 1', 'ETIQUETADO_QTD'); // RN-08
     const lote = await prisma.loteEntrada.findUnique({ where: { id: loteId }, select: { numero: true, status: true, tipo: true } });
     if (!lote) naoEncontrado('Lote');
     if (lote!.status === 'TRIADO' && !b.descarteOrigemId) conflito('LOTE_TRIADO', 'Lote já triado não aceita registros');
     // RF-TRI-01 cenário 5: em compra, o valor atribuído é o CUSTO unitário — não pode cair no preço de venda
-    if (lote!.tipo === 'COMPRA' && !b.valorAtribuido) invalido('valorAtribuido', 'obrigatório em lote de compra (custo unitário)');
+    if (lote!.tipo === 'COMPRA' && !(b.valorAtribuido && toCents(b.valorAtribuido) > 0)) invalido('valorAtribuido', 'obrigatório em lote de compra (custo unitário maior que zero)');
     const cat = await prisma.categoria.findFirst({ where: { id: b.categoriaId, ativa: true } });
     if (!cat) throw new AppError(400, 'Categoria inexistente ou inativa', 'VALIDACAO');
 
+    let existente: { id: string; nome: string; categoriaId: string; pecaUnica: boolean } | null = null;
+    if (b.produtoId) {
+      // nova entrada de um produto que já existe: o preço do produto não muda (P-14)
+      existente = await prisma.produto.findFirst({ where: { id: b.produtoId, ativo: true }, select: { id: true, nome: true, categoriaId: true, pecaUnica: true } });
+      if (!existente) throw new AppError(400, 'Produto inexistente ou inativo', 'VALIDACAO');
+      if (existente.categoriaId !== b.categoriaId) conflito('CATEGORIA_DO_PRODUTO', 'A entrada tem a categoria do produto');
+      if (existente.pecaUnica) conflito('PECA_UNICA_ENTRADA', 'Peça única não recebe nova entrada: cadastre um produto novo');
+    }
+    if (b.produto?.pecaUnica && b.quantidade !== 1) throw new AppError(400, 'Peça única tem quantidade 1', 'PECA_UNICA_QTD'); // RN-08
+
     const item = await prisma.$transaction(async (tx) => {
-      const codigo = b.controle === 'ETIQUETADO' ? await proximoCodigo(tx) : null;
-      const novo = await tx.item.create({
+      let produtoId = existente?.id ?? null;
+      let nome = existente?.nome;
+      if (b.produto) {
+        const p = b.produto;
+        const novo = await tx.produto.create({
+          data: {
+            codigo: await proximoCodigo(tx), tituloEtiqueta: p.tituloEtiqueta, nome: p.nome, categoriaId: b.categoriaId, precoVenda: p.preco,
+            pecaUnica: p.pecaUnica, modelo: p.modelo ?? null, marca: p.marca ?? null, ano: p.ano ?? null, tipo: p.tipo ?? null,
+            tamanho: p.tamanho ?? null, cor: p.cor ?? null, condicao: p.condicao ?? null, criadoPorId: u.id,
+          },
+        });
+        produtoId = novo.id;
+        nome = novo.nome;
+        await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'PRODUTO_CRIADO', 'produto', novo.id, undefined, { codigo: novo.codigo, preco: p.preco, pecaUnica: p.pecaUnica });
+      }
+      await tx.item.create({
         data: {
-          id: b.id, loteId, categoriaId: b.categoriaId, tipoControle: b.controle, codigoBarras: codigo,
-          descricao: b.descricao || `${cat!.nome} (lote ${lote!.numero})`,
-          valorAtribuido: b.valorAtribuido ?? b.preco, // RN-33: sugerido pelo preço, editável
-          precoVenda: b.controle === 'ETIQUETADO' ? b.preco : null,
+          id: b.id, loteId, categoriaId: b.categoriaId, tipoControle: b.controle, produtoId,
+          descricao: b.descricao || nome || `${cat!.nome} (lote ${lote!.numero})`,
+          valorAtribuido: b.valorAtribuido ?? b.preco!, // RN-33 (por categoria): sugerido pelo preço, editável
           quantidadeInicial: b.quantidade, descarteOrigemId: b.descarteOrigemId ?? null, criadoPorId: u.id,
+          localDestinoId: LOCAL_ID[b.localDestino], // o estoque só recebe na aprovação
         },
       });
-      await tx.movimentacao.create({
-        data: { itemId: novo.id, tipo: 'ENTRADA', localDestinoId: LOCAL_ID[b.localDestino], quantidade: b.quantidade, usuarioId: u.id, motivo: `Triagem do lote ${lote!.numero}` },
-      });
-      return tx.item.findUniqueOrThrow({ where: { id: novo.id }, include: itemTriagemInclude });
+      await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'ITEM_CADASTRADO', 'item', b.id, undefined, { loteId, produtoId, quantidade: b.quantidade, local: b.localDestino });
+      return tx.item.findUniqueOrThrow({ where: { id: b.id }, include: itemTriagemInclude });
     });
     return reply.code(201).send(itemTriagemDto(item));
+  });
+
+  // Correção pelo estoquista enquanto o item não foi aprovado. Item devolvido volta a CADASTRADO (reenvio, P-14).
+  app.patch('/lotes/:id/itens/:itemId', { config: { acesso: ['entrada.registrar'] } }, async (req) => {
+    const u = exigirUsuario(req);
+    const { id: loteId, itemId } = parse(z.object({ id: zUuid, itemId: zUuid }), req.params);
+    const b = parse(zCorrecao, req.body);
+    const item = await prisma.$transaction(async (tx) => {
+      await travarItens(tx, [itemId]);
+      const i = await tx.item.findUnique({ where: { id: itemId }, include: { produto: true } });
+      if (!i || i.loteId !== loteId) naoEncontrado('Item');
+      if (i!.status === 'APROVADO') conflito('ITEM_APROVADO', 'Item já aprovado: a correção agora é pelo estoque');
+      if (b.valorAtribuido !== undefined && toCents(b.valorAtribuido) <= 0 && (await tx.loteEntrada.findUnique({ where: { id: loteId }, select: { tipo: true } }))?.tipo === 'COMPRA') {
+        invalido('valorAtribuido', 'em lote de compra o custo unitário é maior que zero');
+      }
+      if (b.categoriaId && !(await tx.categoria.findFirst({ where: { id: b.categoriaId, ativa: true } }))) throw new AppError(400, 'Categoria inexistente ou inativa', 'VALIDACAO');
+      if (i!.produto && (b.produto || b.categoriaId)) {
+        // os dados do produto só se corrigem aqui se ele nasceu nesta entrada e ainda não tem outra
+        // (trava o produto: uma nova entrada simultânea do mesmo produto espera esta correção)
+        await tx.$queryRaw`SELECT 1 AS travado FROM produto WHERE id = ${i!.produtoId!}::uuid FOR UPDATE`;
+        const outras = await tx.item.count({ where: { produtoId: i!.produtoId!, id: { not: itemId } } });
+        if (outras) conflito('PRODUTO_EM_USO', 'Este produto tem outras entradas: corrija o produto na tela do produto');
+        const p = b.produto ?? {};
+        const quantidadeFinal = b.quantidade ?? i!.quantidadeInicial;
+        if ((p.pecaUnica ?? i!.produto!.pecaUnica) && quantidadeFinal !== 1) throw new AppError(400, 'Peça única tem quantidade 1', 'PECA_UNICA_QTD');
+        // a categoria do produto muda antes do item (o gatilho exige a mesma categoria nos dois)
+        await tx.produto.update({
+          where: { id: i!.produtoId! },
+          data: {
+            ...(p.tituloEtiqueta !== undefined ? { tituloEtiqueta: p.tituloEtiqueta } : {}), ...(p.nome !== undefined ? { nome: p.nome } : {}),
+            ...(p.preco !== undefined ? { precoVenda: p.preco } : {}),
+            ...(p.modelo !== undefined ? { modelo: p.modelo ?? null } : {}), ...(p.marca !== undefined ? { marca: p.marca ?? null } : {}),
+            ...(p.ano !== undefined ? { ano: p.ano } : {}), ...(p.tipo !== undefined ? { tipo: p.tipo ?? null } : {}),
+            ...(p.tamanho !== undefined ? { tamanho: p.tamanho ?? null } : {}), ...(p.cor !== undefined ? { cor: p.cor ?? null } : {}),
+            ...(p.condicao !== undefined ? { condicao: p.condicao ?? null } : {}), ...(b.categoriaId ? { categoriaId: b.categoriaId } : {}),
+            // deixar de ser peça única vai antes do item (a quantidade nova já pode passar de 1)
+            ...(p.pecaUnica === false ? { pecaUnica: false } : {}),
+          },
+        });
+      } else if (b.produto) {
+        throw new AppError(400, 'Item por categoria não tem produto', 'VALIDACAO');
+      }
+      const reenvio = i!.status === 'DEVOLVIDO';
+      await tx.item.update({
+        where: { id: itemId },
+        data: {
+          ...(b.quantidade !== undefined ? { quantidadeInicial: b.quantidade } : {}), ...(b.valorAtribuido !== undefined ? { valorAtribuido: b.valorAtribuido } : {}),
+          ...(b.descricao !== undefined ? { descricao: b.descricao || null } : {}), ...(b.localDestino ? { localDestinoId: LOCAL_ID[b.localDestino] } : {}),
+          ...(b.categoriaId ? { categoriaId: b.categoriaId } : {}),
+          ...(reenvio ? { status: 'CADASTRADO' as const, motivoDevolucao: null } : {}),
+        },
+      });
+      // virar peça única vai por último: o banco confere com a quantidade já corrigida
+      if (b.produto?.pecaUnica === true && i!.produto && !i!.produto.pecaUnica) {
+        await tx.produto.update({ where: { id: i!.produtoId! }, data: { pecaUnica: true } });
+      }
+      const antes = {
+        status: i!.status, quantidade: i!.quantidadeInicial, valorAtribuido: money(i!.valorAtribuido), local: LOCAL_COD[i!.localDestinoId], categoriaId: i!.categoriaId,
+        ...((b.produto || b.categoriaId) && i!.produto ? { produto: produtoDto(i!.produto) } : {}),
+      };
+      await auditar(tx, { usuarioId: u.id, ip: req.ip }, reenvio ? 'ITEM_REENVIADO' : 'ITEM_CORRIGIDO', 'item', itemId, antes, { ...b, status: 'CADASTRADO' });
+      return tx.item.findUniqueOrThrow({ where: { id: itemId }, include: itemTriagemInclude });
+    });
+    return itemTriagemDto(item);
+  });
+
+  // ---------------- aprovação pelo Administrador (S2-09) ----------------
+  app.post('/itens/:id/aprovar', { config: { acesso: ['produtos.aprovar'] } }, async (req) => {
+    const u = exigirUsuario(req);
+    const { id } = parse(zIdParam, req.params);
+    const item = await prisma.$transaction(async (tx) => {
+      await travarItens(tx, [id]);
+      const i = await tx.item.findUnique({ where: { id }, select: { status: true } });
+      if (!i) naoEncontrado('Item');
+      if (i!.status === 'DEVOLVIDO') conflito('ITEM_DEVOLVIDO', 'Item devolvido: o estoquista corrige e reenvia antes da aprovação');
+      if (i!.status === 'CADASTRADO') await aprovarItem(tx, id, u.id, req.ip); // aprovado de novo: nada a fazer (reenvio)
+      return tx.item.findUniqueOrThrow({ where: { id }, include: itemTriagemInclude });
+    });
+    return itemTriagemDto(item);
+  });
+
+  app.post('/lotes/:id/aprovar', { config: { acesso: ['produtos.aprovar'] } }, async (req) => {
+    const u = exigirUsuario(req);
+    const { id } = parse(zIdParam, req.params);
+    const n = await prisma.$transaction(async (tx) => {
+      if (!(await tx.loteEntrada.findUnique({ where: { id }, select: { id: true } }))) naoEncontrado('Lote');
+      const ids = (await tx.item.findMany({ where: { loteId: id, status: 'CADASTRADO' }, select: { id: true } })).map((i) => i.id);
+      // trava na ordem do id (a mesma da venda e do estorno) e confere de novo o estado depois da trava
+      let aprovados = 0;
+      for (const r of await travarItens(tx, ids)) if (r.status === 'CADASTRADO') { await aprovarItem(tx, r.id, u.id, req.ip); aprovados++; }
+      await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'LOTE_APROVADO', 'lote_entrada', id, undefined, { itens: aprovados });
+      return aprovados;
+    }, { timeout: 60_000 });
+    return { ...(await obterLoteDto(prisma, id)), aprovadosAgora: n };
+  });
+
+  app.post('/itens/:id/devolver', { config: { acesso: ['produtos.aprovar'] } }, async (req) => {
+    const u = exigirUsuario(req);
+    const { id } = parse(zIdParam, req.params);
+    const { motivo } = parse(z.object({ motivo: zMotivo }), req.body);
+    const item = await prisma.$transaction(async (tx) => {
+      await travarItens(tx, [id]);
+      const i = await tx.item.findUnique({ where: { id }, select: { status: true } });
+      if (!i) naoEncontrado('Item');
+      if (i!.status === 'APROVADO') conflito('ITEM_APROVADO', 'Item já aprovado não é devolvido');
+      if (i!.status === 'CADASTRADO') {
+        await tx.item.update({ where: { id }, data: { status: 'DEVOLVIDO', motivoDevolucao: motivo } });
+        await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'ITEM_DEVOLVIDO', 'item', id, { status: 'CADASTRADO' }, { status: 'DEVOLVIDO', motivo });
+      }
+      return tx.item.findUniqueOrThrow({ where: { id }, include: itemTriagemInclude });
+    });
+    return itemTriagemDto(item);
+  });
+
+  // ---------------- produtos: busca para a nova entrada ----------------
+  app.get('/produtos', { config: { acesso: ['entrada.registrar', 'estoque.consultar', 'produtos.aprovar'] } }, async (req) => {
+    const q = parse(zPage.extend({ busca: z.string().trim().max(100).optional(), categoriaId: zUuid.optional() }), req.query);
+    const where: Prisma.ProdutoWhereInput = {
+      ativo: true,
+      ...(q.categoriaId ? { categoriaId: q.categoriaId } : {}),
+      ...(q.busca ? { OR: [{ codigo: { equals: q.busca!.toUpperCase() } }, { nome: { contains: q.busca!, mode: 'insensitive' } }, { tituloEtiqueta: { contains: q.busca!, mode: 'insensitive' } }, { marca: { contains: q.busca!, mode: 'insensitive' } }] } : {}),
+    };
+    const [rows, total] = await Promise.all([
+      prisma.produto.findMany({ where, orderBy: [{ nome: 'asc' }, { codigo: 'asc' }], include: { categoria: { select: { nome: true } } }, ...skipTake(q) }),
+      prisma.produto.count({ where }),
+    ]);
+    const saldos = rows.length ? await prisma.$queryRaw<{ produto_id: string; b: number; d: number }[]>`
+      SELECT i.produto_id::text, coalesce(sum(s.saldo) FILTER (WHERE s.local_id = 1), 0)::int AS b, coalesce(sum(s.saldo) FILTER (WHERE s.local_id = 2), 0)::int AS d
+      FROM item i JOIN vw_saldo_estoque s ON s.item_id = i.id WHERE i.produto_id = ANY(${rows.map((p) => p.id)}::uuid[]) GROUP BY 1` : [];
+    const porProduto = new Map(saldos.map((s) => [s.produto_id, s]));
+    return page(rows.map((p) => ({ ...produtoDto(p), categoriaNome: p.categoria.nome, saldoBazar: porProduto.get(p.id)?.b ?? 0, saldoDoacoes: porProduto.get(p.id)?.d ?? 0 })), q, total);
   });
 
   app.post('/lotes/:id/descartes', { config: { acesso: ['entrada.registrar'] } }, async (req, reply) => {
@@ -321,8 +549,10 @@ export async function rotasLotes(app: FastifyInstance) {
     const q = parse(z.object({ itens: z.string().max(200 * 37) }), req.query);
     const ids = q.itens.split(',').map((s) => s.trim()).filter(Boolean);
     if (ids.length > 200 || !ids.every((x) => zUuid.safeParse(x).success)) throw new AppError(400, 'Lista de itens inválida (até 200 ids)', 'VALIDACAO');
-    const itens = await prisma.item.findMany({ where: { id: { in: ids }, tipoControle: 'ETIQUETADO' }, orderBy: { codigoBarras: 'asc' } });
-    return itens.map((i) => ({ itemId: i.id, codigo: i.codigoBarras!, descricao: i.descricao ?? '', preco: money(i.precoVenda) }));
+    // a etiqueta é do produto: título curto, preço atual e código (P-06)
+    const itens = await prisma.item.findMany({ where: { id: { in: ids }, tipoControle: 'ETIQUETADO' }, include: { produto: true } });
+    return itens.map((i) => ({ itemId: i.id, codigo: i.produto!.codigo, descricao: i.produto!.tituloEtiqueta, preco: money(i.produto!.precoVenda) }))
+      .sort((a, b) => a.codigo.localeCompare(b.codigo));
   });
 }
 

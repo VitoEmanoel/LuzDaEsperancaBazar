@@ -10,7 +10,7 @@ import { TIPOS_PARCEIRO } from '../../../shared/api/types';
 import { clientesComMesmoTelefone, type ClienteResumo } from '../telefoneDuplicado';
 import { AvisoTelefoneDuplicado } from '../components/AvisoTelefoneDuplicado';
 import { useAsync } from '../../../shared/hooks/useAsync';
-import { Badge, Empty, ErrorAlert, Field, MoneyText, PageHeader, Tabs } from '../../../shared/components/ui';
+import { Badge, Empty, ErrorAlert, Field, MoneyText, PageHeader, TabelaRolavel, Tabs } from '../../../shared/components/ui';
 import { Modal } from '../../../shared/components/Modal';
 import { useAuth } from '../../auth/AuthContext';
 import { fromCents, toCents, tryCents } from '../../../shared/lib/money';
@@ -94,7 +94,7 @@ export function CadastrosPage() {
       </form>
       <ErrorAlert erro={lista.erro} />
       {lista.carregando ? <p>Carregando…</p> : !lista.data?.length ? <Empty /> : (
-        <table className="table">
+        <TabelaRolavel><table className="table">
           <thead><tr>{cfg.campos.map((c) => <th key={c.chave}>{c.rotulo}</th>)}<th>Situação</th><th /></tr></thead>
           <tbody>{lista.data.map((r) => (
             <tr key={r.id}>
@@ -106,7 +106,7 @@ export function CadastrosPage() {
               </>}</td>
             </tr>
           ))}</tbody>
-        </table>
+        </table></TabelaRolavel>
       )}
       {editando && <EditarModal tipo={tipo} campos={cfg.campos} registro={editando === 'novo' ? null : editando} onFechar={() => setEditando(null)} onOk={async () => { toast('Salvo.'); await lista.reload(); }} />}
     </div>

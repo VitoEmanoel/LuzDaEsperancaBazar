@@ -5,7 +5,7 @@ import { cadastrosApi } from '../../cadastros/cadastros.api';
 import { estoqueApi } from '../estoque.api';
 import type { LocalEstoque } from '../../../shared/api/types';
 import { useAsync } from '../../../shared/hooks/useAsync';
-import { Empty, ErrorAlert, Field, MoneyText, PageHeader, Pagination } from '../../../shared/components/ui';
+import { Empty, ErrorAlert, Field, MoneyText, PageHeader, Pagination, TabelaRolavel } from '../../../shared/components/ui';
 
 export function EstoquePage() {
   const [f, setF] = useState({ local: '' as LocalEstoque | '', categoriaId: '', parceiroId: '', campanhaId: '', busca: '' });
@@ -28,7 +28,7 @@ export function EstoquePage() {
       </form>
       <ErrorAlert erro={erro} />
       {carregando ? <p>Carregando…</p> : !data?.items.length ? <Empty /> : (
-        <table className="table">
+        <TabelaRolavel><table className="table">
           <thead><tr><th>Código</th><th>Descrição</th><th>Categoria</th><th>Lote</th><th>Origem</th><th className="num">Preço</th><th className="num">Bazar</th><th className="num">Doações</th></tr></thead>
           <tbody>{data.items.map((i) => (
             <tr key={i.id}>
@@ -37,7 +37,7 @@ export function EstoquePage() {
               <td className="num"><MoneyText value={i.preco} /></td><td className="num">{i.saldoBazar}</td><td className="num">{i.saldoDoacoes}</td>
             </tr>
           ))}</tbody>
-        </table>
+        </table></TabelaRolavel>
       )}
       {data && <Pagination page={data.page} pageSize={data.pageSize} total={data.total} onChange={setPage} />}
     </div>

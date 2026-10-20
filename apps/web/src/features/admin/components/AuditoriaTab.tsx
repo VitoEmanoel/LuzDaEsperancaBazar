@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { auditoriaApi } from '../../auth/auth.api';
 import { useAsync } from '../../../shared/hooks/useAsync';
-import { Empty, ErrorAlert, Field, Pagination } from '../../../shared/components/ui';
+import { Empty, ErrorAlert, Field, Pagination, TabelaRolavel } from '../../../shared/components/ui';
 import { formatDateTime, todayLocal } from '../../../shared/lib/format';
 
 export function AuditoriaTab() {
@@ -20,10 +20,10 @@ export function AuditoriaTab() {
       </div>
       <ErrorAlert erro={erro} />
       {carregando ? <p>Carregando…</p> : !data?.items.length ? <Empty /> : (
-        <table className="table compact">
+        <TabelaRolavel><table className="table compact">
           <thead><tr><th>Quando</th><th>Usuário</th><th>Ação</th><th>Entidade</th><th>Id</th></tr></thead>
           <tbody>{data.items.map((a) => <tr key={a.id}><td>{formatDateTime(a.ocorridoEm)}</td><td>{a.usuarioNome}</td><td><code>{a.acao}</code></td><td>{a.entidade}</td><td><code>{a.entidadeId.slice(0, 8)}…</code></td></tr>)}</tbody>
-        </table>
+        </table></TabelaRolavel>
       )}
       {data && <Pagination page={data.page} pageSize={data.pageSize} total={data.total} onChange={setPage} />}
     </section>

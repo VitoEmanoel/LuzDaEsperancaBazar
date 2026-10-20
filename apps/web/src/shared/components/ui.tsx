@@ -21,6 +21,11 @@ export function PageHeader({ titulo, children }: { titulo: string; children?: Re
   return <div className="page-header"><h1>{titulo}</h1><div className="actions">{children}</div></div>;
 }
 
+/** Tabela larga rola para o lado dentro desta caixa, sem empurrar a página para além do cabeçalho. */
+export function TabelaRolavel({ children }: { children: ReactNode }) {
+  return <div className="tabela-rolavel">{children}</div>;
+}
+
 export function MoneyText({ value }: { value: Money | number | undefined | null }) {
   return <span className="num">{value === undefined || value === null ? '—' : formatMoney(value)}</span>;
 }

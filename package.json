@@ -22,7 +22,8 @@
     "audit": "npm audit --audit-level=high",
     "test:reteste": "npm run test:reteste -w @bazar/api",
     "test:perfis": "npm run test:perfis -w @bazar/api",
-    "test:cpf": "npm run test:cpf -w @bazar/api"
+    "test:cpf": "npm run test:cpf -w @bazar/api",
+    "test:produto": "npm run test:produto -w @bazar/api"
   },
   "overrides": {
     "mysql2": "^3.24.5",

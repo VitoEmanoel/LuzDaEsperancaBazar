@@ -71,10 +71,9 @@
   .pdv-header .brandmark-texto { display: none; }
 }
 
-/* Sangria: dinheiro que há na gaveta; tabelas largas (linha do tempo do caixa) rolam sozinhas */
+/* Sangria: dinheiro que há na gaveta */
 .gaveta { background: var(--surface-2); border-radius: var(--radius-sm); padding: .5rem .75rem; margin: 0 0 .75rem; font-size: 1.05rem; }
 .gaveta strong { font-variant-numeric: tabular-nums; color: var(--primary); }
-.tabela-rolavel { overflow-x: auto; }
 
 /* Celular: o PDV precisa funcionar de pé, com uma mão (S1B-12) */
 @media (max-width: 600px) {

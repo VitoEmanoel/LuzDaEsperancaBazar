@@ -10,7 +10,7 @@ import { cadastrosApi } from '../../cadastros/cadastros.api';
 import { errorMessage } from '../../../shared/api/http';
 import type { RelatorioSecao, TipoRelatorio } from '../../../shared/api/types';
 import { useAsync } from '../../../shared/hooks/useAsync';
-import { Empty, ErrorAlert, Field, MoneyText, PageHeader, Tabs } from '../../../shared/components/ui';
+import { Empty, ErrorAlert, Field, MoneyText, PageHeader, TabelaRolavel, Tabs } from '../../../shared/components/ui';
 import { useAuth } from '../../auth/AuthContext';
 import { formatDate, todayLocal } from '../../../shared/lib/format';
 import { downloadBlob } from '../../../shared/lib/download';
@@ -107,7 +107,7 @@ function TabelaRelatorio({ secao, vazio }: { secao: RelatorioSecao; vazio?: stri
   const celula = (tipo: string | undefined, v: unknown) =>
     tipo === 'money' ? <MoneyText value={v as string} /> : tipo === 'date' ? formatDate(v as string) : String(v ?? '—');
   return (
-    <table className="table">
+    <TabelaRolavel><table className="table">
       <caption>{secao.titulo}</caption>
       <thead><tr>{secao.colunas.map((c) => <th key={c.chave} className={numerica(c.tipo) ? 'num' : ''}>{c.rotulo}</th>)}</tr></thead>
       <tbody>{secao.linhas.map((l, i) => (
@@ -120,6 +120,6 @@ function TabelaRelatorio({ secao, vazio }: { secao: RelatorioSecao; vazio?: stri
           return <td key={c.chave} className="num">{v === undefined ? '' : c.tipo === 'money' ? <MoneyText value={String(v)} /> : v}</td>;
         })}</tr></tfoot>
       )}
-    </table>
+    </table></TabelaRolavel>
   );
 }

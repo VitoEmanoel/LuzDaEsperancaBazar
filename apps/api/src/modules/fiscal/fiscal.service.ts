@@ -3,18 +3,18 @@ import type { Db } from '../../shared/prisma.js';
 import { fromDbDate, toDbDate } from '../../shared/dates.js';
 import { money } from '../../shared/money.js';
 
-const incluirAlvo = { categoria: { select: { nome: true } }, item: { select: { descricao: true, codigoBarras: true } } } as const;
+const incluirAlvo = { categoria: { select: { nome: true } }, item: { select: { descricao: true, produto: { select: { codigo: true } } } } } as const;
 
 type RegraRow = {
   id: string; escopo: 'GERAL' | 'CATEGORIA' | 'ITEM'; categoriaId: string | null; itemId: string | null;
   situacao: 'ISENTO' | 'TRIBUTADO'; aliquota: { toFixed(n: number): string }; vigenciaInicio: Date; vigenciaFim: Date | null;
   fundamentoLegal?: string | null;
-  categoria?: { nome: string } | null; item?: { descricao: string | null; codigoBarras: string | null } | null;
+  categoria?: { nome: string } | null; item?: { descricao: string | null; produto: { codigo: string } | null } | null;
 };
 
 export const regraDto = (r: RegraRow) => ({
   id: r.id, alvo: r.escopo, alvoId: r.categoriaId ?? r.itemId ?? undefined,
-  alvoNome: r.categoria?.nome ?? (r.item ? r.item.codigoBarras ?? r.item.descricao ?? undefined : undefined),
+  alvoNome: r.categoria?.nome ?? (r.item ? r.item.produto?.codigo ?? r.item.descricao ?? undefined : undefined),
   situacao: r.situacao, aliquota: money(r.aliquota),
   vigenciaInicio: fromDbDate(r.vigenciaInicio), vigenciaFim: r.vigenciaFim ? fromDbDate(r.vigenciaFim) : undefined,
   fundamentoLegal: r.fundamentoLegal ?? undefined,

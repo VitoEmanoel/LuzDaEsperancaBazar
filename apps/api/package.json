@@ -20,7 +20,8 @@
     "postinstall": "prisma generate",
     "test:reteste": "tsx tests/reteste-qa.ts",
     "test:perfis": "tsx tests/perfis.ts",
-    "test:cpf": "tsx tests/cpf.ts"
+    "test:cpf": "tsx tests/cpf.ts",
+    "test:produto": "tsx tests/produto.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",

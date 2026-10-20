@@ -30,11 +30,11 @@ export const FORMAS_PAGAMENTO: { value: FormaPagamento; label: string }[] = [
 export type FormaQuitacao = Exclude<FormaPagamento, 'FIADO'>;
 export const FORMAS_QUITACAO = FORMAS_PAGAMENTO.filter((f): f is { value: FormaQuitacao; label: string } => f.value !== 'FIADO');
 
-// ---------- Permissões (lista fixa de 24 — ACS) ----------
+// ---------- Permissões (lista fixa de 26 — ACS) ----------
 export const PERMISSOES = [
   'usuarios.gerenciar', 'perfis.gerenciar', 'auditoria.consultar',
   'cadastros.gerenciar', 'cadastros.consultar', 'clientes.gerenciar', 'parametros.gerenciar',
-  'entrada.registrar', 'triagem.reabrir',
+  'entrada.registrar', 'triagem.reabrir', 'produtos.aprovar', 'parceiros.criar',
   'estoque.consultar', 'estoque.transferir', 'estoque.ajustar',
   'caixa.operar', 'venda.cancelar', 'venda.desconto_autorizar', 'terminais.gerenciar',
   'contas_pagar.gerenciar', 'contas_receber.receber', 'contas_receber.lancar', 'recebimento.estornar',
@@ -112,7 +112,11 @@ export interface LoteEntrada {
   temAnexo: boolean;
   recebidoEm: IsoDateTime;
   status: 'ABERTO' | 'TRIADO';
+  /** Unidades aprovadas pelo Administrador (só elas estão no estoque e na prestação de contas). */
   aprovados: number;
+  /** Itens aguardando a aprovação e itens devolvidos ao estoquista (Sprint 2). */
+  pendentes?: number;
+  devolvidos?: number;
   descartados: number;
   valorAtribuido: Money;
   valorCompra?: Money;
@@ -122,15 +126,38 @@ export interface NovoLoteRequest {
   id: Uuid; tipo: TipoEntrada; parceiroId?: Uuid; campanhaId?: Uuid; documento?: string;
   valorCompra?: Money; pago?: boolean; vencimento?: LocalDate;
 }
+/** Estado do item no lote (Sprint 2): o estoque só recebe na aprovação pelo Administrador. */
+export type StatusItem = 'CADASTRADO' | 'DEVOLVIDO' | 'APROVADO';
+/** Campos do produto (P-06): título da etiqueta, nome e preço obrigatórios; o resto é opcional. */
+export interface CamposProduto {
+  tituloEtiqueta: string; nome: string; preco: Money; pecaUnica?: boolean;
+  modelo?: string; marca?: string; ano?: number; tipo?: string; tamanho?: string; cor?: string; condicao?: string;
+}
+export interface Produto extends CamposProduto { id: Uuid; codigo: string; categoriaId: Uuid; pecaUnica: boolean }
+export interface ProdutoBusca extends Produto { categoriaNome: string; saldoBazar: number; saldoDoacoes: number }
+/**
+ * Item do lote. Por categoria: `preco` sugere o valor atribuído. Produto (`ETIQUETADO`): produto novo (`produto`)
+ * ou nova entrada de um que já existe (`produtoId`); o valor atribuído é obrigatório.
+ */
 export interface TriagemItemRequest {
-  id: Uuid; categoriaId: Uuid; controle: TipoControle; quantidade: number; preco: Money;
-  /** Valor UNITÁRIO para a prestação de contas (RN-33). Doação: sugerido = preço. Compra: custo unitário, obrigatório. */
+  id: Uuid; categoriaId: Uuid; controle: TipoControle; quantidade: number; preco?: Money;
+  /** Valor UNITÁRIO para a prestação de contas (RN-33). Compra: custo unitário. */
   valorAtribuido?: Money;
   descricao?: string; localDestino: LocalEstoque;
+  produtoId?: Uuid; produto?: CamposProduto;
+}
+/** Correção de item cadastrado ou devolvido (só os campos enviados mudam). */
+export interface CorrecaoItemRequest {
+  quantidade?: number; valorAtribuido?: Money; descricao?: string; localDestino?: LocalEstoque; categoriaId?: Uuid; produto?: Partial<CamposProduto>;
+}
+export interface ItemLote {
+  id: Uuid; controle: TipoControle; codigo?: string; descricao: string; categoriaId: Uuid; categoriaNome: string;
+  quantidade: number; preco: Money; valorAtribuido: Money; localDestino: LocalEstoque;
+  status: StatusItem; motivoDevolucao?: string; produto?: Produto;
 }
 export interface TriagemDescarteRequest { id: Uuid; categoriaId: Uuid; motivoId: Uuid; observacao?: string }
 export interface LoteDetalhe extends LoteEntrada {
-  itens: { id: Uuid; codigo?: string; descricao: string; categoriaNome: string; quantidade: number; preco: Money; localDestino: LocalEstoque }[];
+  itens: ItemLote[];
   descartes: { id: Uuid; categoriaNome: string; motivoNome: string; registradoEm: IsoDateTime; revertido: boolean }[];
 }
 export interface Etiqueta { itemId: Uuid; codigo: string; descricao: string; preco: Money }
@@ -159,7 +186,8 @@ export interface CargaInicialResultado { gravado: boolean; linhas: number; erros
 export interface CatalogoPdv {
   versao: string;
   categorias: CategoriaPdv[];
-  itensEtiquetados: { itemId: Uuid; codigo: string; descricao: string; preco: Money }[];
+  /** Um por produto com saldo no Bazar. `itemId` é o id do produto; `saldoBazar` e `pecaUnica` vêm do servidor real (Sprint 2). */
+  itensEtiquetados: { itemId: Uuid; codigo: string; descricao: string; preco: Money; saldoBazar?: number; pecaUnica?: boolean }[];
   /** RNF-19: só nome e telefone dos clientes do fiado. */
   clientesFiado: { id: Uuid; nome: string; telefone: string }[];
   regrasFiscais: RegraFiscal[];
@@ -171,7 +199,7 @@ export interface CatalogoPdv {
 /** Saldo do CPF no mês: `limite` e `saldo` são nulos quando não há limite. */
 export interface SaldoCpf { cpf: string; limite: Money | null; comprado: Money; saldo: Money | null; obrigatorio: boolean }
 export type VendaItemRequest =
-  | { codigo: string; quantidade: 1; desconto?: Money }
+  | { codigo: string; quantidade: number; desconto?: Money } // produto: várias unidades; peça única só 1 (o servidor confere)
   | { categoriaId: Uuid; quantidade: number; desconto?: Money };
 export interface PagamentoRequest { forma: FormaPagamento; valor: Money; valorRecebido?: Money }
 /** Corpo de PUT /vendas/:id — o servidor recalcula preços, total e troco. */
