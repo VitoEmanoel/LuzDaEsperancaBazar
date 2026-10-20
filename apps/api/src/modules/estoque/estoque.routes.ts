@@ -14,7 +14,8 @@ import { auditar } from '../../shared/audit.js';
 import { money, toCents } from '../../shared/money.js';
 import { reservarChave } from '../../shared/idempotencia.js';
 import { lerPlanilha } from '../../shared/planilha.js';
-import { exigirUsuario } from '../../plugins/auth.js';
+import { exigirUsuario, tem } from '../../plugins/auth.js';
+import { mudarPrecoProduto } from './produtos.routes.js';
 import { LOCAL_COD, LOCAL_ID, proximoCodigo } from '../entradas/lotes.routes.js';
 
 /** Sem acento, sem espaços nas pontas, maiúsculas — para comparar valores digitados em planilha. */
@@ -24,23 +25,31 @@ const zLocal = z.enum(['BAZAR', 'DOACOES']);
 
 interface ItemSql {
   id: string; codigo_barras: string | null; descricao: string | null; categoria_id: string; categoria_nome: string;
-  tipo_controle: 'ETIQUETADO' | 'CATEGORIA'; preco: string | null; lote_id: string; lote_numero: number;
+  tipo_controle: 'ETIQUETADO' | 'CATEGORIA'; preco: string | null; preco_tabela: string | null; produto_id: string | null; peca_unica: boolean | null;
+  valor_atribuido: string; lote_id: string; lote_numero: number;
   parceiro_nome: string | null; campanha_nome: string | null; saldo_bazar: number; saldo_doacoes: number; total?: bigint;
 }
-const itemDto = (r: ItemSql) => ({
+const dec = (v: string | null) => (v === null ? '0.00' : Number(v).toFixed(2));
+/** O custo (valor atribuído) só sai para quem tem a permissão de vê-lo (S3-05): o PDV e perfis sem ela não recebem. */
+const itemDto = (r: ItemSql, verCusto: boolean) => ({
   id: r.id, codigo: r.codigo_barras ?? undefined, descricao: r.descricao ?? r.categoria_nome,
   categoriaId: r.categoria_id, categoriaNome: r.categoria_nome, controle: r.tipo_controle,
-  preco: r.preco === null ? '0.00' : Number(r.preco).toFixed(2),
+  produtoId: r.produto_id ?? undefined, pecaUnica: r.peca_unica ?? undefined,
+  // preço efetivo (com o desconto vigente do produto) e, se houver desconto, o preço sem ele (S3-10)
+  preco: dec(r.preco), precoSemDesconto: r.preco_tabela !== null && dec(r.preco_tabela) !== dec(r.preco) ? dec(r.preco_tabela) : undefined,
+  ...(verCusto ? { valorAtribuido: dec(r.valor_atribuido) } : {}),
   loteId: r.lote_id, loteNumero: r.lote_numero,
   parceiroNome: r.parceiro_nome ?? undefined, campanhaNome: r.campanha_nome ?? undefined,
   saldoBazar: Number(r.saldo_bazar), saldoDoacoes: Number(r.saldo_doacoes),
 });
 
-/** Preço vigente: produto = preço ATUAL do produto; por categoria = preço padrão ATUAL da categoria (RN-08). */
-const SELECT_ITEM = Prisma.sql`
+/** Preço vigente: produto = preço ATUAL do produto com o desconto vigente (fn_preco_efetivo); por categoria = preço padrão ATUAL da categoria (RN-08). */
+export const SELECT_ITEM = Prisma.sql`
   SELECT i.id::text, coalesce(pr.codigo, i.codigo_barras) AS codigo_barras, coalesce(i.descricao, pr.nome) AS descricao,
          i.categoria_id::text, c.nome AS categoria_nome, i.tipo_controle::text AS tipo_controle,
-         (CASE WHEN i.tipo_controle = 'ETIQUETADO' THEN pr.preco_venda ELSE c.preco_padrao END)::text AS preco,
+         (CASE WHEN i.tipo_controle = 'ETIQUETADO' THEN fn_preco_efetivo(pr.preco_venda, pr.desconto_tipo, pr.desconto_valor, pr.desconto_ate)
+               ELSE c.preco_padrao END)::text AS preco,
+         pr.preco_venda::text AS preco_tabela, i.produto_id::text, pr.peca_unica, i.valor_atribuido::text,
          l.id::text AS lote_id, l.numero AS lote_numero, p.nome AS parceiro_nome, cp.nome AS campanha_nome,
          coalesce(s.b, 0)::int AS saldo_bazar, coalesce(s.d, 0)::int AS saldo_doacoes
   FROM item i
@@ -52,16 +61,16 @@ const SELECT_ITEM = Prisma.sql`
   LEFT JOIN (SELECT item_id, sum(saldo) FILTER (WHERE local_id = 1) AS b, sum(saldo) FILTER (WHERE local_id = 2) AS d
              FROM vw_saldo_estoque GROUP BY item_id) s ON s.item_id = i.id`;
 
-export async function itemPorId(db: Db, id: string) {
+export async function itemPorId(db: Db, id: string, verCusto = false) {
   const [r] = await db.$queryRaw<ItemSql[]>`${SELECT_ITEM} WHERE i.id = ${id}::uuid`;
-  return r ? itemDto(r) : null;
+  return r ? itemDto(r, verCusto) : null;
 }
 /** Pelo código do produto: a entrada aprovada mais antiga que ainda tem saldo no Bazar (a próxima a ser vendida, PEPS). */
-async function itemPorCodigo(db: Db, codigo: string) {
+async function itemPorCodigo(db: Db, codigo: string, verCusto: boolean) {
   const [r] = await db.$queryRaw<ItemSql[]>`
     ${SELECT_ITEM} WHERE pr.codigo = ${codigo} AND i.status = 'APROVADO'
     ORDER BY (coalesce(s.b, 0) > 0) DESC, l.recebido_em, l.numero, i.criado_em, i.id LIMIT 1`;
-  return r ? itemDto(r) : null;
+  return r ? itemDto(r, verCusto) : null;
 }
 
 /**
@@ -85,11 +94,13 @@ const zTransf = z.object({
   origem: zLocal, destino: zLocal, motivo: z.string().trim().max(300).optional(),
 }).refine((b) => b.itemId || b.codigo, 'informe itemId ou codigo').refine((b) => b.origem !== b.destino, 'origem e destino devem ser diferentes');
 const zBaixa = z.object({ id: zUuid, itemId: zUuid, quantidade: z.number().int().min(1).max(100_000), local: zLocal, motivoId: zUuid, observacao: z.string().trim().max(300).optional() });
-const zAjuste = z.object({ id: zUuid, itemId: zUuid, local: zLocal, tipo: z.enum(['AJUSTE_ENTRADA', 'AJUSTE_SAIDA']), quantidade: z.number().int().min(1).max(100_000), motivo: zMotivo });
+// S3-03: o ajuste de inventário é só de saída (estoque só sobe por entrada aprovada; o banco também recusa, 0010)
+const zAjuste = z.object({ id: zUuid, itemId: zUuid, local: zLocal, tipo: z.literal('AJUSTE_SAIDA').default('AJUSTE_SAIDA'), quantidade: z.number().int().min(1).max(100_000), motivo: zMotivo });
 const zPreco = z.object({ preco: zMoney.refine((v) => toCents(v) > 0, 'preço deve ser maior que zero'), motivo: zMotivo });
 
 export async function rotasEstoque(app: FastifyInstance) {
   app.get('/estoque', { config: { acesso: ['estoque.consultar'] } }, async (req) => {
+    const u = exigirUsuario(req);
     const q = parse(zPage.extend({
       local: zLocal.optional(), categoriaId: zUuid.optional(), parceiroId: zUuid.optional(), campanhaId: zUuid.optional(),
       loteId: zUuid.optional(), busca: z.string().trim().max(100).optional(),
@@ -109,19 +120,19 @@ export async function rotasEstoque(app: FastifyInstance) {
     const rows = await prisma.$queryRaw<ItemSql[]>`
       SELECT x.*, count(*) OVER () AS total FROM (${SELECT_ITEM} WHERE ${where}) x
       ORDER BY x.categoria_nome, x.descricao, x.id LIMIT ${q.pageSize} OFFSET ${(q.page - 1) * q.pageSize}`;
-    return page(rows.map(itemDto), q, rows.length ? Number(rows[0]!.total) : 0);
+    return page(rows.map((r) => itemDto(r, tem(u, 'custo.consultar'))), q, rows.length ? Number(rows[0]!.total) : 0);
   });
 
   app.get('/itens/codigo/:codigo', { config: { acesso: ['estoque.consultar', 'caixa.operar'] } }, async (req) => {
     const { codigo } = parse(z.object({ codigo: z.string().trim().min(1).max(40) }), req.params);
-    const i = await itemPorCodigo(prisma, codigo.toUpperCase());
+    const i = await itemPorCodigo(prisma, codigo.toUpperCase(), tem(exigirUsuario(req), 'custo.consultar'));
     if (!i) throw new AppError(404, 'Código não encontrado', 'CODIGO_INEXISTENTE');
     return i;
   });
 
   app.get('/itens/:id/historico', { config: { acesso: ['estoque.consultar'] } }, async (req) => {
     const { id } = parse(zIdParam, req.params);
-    const item = await itemPorId(prisma, id);
+    const item = await itemPorId(prisma, id, tem(exigirUsuario(req), 'custo.consultar'));
     if (!item) naoEncontrado('Item');
     const lote = await prisma.loteEntrada.findUniqueOrThrow({ where: { id: item!.loteId }, include: { parceiro: { select: { nome: true } }, campanha: { select: { nome: true } } } });
     const movs = await prisma.movimentacao.findMany({ where: { itemId: id }, orderBy: [{ ocorridoEm: 'asc' }, { id: 'asc' }], include: { motivoBaixa: { select: { nome: true } } } });
@@ -183,8 +194,7 @@ export async function rotasEstoque(app: FastifyInstance) {
       const loc = LOCAL_ID[b.local];
       await tx.movimentacao.create({
         data: {
-          itemId: await acharItemId(tx, b), tipo: b.tipo, quantidade: b.quantidade, motivo: b.motivo, usuarioId: u.id,
-          ...(b.tipo === 'AJUSTE_ENTRADA' ? { localDestinoId: loc } : { localOrigemId: loc }),
+          itemId: await acharItemId(tx, b), tipo: b.tipo, quantidade: b.quantidade, motivo: b.motivo, usuarioId: u.id, localOrigemId: loc,
         },
       });
       await auditar(tx, { usuarioId: u.id, ip: req.ip }, b.tipo, 'item', b.itemId, undefined, { local: b.local, quantidade: b.quantidade, motivo: b.motivo });
@@ -192,18 +202,16 @@ export async function rotasEstoque(app: FastifyInstance) {
     return reply.code(204).send();
   });
 
-  app.patch('/itens/:id/preco', { config: { acesso: ['estoque.ajustar'] } }, async (req, reply) => {
+  // preço do produto pela linha do estoque: Admin e Estoquista (S3-08); a mesma regra de PATCH /produtos/:id/preco
+  app.patch('/itens/:id/preco', { config: { acesso: ['produtos.preco'] } }, async (req, reply) => {
     const u = exigirUsuario(req);
     const { id } = parse(zIdParam, req.params);
     const b = parse(zPreco, req.body);
     await prisma.$transaction(async (tx) => {
-      const i = await tx.item.findUnique({ where: { id }, select: { tipoControle: true, produto: { select: { id: true, precoVenda: true } } } });
+      const i = await tx.item.findUnique({ where: { id }, select: { tipoControle: true, produtoId: true } });
       if (!i) naoEncontrado('Item');
       if (i!.tipoControle !== 'ETIQUETADO') conflito('PRECO_DA_CATEGORIA', 'Item por categoria usa o preço padrão da categoria');
-      // o preço é do produto: vale para todas as unidades, de todas as entradas (P-14)
-      await tx.produto.update({ where: { id: i!.produto!.id }, data: { precoVenda: b.preco } });
-      // RF-EST-07: histórico do preço na auditoria
-      await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'PRECO_PRODUTO', 'produto', i!.produto!.id, { preco: money(i!.produto!.precoVenda) }, { preco: b.preco, motivo: b.motivo, itemId: id });
+      await mudarPrecoProduto(tx, i!.produtoId!, b.preco, b.motivo, { usuarioId: u.id, ip: req.ip }, id);
     });
     return reply.code(204).send();
   });

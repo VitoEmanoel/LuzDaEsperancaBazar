@@ -17,7 +17,8 @@ import { TriagemPage } from '../features/entradas/pages/TriagemPage';
 import { EstoquePage } from '../features/estoque/pages/EstoquePage';
 import { HistoricoItemPage } from '../features/estoque/pages/HistoricoItemPage';
 import { TransferenciaPage } from '../features/estoque/pages/TransferenciaPage';
-import { AjustesPage } from '../features/estoque/pages/AjustesPage';
+import { ProdutoPage } from '../features/estoque/pages/ProdutoPage';
+import { AprovacaoPage } from '../features/entradas/pages/AprovacaoPage';
 import { ContasPagarPage } from '../features/financeiro/pages/ContasPagarPage';
 import { ContasReceberPage } from '../features/financeiro/pages/ContasReceberPage';
 import { ResumoFinanceiroPage } from '../features/financeiro/pages/ResumoFinanceiroPage';
@@ -45,19 +46,21 @@ export function App() {
             <Route element={<RequireAuth><AppLayout /></RequireAuth>}>
               <Route index element={<HomePage />} />
               <Route path="vendas" element={P(['venda.cancelar'], <VendasPage />)} />
-              <Route path="entradas" element={P(['entrada.registrar'], <LotesPage />)} />
+              {/* lotes: quem registra, quem aprova e quem consulta o estoque (o Financeiro só lê: S3-12) */}
+              <Route path="entradas" element={P(['entrada.registrar', 'produtos.aprovar', 'estoque.consultar'], <LotesPage />)} />
               <Route path="entradas/novo" element={P(['entrada.registrar'], <NovoLotePage />)} />
-              <Route path="entradas/:id/triagem" element={P(['entrada.registrar'], <TriagemPage />)} />
+              <Route path="entradas/:id/triagem" element={P(['entrada.registrar', 'produtos.aprovar', 'estoque.consultar'], <TriagemPage />)} />
+              <Route path="aprovacoes" element={P(['produtos.aprovar'], <AprovacaoPage />)} />
               <Route path="estoque" element={P(['estoque.consultar'], <EstoquePage />)} />
               <Route path="estoque/itens/:id" element={P(['estoque.consultar'], <HistoricoItemPage />)} />
+              <Route path="estoque/produtos/:id" element={P(['estoque.consultar', 'entrada.registrar', 'produtos.aprovar'], <ProdutoPage />)} />
               <Route path="estoque/transferir" element={P(['estoque.transferir'], <TransferenciaPage />)} />
-              <Route path="estoque/ajustes" element={P(['estoque.ajustar'], <AjustesPage />)} />
               <Route path="financeiro/pagar" element={P(['contas_pagar.gerenciar'], <ContasPagarPage />)} />
               <Route path="financeiro/receber" element={P(['contas_receber.receber'], <ContasReceberPage />)} />
               <Route path="financeiro/resumo" element={P(['relatorios.consultar'], <ResumoFinanceiroPage />)} />
               <Route path="relatorios/:tipo" element={P(['relatorios.consultar', 'relatorios.estoque'], <RelatoriosPage />)} />
               <Route path="cadastros/:tipo" element={P(['cadastros.gerenciar', 'cadastros.consultar'], <CadastrosPage />)} />
-              <Route path="admin/*" element={P(['usuarios.gerenciar', 'perfis.gerenciar', 'parametros.gerenciar', 'auditoria.consultar', 'terminais.gerenciar', 'privacidade.gerenciar', 'fiscal.gerenciar', 'cadastros.gerenciar'], <AdminPage />)} />
+              <Route path="admin/*" element={P(['usuarios.gerenciar', 'perfis.gerenciar', 'parametros.gerenciar', 'auditoria.consultar', 'terminais.gerenciar', 'privacidade.gerenciar', 'fiscal.gerenciar', 'cadastros.gerenciar', 'estoque.ajustar'], <AdminPage />)} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

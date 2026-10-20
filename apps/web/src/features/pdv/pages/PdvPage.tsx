@@ -173,7 +173,7 @@ export function PdvPage() {
       try {
         const r = await estoqueApi.porCodigo(c);
         if (r.controle === 'ETIQUETADO' && r.saldoBazar > 0) {
-          item = { itemId: r.id, codigo: r.codigo!, descricao: r.descricao, preco: r.preco };
+          item = { itemId: r.id, codigo: r.codigo!, descricao: r.descricao, preco: r.preco, ...(r.precoSemDesconto ? { precoSemDesconto: r.precoSemDesconto } : {}) };
           void sessao.recarregarCatalogo().catch(() => {}); // traz o produto novo (com o saldo e a peça única) para o próximo bip
         }
         else if (r.saldoDoacoes > 0) foraDoBazar = true;
@@ -183,7 +183,8 @@ export function PdvPage() {
     const it = item;
     if (!cabeNoSaldoCpf(toCents(it.preco))) return;
     setLinhas((ls) => [...ls, { key: uuid(), tipo: 'codigo', codigo: it.codigo, descricao: it.descricao, precoCents: toCents(it.preco), quantidade: 1 }]);
-    feedback('ok', `${it.descricao} — ${formatMoney(it.preco)}`);
+    // produto com desconto (S3-10): o preço já vem com ele; o operador vê que está em promoção
+    feedback('ok', `${it.descricao} — ${it.precoSemDesconto ? `de ${formatMoney(it.precoSemDesconto)} por ` : ''}${formatMoney(it.preco)}`);
   }
 
   function adicionarCategoria(categoriaId: string) { exigirCpf(() => adicionarCategoriaAgora(categoriaId)); }
@@ -253,6 +254,17 @@ export function PdvPage() {
         void sessao.recarregarCatalogo().catch(() => {});
         setPagando(false);
         feedback('erro', `O estoque mudou e a venda não foi gravada: ${e.message}. Ajuste o carrinho (use o ✕) e tente de novo.`);
+        return;
+      }
+      // O preço ou o desconto de um produto mudou com a venda aberta (S3-08, S3-09): o carrinho passa ao preço atual.
+      if (e instanceof ApiError && e.code === 'PAGAMENTO_DIVERGENTE') {
+        const c = await sessao.recarregarCatalogo().catch(() => null);
+        if (c) setLinhas((ls) => ls.map((l) => {
+          const p = l.codigo ? c.itensEtiquetados.find((i) => i.codigo === l.codigo)?.preco : c.categorias.find((x) => x.id === l.categoriaId)?.precoPadrao;
+          return p ? { ...l, precoCents: toCents(p) } : l;
+        }));
+        setPagando(false);
+        feedback('erro', 'O preço de algum produto mudou (preço novo ou desconto) e a venda não foi gravada. O carrinho já está com o preço de agora: confira o total e receba de novo.');
         return;
       }
       throw e;

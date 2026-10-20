@@ -40,8 +40,9 @@ export async function rotasPdv(app: FastifyInstance) {
           WHERE i.categoria_id = c.id AND i.tipo_controle = 'CATEGORIA')
         ORDER BY c.nome`,
       // um por produto com saldo no Bazar (somando as entradas aprovadas); o preço é o atual do produto
-      prisma.$queryRaw<{ id: string; codigo: string; nome: string; preco_venda: string; peca_unica: boolean; saldo_bazar: number }[]>`
-        SELECT pr.id::text, pr.codigo, pr.nome, pr.preco_venda::text, pr.peca_unica, sum(s.saldo)::int AS saldo_bazar
+      prisma.$queryRaw<{ id: string; codigo: string; nome: string; preco_venda: string; preco_efetivo: string; peca_unica: boolean; saldo_bazar: number }[]>`
+        SELECT pr.id::text, pr.codigo, pr.nome, pr.preco_venda::text, pr.peca_unica, sum(s.saldo)::int AS saldo_bazar,
+               fn_preco_efetivo(pr.preco_venda, pr.desconto_tipo, pr.desconto_valor, pr.desconto_ate)::text AS preco_efetivo
         FROM produto pr JOIN item i ON i.produto_id = pr.id AND i.status = 'APROVADO'
         JOIN vw_saldo_estoque s ON s.item_id = i.id AND s.local_id = 1 AND s.saldo > 0
         GROUP BY pr.id ORDER BY pr.codigo`,
@@ -65,7 +66,12 @@ export async function rotasPdv(app: FastifyInstance) {
     const corpo = {
       categorias: categorias.map((c) => ({ id: c.id, nome: c.nome, precoPadrao: c.preco_padrao ? Number(c.preco_padrao).toFixed(2) : '0.00', vendaPorCategoria: c.venda_por_categoria, ativo: c.ativa, saldoBazar: c.saldo_bazar })),
       // `itemId` é o id do produto (o PDV vende pelo código); `saldoBazar` e `pecaUnica` para o "restam N" (S4-08)
-      itensEtiquetados: etiquetadas.map((p) => ({ itemId: p.id, codigo: p.codigo, descricao: p.nome, preco: Number(p.preco_venda).toFixed(2), saldoBazar: p.saldo_bazar, pecaUnica: p.peca_unica })),
+      // `preco` já com o desconto vigente do produto (S3-10); `precoSemDesconto` só quando há desconto, para o PDV mostrar
+      itensEtiquetados: etiquetadas.map((p) => ({
+        itemId: p.id, codigo: p.codigo, descricao: p.nome, preco: Number(p.preco_efetivo).toFixed(2),
+        ...(Number(p.preco_efetivo) < Number(p.preco_venda) ? { precoSemDesconto: Number(p.preco_venda).toFixed(2) } : {}),
+        saldoBazar: p.saldo_bazar, pecaUnica: p.peca_unica,
+      })),
       clientesFiado: clientes,
       regrasFiscais: regras.map(regraDto),
       fiadoPrazoDias: prazo || undefined,

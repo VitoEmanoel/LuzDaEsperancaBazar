@@ -48,7 +48,7 @@ const UNICOS: Record<string, [string, string]> = {
   ux_campanha_nome: ['NOME_DUPLICADO', 'Já existe um cadastro com este nome'],
   usuario_login_key: ['LOGIN_DUPLICADO', 'Login já existe'],
   terminal_nome_key: ['NOME_DUPLICADO', 'Já existe um terminal com este nome'],
-  perfil_nome_key: ['NOME_DUPLICADO', 'Já existe um perfil com este nome'],
+  perfil_nome_ativo_key: ['NOME_DUPLICADO', 'Já existe um perfil ativo com este nome'],
   motivo_descarte_nome_key: ['NOME_DUPLICADO', 'Já existe um motivo com este nome'],
   motivo_baixa_nome_key: ['NOME_DUPLICADO', 'Já existe um motivo com este nome'],
   categoria_despesa_nome_key: ['NOME_DUPLICADO', 'Já existe uma categoria com este nome'],

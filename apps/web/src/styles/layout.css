@@ -110,6 +110,16 @@
 .timeline li::before { content: ""; position: absolute; left: -9px; top: .85rem; width: 14px; height: 14px; border-radius: 50%; background: var(--brand); border: 3px solid var(--bg); }
 .timeline time { color: var(--muted); min-width: 140px; }
 .perms { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+.perms { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .5rem .85rem .75rem; margin: 0 0 .85rem; gap: .15rem .75rem; }
+.perms legend { font-weight: 800; color: var(--heading); padding: 0 .35rem; }
+.perms .marcar-todas { grid-column: 1 / -1; border-bottom: 1px solid var(--border); padding-bottom: .35rem; margin-bottom: .2rem; }
+.perfil-item { display: flex; gap: .35rem; align-items: stretch; }
+.perfil-item > .btn-block { flex: 1; }
+.preco-desconto s { margin-right: .25rem; font-weight: 400; font-size: .8em; }
+.contadores .preco-desconto { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0 .35rem; white-space: normal; }
+.dados { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: .5rem 1rem; }
+.dados dt { font-size: .8rem; font-weight: 800; text-transform: uppercase; color: var(--muted); }
+.dados dd { margin: 0; }
 .senha-provisoria { font-size: 1.5rem; text-align: center; font-family: var(--fonte-mono); }
 
 /* --- Responsivo (tablet 10", RNF-11) --- */

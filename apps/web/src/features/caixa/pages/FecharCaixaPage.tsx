@@ -58,15 +58,16 @@ export function FecharCaixaPage() {
     return (
       <div className="center-page">
       <BrandMark />
-      <div className="card fechamento">
+      {/* S3-17: só o resumo vai para o papel (a impressão mostra apenas a .print-area) */}
+      <div className="card fechamento print-area">
         <h1>Caixa fechado</h1>
         <p>{fechado.terminalNome} · aberto em {formatDateTime(fechado.abertoEm)} · fechado em {formatDateTime(fechado.fechadoEm)}</p>
         <p>Esperado: <MoneyText value={fechado.esperado} /> · Contado: <MoneyText value={fechado.contado} /></p>
         <p>Diferença: <strong className={fechado.diferenca !== '0.00' ? 'txt-erro' : 'txt-ok'}><MoneyText value={fechado.diferenca} /></strong></p>
         <h2>O que aconteceu, da abertura ao fechamento</h2>
-        <ErrorAlert erro={tempo.erro ?? erro} />
+        <div className="no-print"><ErrorAlert erro={tempo.erro ?? erro} /></div>
         {tempo.data ? <LinhaDoTempoCaixa eventos={tempo.data.eventos} /> : <p>Carregando…</p>}
-        <div className="row">
+        <div className="row no-print">
           <button className="btn" onClick={() => baixarPdf(fechado.id)}>Baixar PDF</button>
           <button className="btn" onClick={() => window.print()}>Imprimir</button>
           <Link to="/" className="btn btn-primary grow">Ir para o início</Link>

@@ -10,7 +10,7 @@ import { Link, useParams } from 'react-router-dom';
 import { cadastrosApi } from '../../cadastros/cadastros.api';
 import { lotesApi } from '../entradas.api';
 import { errorMessage } from '../../../shared/api/http';
-import type { CamposProduto, Etiqueta, ItemLote, LocalEstoque, ProdutoBusca, StatusItem, TipoEntrada } from '../../../shared/api/types';
+import { PERFIL_ADMIN_ID, type CamposProduto, type Etiqueta, type ItemLote, type LocalEstoque, type ProdutoBusca, type StatusItem, type TipoEntrada } from '../../../shared/api/types';
 import { useAsync } from '../../../shared/hooks/useAsync';
 import { Badge, ErrorAlert, Field, MoneyText, PageHeader, TabelaRolavel } from '../../../shared/components/ui';
 import { ConfirmMotivo } from '../../../shared/components/ConfirmMotivo';
@@ -33,7 +33,7 @@ const SITUACAO: Record<StatusItem, { rotulo: string; tom: 'ok' | 'alerta' | 'err
 export function TriagemPage() {
   const { id = '' } = useParams();
   const toast = useToast();
-  const { can } = useAuth();
+  const { can, me } = useAuth();
   const lote = useAsync(() => lotesApi.obter(id), [id]);
   const ops = useAsync(() => Promise.all([cadastrosApi.listar('categorias', { ativo: true }), cadastrosApi.listar('motivos-descarte', { ativo: true })]), []);
   const [reabrir, setReabrir] = useState(false);
@@ -48,8 +48,13 @@ export function TriagemPage() {
   const motivos = ops.data?.[1] ?? [];
   const aberto = l?.status === 'ABERTO';
   const aprovador = can('produtos.aprovar');
+  const registra = can('entrada.registrar'); // o Financeiro só lê o lote (S3-12)
+  const verCusto = can('custo.consultar'); // S3-05
+  // quem cadastrou não confere o próprio item; o Administrador pode (S3-22)
+  const podeConferir = (i: ItemLote) => aprovador && (me?.perfil.id === PERFIL_ADMIN_ID || i.criadoPorId !== me?.id);
   const etiquetaveis = useMemo(() => l?.itens.filter((i) => i.codigo).map((i) => i.id) ?? [], [l]);
   const pendentes = l?.itens.filter((i) => i.status === 'CADASTRADO').length ?? 0;
+  const conferiveis = l?.itens.filter((i) => i.status === 'CADASTRADO' && podeConferir(i)).length ?? 0;
 
   async function encerrar() {
     try { await lotesApi.encerrar(id); toast('Lote encerrado.'); await lote.reload(); } catch (e) { toast(errorMessage(e), 'erro'); }
@@ -62,7 +67,11 @@ export function TriagemPage() {
   }
   async function aprovarLote() {
     setAprovando(true);
-    try { const r = await lotesApi.aprovarLote(id); toast(`${r.aprovadosAgora} item(ns) aprovado(s).`); await lote.reload(); }
+    try {
+      const r = await lotesApi.aprovarLote(id);
+      toast(`${r.aprovadosAgora} item(ns) aprovado(s).${r.deixadosParaOutraPessoa ? ` ${r.deixadosParaOutraPessoa} cadastrado(s) por você fica(m) para outra pessoa conferir.` : ''}`);
+      await lote.reload();
+    }
     catch (e) { toast(errorMessage(e), 'erro'); } finally { setAprovando(false); }
   }
 
@@ -72,26 +81,26 @@ export function TriagemPage() {
   return (
     <div className="page">
       <PageHeader titulo={`Lote #${l.numero} — cadastro de produtos`}>
-        {etiquetaveis.length > 0 && <button className="btn" onClick={() => imprimirEtiquetas(etiquetaveis)}>Imprimir etiquetas ({etiquetaveis.length})</button>}
-        {aprovador && pendentes > 0 && <button className="btn btn-primary" disabled={aprovando} onClick={aprovarLote}>Aprovar lote ({pendentes})</button>}
-        {aberto ? <button className="btn" onClick={encerrar}>Encerrar lote</button>
+        {registra && etiquetaveis.length > 0 && <button className="btn" onClick={() => imprimirEtiquetas(etiquetaveis)}>Imprimir etiquetas ({etiquetaveis.length})</button>}
+        {conferiveis > 0 && <button className="btn btn-primary" disabled={aprovando} onClick={aprovarLote}>Aprovar lote ({conferiveis})</button>}
+        {aberto ? registra && <button className="btn" onClick={encerrar}>Encerrar lote</button>
           : <Can perm="triagem.reabrir"><button className="btn" onClick={() => setReabrir(true)}>Reabrir lote</button></Can>}
       </PageHeader>
       <p className="muted">
         {[l.parceiroNome, l.campanhaNome].filter(Boolean).join(' · ')} · recebido em {formatDateTime(l.recebidoEm)} {l.documento && `· ${l.documento}`}{' '}
         {aberto ? <Badge tom="alerta">Recebendo cadastro</Badge> : <Badge tom="ok">Encerrado</Badge>}
       </p>
-      <p className="hint">Os itens cadastrados só entram no estoque depois que o Administrador aprova.</p>
+      <p className="hint">Os itens cadastrados só entram no estoque depois que outra pessoa confere e aprova (o Administrador ou outro Estoquista).</p>
       <div className="contadores" aria-live="polite">
         <div className="card"><span>No estoque (unidades)</span><strong>{l.aprovados}</strong></div>
         <div className="card"><span>Aguardando aprovação</span><strong>{l.pendentes ?? pendentes}</strong></div>
         <div className="card"><span>Devolvidos</span><strong>{l.devolvidos ?? 0}</strong></div>
         <div className="card"><span>Descartados</span><strong>{l.descartados}</strong></div>
-        <div className="card"><span>Valor atribuído (aprovado)</span><strong><MoneyText value={l.valorAtribuido} /></strong></div>
+        {l.valorAtribuido !== undefined && <div className="card"><span>Valor atribuído (aprovado)</span><strong><MoneyText value={l.valorAtribuido} /></strong></div>}
       </div>
       <ErrorAlert erro={ops.erro} />
 
-      {aberto && (
+      {aberto && registra && (
         <div className="grid-2 triagem">
           <FormCadastrar loteId={id} tipoLote={l.tipo} categorias={categorias} onOk={() => lote.reload()} />
           <FormDescartar loteId={id} categorias={categorias} motivos={motivos} onOk={() => lote.reload()} />
@@ -101,20 +110,23 @@ export function TriagemPage() {
       <section>
         <h2>Itens do lote</h2>
         <TabelaRolavel><table className="table compact">
-          <thead><tr><th>Código</th><th>Descrição</th><th className="num">Qtd.</th><th className="num">Preço</th><th>Destino</th><th>Situação</th><th /></tr></thead>
+          <thead><tr><th>Código</th><th>Descrição</th><th className="num">Qtd.</th><th className="num">Preço</th>{verCusto && <th className="num">Custo (unitário)</th>}<th>Destino</th><th>Situação</th><th /></tr></thead>
           <tbody>{l.itens.map((i) => (
             <tr key={i.id}>
               <td>{i.codigo ?? '—'}</td>
-              <td>{i.status === 'APROVADO' ? <Link to={`/estoque/itens/${i.id}`}>{i.descricao}</Link> : i.descricao}{i.produto?.pecaUnica && <small> · peça única</small>}</td>
+              {/* o produto já existe antes da aprovação (quem confere vê os dados); o item por categoria só tem histórico depois de aprovado */}
+              <td>{i.produto ? <Link to={`/estoque/produtos/${i.produto.id}`}>{i.descricao}</Link> : i.status === 'APROVADO' ? <Link to={`/estoque/itens/${i.id}`}>{i.descricao}</Link> : i.descricao}{i.produto?.pecaUnica && <small> · peça única</small>}</td>
               <td className="num">{i.quantidade}</td>
               <td className="num"><MoneyText value={i.preco} /></td>
+              {verCusto && <td className="num"><MoneyText value={i.valorAtribuido} /></td>}
               <td>{i.localDestino === 'BAZAR' ? 'Bazar' : 'Doações'}</td>
               <td><Badge tom={SITUACAO[i.status].tom}>{SITUACAO[i.status].rotulo}</Badge>{i.motivoDevolucao && <small className="motivo-devolucao">{i.motivoDevolucao}</small>}</td>
               <td className="row">
-                {i.status === 'CADASTRADO' && aprovador && <>
-                  <button className="btn btn-sm btn-primary" onClick={() => aprovarItem(i)}>Aprovar</button>
-                  <button className="btn btn-sm" onClick={() => setDevolver(i)}>Devolver</button>
+                {i.status === 'CADASTRADO' && podeConferir(i) && <>
+                  <button className="btn btn-sm btn-primary" disabled={aprovando} onClick={() => aprovarItem(i)}>Aprovar</button>
+                  <button className="btn btn-sm" disabled={aprovando} onClick={() => setDevolver(i)}>Devolver</button>
                 </>}
+                {i.status === 'CADASTRADO' && aprovador && !podeConferir(i) && <small className="muted">Outra pessoa confere</small>}
                 {i.status !== 'APROVADO' && <Can perm="entrada.registrar"><button className="btn btn-sm" onClick={() => setCorrigir(i)}>{i.status === 'DEVOLVIDO' ? 'Corrigir e reenviar' : 'Corrigir'}</button></Can>}
               </td>
             </tr>
@@ -298,7 +310,7 @@ function BuscaProduto({ escolhido, onEscolher }: { escolhido: ProdutoBusca | nul
 /** Correção do estoquista (item cadastrado ou devolvido). Os dados do produto só mudam aqui se ele nasceu nesta entrada. */
 function CorrigirModal({ loteId, compra, item, onFechar, onOk }: { loteId: string; compra: boolean; item: ItemLote; onFechar: () => void; onOk: () => Promise<void> }) {
   const [qtd, setQtd] = useState(String(item.quantidade));
-  const [valor, setValor] = useState(item.valorAtribuido.replace('.', ','));
+  const [valor, setValor] = useState((item.valorAtribuido ?? '').replace('.', ','));
   const [destino, setDestino] = useState<LocalEstoque>(item.localDestino);
   const [titulo, setTitulo] = useState(item.produto?.tituloEtiqueta ?? '');
   const [nome, setNome] = useState(item.produto?.nome ?? '');

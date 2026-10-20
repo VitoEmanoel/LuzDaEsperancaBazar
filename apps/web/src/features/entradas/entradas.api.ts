@@ -1,6 +1,6 @@
 /** ENT/TRI — lotes de entrada, cadastro dos produtos do lote e aprovação. */
 import { http } from '../../shared/api/http';
-import type { CorrecaoItemRequest, Etiqueta, ItemLote, LoteDetalhe, LoteEntrada, NovoLoteRequest, Page, ProdutoBusca, TriagemDescarteRequest, TriagemItemRequest } from '../../shared/api/types';
+import type { CorrecaoItemRequest, Etiqueta, ItemAprovacao, ItemLote, LoteDetalhe, LoteEntrada, NovoLoteRequest, Page, ProdutoBusca, TriagemDescarteRequest, TriagemItemRequest } from '../../shared/api/types';
 
 export const lotesApi = {
   listar: (q: { parceiroId?: string; campanhaId?: string; status?: string; de?: string; ate?: string; page?: number }) =>
@@ -18,7 +18,10 @@ export const lotesApi = {
   corrigirItem: (loteId: string, itemId: string, c: CorrecaoItemRequest) => http.patch<ItemLote>(`/lotes/${loteId}/itens/${itemId}`, c),
   aprovarItem: (itemId: string) => http.post<ItemLote>(`/itens/${itemId}/aprovar`),
   devolverItem: (itemId: string, motivo: string) => http.post<ItemLote>(`/itens/${itemId}/devolver`, { motivo }),
-  aprovarLote: (id: string) => http.post<LoteEntrada & { aprovadosAgora: number }>(`/lotes/${id}/aprovar`),
+  /** Aprova o que falta no lote; fora do Administrador, os itens da própria pessoa ficam para outra conferir (S3-22). */
+  aprovarLote: (id: string) => http.post<LoteEntrada & { aprovadosAgora: number; deixadosParaOutraPessoa?: number }>(`/lotes/${id}/aprovar`),
+  /** Fila de aprovação (S3-01): o que espera conferência (ou foi devolvido), de todos os lotes. */
+  aprovacoes: (status: 'CADASTRADO' | 'DEVOLVIDO' = 'CADASTRADO') => http.get<ItemAprovacao[]>('/aprovacoes', { query: { status } }),
   buscarProdutos: (busca: string) => http.get<Page<ProdutoBusca>>('/produtos', { query: { busca, pageSize: 10 } }),
   descartar: (loteId: string, d: TriagemDescarteRequest) => http.post<LoteDetalhe['descartes'][number]>(`/lotes/${loteId}/descartes`, d),
   encerrar: (id: string) => http.post<LoteEntrada>(`/lotes/${id}/encerrar`),

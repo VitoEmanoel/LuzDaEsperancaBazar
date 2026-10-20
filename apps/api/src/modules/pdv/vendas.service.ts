@@ -83,7 +83,8 @@ export async function carregarVenda(db: Db, id: string, comCpf = false) {
 }
 
 // ---------------- alocação ----------------
-interface Linha { itemId: string; forma: 'CODIGO' | 'CATEGORIA'; categoriaId: string; quantidade: number; precoCents: number; descontoCents: number }
+/** precoCents = preço cobrado (já com o desconto do produto); tabelaCents = preço sem ele, só quando houve (S3-10). */
+interface Linha { itemId: string; forma: 'CODIGO' | 'CATEGORIA'; categoriaId: string; quantidade: number; precoCents: number; tabelaCents?: number; descontoCents: number }
 
 /** Distribui um desconto em centavos proporcionalmente aos valores (sobra no último). */
 function ratear(totalCents: number, bases: number[]): number[] {
@@ -95,7 +96,7 @@ function ratear(totalCents: number, bases: number[]): number[] {
 }
 
 /** O que a venda pede: um produto (pelo código) ou uma categoria, com a quantidade e o desconto somados. */
-interface Pedido { chave: string; forma: 'CODIGO' | 'CATEGORIA'; nome: string; categoriaId: string; quantidade: number; precoCents: number; descontoCents: number; pecaUnica: boolean }
+interface Pedido { chave: string; forma: 'CODIGO' | 'CATEGORIA'; nome: string; categoriaId: string; quantidade: number; precoCents: number; tabelaCents?: number; descontoCents: number; pecaUnica: boolean }
 
 /** Entradas aprovadas com saldo no Bazar, por PEPS (RN-09): lote mais antigo; desempate por número do lote, criação do item e id. */
 async function candidatas(tx: Tx, produtoIds: string[], categoriaIds: string[]): Promise<{ id: string; chave: string }[]> {
@@ -134,7 +135,7 @@ async function alocar(tx: Tx, pedidos: Pedido[]): Promise<Linha[]> {
         if (!resta) break;
         if (c.chave !== p.chave) continue;
         const q = Math.min(resta, saldo.get(c.id) ?? 0);
-        if (q > 0) { doPedido.push({ itemId: c.id, forma: p.forma, categoriaId: p.categoriaId, quantidade: q, precoCents: p.precoCents, descontoCents: 0 }); resta -= q; }
+        if (q > 0) { doPedido.push({ itemId: c.id, forma: p.forma, categoriaId: p.categoriaId, quantidade: q, precoCents: p.precoCents, ...(p.tabelaCents ? { tabelaCents: p.tabelaCents } : {}), descontoCents: 0 }); resta -= q; }
       }
       if (resta > 0) { falta = { pedido: p, resta }; break; }
       const d = ratear(p.descontoCents, doPedido.map((l) => l.quantidade * l.precoCents));
@@ -157,17 +158,24 @@ async function alocar(tx: Tx, pedidos: Pedido[]): Promise<Linha[]> {
   throw new AppError(409, 'Saldo insuficiente', 'SALDO_INSUFICIENTE', `${p.nome}: faltam ${resta}`);
 }
 
-/** Monta os pedidos: produtos pelo código (o preço é o ATUAL do produto) e categorias (preço padrão ATUAL). */
+/**
+ * Monta os pedidos: produtos pelo código (o preço é o ATUAL do produto, com o desconto vigente: fn_preco_efetivo, S3-10)
+ * e categorias (preço padrão ATUAL). O desconto do produto não conta no limite do perfil: ele já vem no preço.
+ */
 async function montarPedidos(tx: Tx, porCodigo: Map<string, { qtd: number; desc: number }>, porCategoria: Map<string, { qtd: number; desc: number }>): Promise<Pedido[]> {
   const pedidos: Pedido[] = [];
   if (porCodigo.size) {
-    const produtos = await tx.produto.findMany({ where: { codigo: { in: [...porCodigo.keys()] } }, select: { id: true, codigo: true, nome: true, categoriaId: true, precoVenda: true, pecaUnica: true } });
+    const produtos = await tx.$queryRaw<{ id: string; codigo: string; nome: string; categoriaId: string; precoVenda: string; efetivo: string; pecaUnica: boolean }[]>`
+      SELECT id::text, codigo, nome, categoria_id::text AS "categoriaId", preco_venda::text AS "precoVenda", peca_unica AS "pecaUnica",
+             fn_preco_efetivo(preco_venda, desconto_tipo, desconto_valor, desconto_ate)::text AS efetivo
+      FROM produto WHERE codigo = ANY(${[...porCodigo.keys()]}::text[])`;
     const achados = new Map(produtos.map((p) => [p.codigo, p]));
     for (const [codigo, c] of porCodigo) {
       const p = achados.get(codigo);
       if (!p) throw new AppError(409, 'Código não encontrado', 'CODIGO_INEXISTENTE', codigo);
       if (p.pecaUnica && c.qtd > 1) throw new AppError(409, 'Peça única: só 1 unidade por venda', 'CODIGO_DUPLICADO', codigo);
-      pedidos.push({ chave: p.id, forma: 'CODIGO', nome: `${codigo} — ${p.nome}`, categoriaId: p.categoriaId, quantidade: c.qtd, precoCents: toCents(p.precoVenda), descontoCents: c.desc, pecaUnica: p.pecaUnica });
+      const preco = toCents(p.efetivo), tabela = toCents(p.precoVenda);
+      pedidos.push({ chave: p.id, forma: 'CODIGO', nome: `${codigo} — ${p.nome}`, categoriaId: p.categoriaId, quantidade: c.qtd, precoCents: preco, ...(tabela > preco ? { tabelaCents: tabela } : {}), descontoCents: c.desc, pecaUnica: p.pecaUnica });
     }
   }
   if (porCategoria.size) {
@@ -321,6 +329,7 @@ export async function processarVenda(tx: Tx, id: string, req: VendaRequest, op: 
       data: {
         vendaId: venda.id, itemId: l.itemId, formaSelecao: l.forma, quantidade: l.quantidade,
         precoUnitario: fromCents(l.precoCents), desconto: fromCents(l.descontoCents), valorTotal: fromCents(valorTotal),
+        ...(l.tabelaCents ? { precoTabela: fromCents(l.tabelaCents), descontoProduto: fromCents(l.quantidade * (l.tabelaCents - l.precoCents)) } : {}),
         situacaoFiscal: fiscal.situacao, aliquota: fiscal.aliquotaPct.toFixed(2), valorImposto: fromCents(imposto), regraFiscalId: fiscal.regraId,
       },
       select: { id: true },

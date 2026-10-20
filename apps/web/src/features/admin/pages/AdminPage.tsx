@@ -6,7 +6,7 @@ import type { Permissao } from '../../../shared/api/types';
 import { PageHeader, Tabs } from '../../../shared/components/ui';
 import { UsuariosTab } from '../components/UsuariosTab';
 import { PerfisTab } from '../components/PerfisTab';
-import { TerminaisTab, ParametrosTab, InstituicaoTab, RegrasFiscaisTab, ImportacaoTab } from '../components/ConfigTabs';
+import { TerminaisTab, ParametrosTab, InstituicaoTab, RegrasFiscaisTab, ImportacaoTab, CargaInicialTab } from '../components/ConfigTabs';
 import { AuditoriaTab } from '../components/AuditoriaTab';
 import { LgpdTab } from '../components/LgpdTab';
 
@@ -19,6 +19,7 @@ const ABAS: { id: string; rotulo: string; perm: Permissao; el: ReactElement }[] 
   { id: 'fiscal', rotulo: 'Regra fiscal', perm: 'fiscal.gerenciar', el: <RegrasFiscaisTab /> },
   { id: 'auditoria', rotulo: 'Auditoria', perm: 'auditoria.consultar', el: <AuditoriaTab /> },
   { id: 'importacao', rotulo: 'Importação', perm: 'cadastros.gerenciar', el: <ImportacaoTab /> },
+  { id: 'carga-inicial', rotulo: 'Carga inicial', perm: 'estoque.ajustar', el: <CargaInicialTab /> },
   { id: 'lgpd', rotulo: 'LGPD', perm: 'privacidade.gerenciar', el: <LgpdTab /> },
 ];
 

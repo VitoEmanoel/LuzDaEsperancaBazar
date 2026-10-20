@@ -33,6 +33,10 @@ input, select, textarea {
 }
 input:focus, select:focus, textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); outline: none; }
 input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+/* Senha com o botão Mostrar dentro do campo (CampoSenha) */
+.campo-senha { position: relative; display: block; }
+.campo-senha input { width: 100%; padding-right: 6.5rem; }
+.campo-senha .btn { position: absolute; right: .3rem; top: 50%; transform: translateY(-50%); min-height: 36px; }
 input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 input[type="checkbox"], input[type="radio"] { width: 22px; min-height: 22px; height: 22px; accent-color: var(--primary); }
 .check { display: inline-flex; align-items: center; gap: .5rem; min-height: 44px; margin-right: 1rem; }
@@ -147,3 +151,36 @@ a.alert:hover { filter: brightness(.98); color: var(--text); }
 .flor .petala-4 { fill: var(--acento-ceu); }
 .flor .petala-5 { fill: var(--acento-roxo); }
 .flor .miolo { fill: var(--flor-miolo, var(--bg)); }
+
+/* --- Celular (até 600 px) --- */
+@media (max-width: 600px) {
+  /* Tabela de 5 colunas ou mais (TabelaRolavel marca .tabela-cartoes): cada linha vira um cartão, cada célula traz o título da coluna */
+  .tabela-cartoes { overflow-x: visible; border-radius: 0; }
+  .tabela-cartoes > .table, .tabela-cartoes > .table tbody, .tabela-cartoes > .table tfoot, .tabela-cartoes > .table tr { display: block; }
+  .tabela-cartoes > .table { border: 0; background: transparent; overflow: visible; }
+  .tabela-cartoes > .table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); } /* some da tela, não do leitor */
+  .tabela-cartoes > .table tr { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: .75rem; padding: .25rem .9rem; }
+  .tabela-cartoes > .table td { display: block; text-align: right; padding: .5rem 0; border-bottom: 0; overflow-wrap: anywhere; }
+  .tabela-cartoes > .table caption { display: block; }
+  .tabela-cartoes > .table td::after { content: ""; display: block; clear: both; }
+  .tabela-cartoes > .table td + td { border-top: 1px solid var(--border); }
+  .tabela-cartoes > .table td::before {
+    content: attr(data-rotulo); float: left; max-width: 48%; margin-right: 1rem; text-align: left;
+    font-size: .78rem; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); line-height: 1.9; white-space: normal;
+  }
+  .tabela-cartoes > .table td[data-rotulo=""]::before { content: none; }
+  .tabela-cartoes > .table td.row, .tabela-cartoes > .table .actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: .4rem; margin: 0; }
+  .tabela-cartoes > .table td:empty { display: none; } /* depois do td.row: célula de ações vazia some */
+  .tabela-cartoes > .table td.row::after { content: none; }
+  .tabela-cartoes > .table tbody tr:hover td { background: transparent; }
+  .tabela-cartoes > .table tr.destaque { background: var(--surface-2); }
+  .tabela-cartoes > .table tr.linha-vencida { border-color: var(--danger); background: var(--err-bg); }
+
+  /* Abas: quebram linha como pílulas, nenhuma fica cortada */
+  .tabs { flex-wrap: wrap; overflow-x: visible; border-bottom: 0; gap: .4rem; }
+  .tab { min-height: 44px; padding: .35rem .9rem; border: 1px solid var(--border); border-radius: 999px; margin-bottom: 0; background: var(--surface); }
+  .tab.active { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+
+  /* Botões lado a lado de alturas diferentes: um embaixo do outro, largura cheia */
+  .row > .btn:not(.btn-sm, .btn-ghost), .modal-footer > .btn { flex: 1 1 100%; }
+}

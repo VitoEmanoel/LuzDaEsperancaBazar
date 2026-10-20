@@ -26,7 +26,8 @@ CREATE FUNCTION pg_temp.espera(teste text, cond boolean, detalhe text DEFAULT NU
 $$;
 
 -- massa mínima fictícia: um lote, um produto de várias unidades (TST0002) e uma peça única (TST0001)
-SELECT id AS u FROM usuario WHERE ativo ORDER BY criado_em LIMIT 1 \gset
+-- o Administrador: desde a 0010 só ele aprova o que ele mesmo cadastrou (S3-22)
+SELECT id AS u FROM usuario WHERE ativo AND perfil_id = '00000000-0000-4000-8000-0000000000a1' ORDER BY criado_em LIMIT 1 \gset
 SELECT id AS cat FROM categoria ORDER BY criado_em LIMIT 1 \gset
 SELECT id AS cat2 FROM categoria WHERE id <> :'cat' ORDER BY criado_em LIMIT 1 \gset
 INSERT INTO lote_entrada (id, tipo, parceiro_id, recebido_em, recebido_por_id)
@@ -70,13 +71,14 @@ UPDATE item SET descricao = 'Caneca (lote de teste)' WHERE id = '20000000-0000-4
 SET CONSTRAINTS ALL IMMEDIATE;
 SET CONSTRAINTS ALL DEFERRED;
 SELECT pg_temp.espera('aprovado ainda muda a descrição', (SELECT descricao FROM item WHERE id = '20000000-0000-4000-8000-0000000000a1') = 'Caneca (lote de teste)');
-INSERT INTO movimentacao (item_id, tipo, local_destino_id, quantidade, usuario_id, motivo) VALUES ('20000000-0000-4000-8000-0000000000a1', 'AJUSTE_ENTRADA', 1, 2, :'u', 'teste');
-SELECT pg_temp.espera('produto de várias unidades passa de 1 unidade (sem ETIQUETADO_QTD)', fn_saldo('20000000-0000-4000-8000-0000000000a1', 1) = 5);
+-- (desde a 0010 não há ajuste de entrada: as 3 unidades aprovadas já provam que o produto de várias unidades passa de 1)
+SELECT pg_temp.espera('produto de várias unidades passa de 1 unidade (sem ETIQUETADO_QTD)', fn_saldo('20000000-0000-4000-8000-0000000000a1', 1) = 3);
 
 -- C. devolução
 SELECT pg_temp.espera_erro('devolver exige motivo',
-  $$UPDATE item SET status = 'DEVOLVIDO' WHERE id = '20000000-0000-4000-8000-0000000000a2'$$, 'ck_item_devolucao');
-UPDATE item SET status = 'DEVOLVIDO', motivo_devolucao = 'Foto e tamanho faltando' WHERE id = '20000000-0000-4000-8000-0000000000a2';
+  format($$UPDATE item SET status = 'DEVOLVIDO', devolvido_por_id = %L WHERE id = '20000000-0000-4000-8000-0000000000a2'$$, :'u'), 'ck_item_devolucao');
+-- desde a 0010 a devolução registra quem devolveu (devolvido_por_id)
+UPDATE item SET status = 'DEVOLVIDO', motivo_devolucao = 'Foto e tamanho faltando', devolvido_por_id = :'u' WHERE id = '20000000-0000-4000-8000-0000000000a2';
 SELECT pg_temp.espera_erro('devolvido não é aprovado sem ser reenviado',
   format($$UPDATE item SET status = 'APROVADO', motivo_devolucao = NULL, aprovado_por_id = %L, aprovado_em = now() WHERE id = '20000000-0000-4000-8000-0000000000a2'$$, :'u'),
   'ITEM_DEVOLVIDO');
@@ -101,7 +103,7 @@ SELECT pg_temp.espera_erro('entrada de produto exige o produto',
 UPDATE item SET status = 'APROVADO', aprovado_por_id = :'u', aprovado_em = now() WHERE id = '20000000-0000-4000-8000-0000000000a2';
 INSERT INTO movimentacao (item_id, tipo, local_destino_id, quantidade, usuario_id) VALUES ('20000000-0000-4000-8000-0000000000a2', 'ENTRADA', 1, 1, :'u');
 SELECT pg_temp.espera_erro('peça única aprovada não passa de 1 unidade',
-  format($$INSERT INTO movimentacao (item_id, tipo, local_destino_id, quantidade, usuario_id, motivo) VALUES ('20000000-0000-4000-8000-0000000000a2', 'AJUSTE_ENTRADA', 1, 1, %L, 'teste')$$, :'u'),
+  format($$INSERT INTO movimentacao (item_id, tipo, local_destino_id, quantidade, usuario_id, motivo) VALUES ('20000000-0000-4000-8000-0000000000a2', 'ENTRADA', 1, 1, %L, 'teste')$$, :'u'),
   'ETIQUETADO_QTD');
 SELECT pg_temp.espera_erro('código do produto não muda',
   $$UPDATE produto SET codigo = 'TST9999' WHERE id = '20000000-0000-4000-8000-0000000000b2'$$, 'ORIGEM_IMUTAVEL');

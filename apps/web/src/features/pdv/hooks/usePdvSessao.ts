@@ -16,7 +16,7 @@ export interface PdvSessao {
   erro: string | null;
   semCaixa: boolean;
   terminalDesativado: boolean;
-  recarregarCatalogo: () => Promise<void>;
+  recarregarCatalogo: () => Promise<CatalogoPdv>;
   atualizarCatalogo: (fn: (c: CatalogoPdv) => CatalogoPdv) => void;
 }
 
@@ -29,7 +29,7 @@ export function usePdvSessao(): PdvSessao {
   const [semCaixa, setSemCaixa] = useState(false);
   const [terminalDesativado, setTerminalDesativado] = useState(false);
 
-  const recarregarCatalogo = useCallback(async () => { setCatalogo(await pdvApi.catalogo()); }, []);
+  const recarregarCatalogo = useCallback(async () => { const c = await pdvApi.catalogo(); setCatalogo(c); return c; }, []);
 
   useEffect(() => {
     let vivo = true;

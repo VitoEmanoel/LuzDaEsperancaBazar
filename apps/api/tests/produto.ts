@@ -84,7 +84,7 @@ async function main() {
   check(et.length === 1 && et[0].codigo === codigo && et[0].descricao === 'Caneca branca' && et[0].preco === '7.00', 'etiqueta do produto: título curto, preço e código', et);
 
   console.log('Devolução e correção (P-14)');
-  check((await est.post(`/itens/${itA.data.id}/aprovar`)).status === 403, 'Estoquista não aprova');
+  check((await est.post(`/itens/${itA.data.id}/aprovar`)).data?.code === 'AUTO_APROVACAO', 'Estoquista não aprova o que ele mesmo cadastrou (S3-22)');
   check((await caixa.post(`/itens/${itA.data.id}/devolver`, { motivo: 'Confira a quantidade' })).status === 403, 'Vendedor não devolve');
   check((await admin.post(`/itens/${itA.data.id}/devolver`, { motivo: 'ruim' })).status === 400, 'devolver exige motivo (5+ caracteres)');
   const dev = await admin.post(`/itens/${itA.data.id}/devolver`, { motivo: 'Confira a quantidade e o preço' });

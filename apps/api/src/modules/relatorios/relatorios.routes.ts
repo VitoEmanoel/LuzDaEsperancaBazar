@@ -119,7 +119,7 @@ async function prestacaoContas(f: Filtro): Promise<Relatorio> {
 const ROTULO_FORMA: Record<string, string> = { DINHEIRO: 'Dinheiro', PIX: 'PIX', CARTAO_DEBITO: 'Cartão de débito', CARTAO_CREDITO: 'Cartão de crédito', FIADO: 'Fiado' };
 const ROTULO_AGRUPAR: Record<string, string> = { dia: 'Dia', forma: 'Forma de pagamento', categoria: 'Categoria', operador: 'Operador' };
 
-type LinhaVenda = { id: string; numero: number; ocorrida_em: Date; operador: string; status: string; formas: string | null; total: string; imposto: string; categorias: string | null; motivo: string | null };
+type LinhaVenda = { id: string; numero: number; ocorrida_em: Date; operador: string; status: string; formas: string | null; total: string; imposto: string; categorias: string | null; motivo: string | null; desc_produto: string; desc_pdv: string };
 
 async function vendas(f: Filtro): Promise<Relatorio> {
   const ini = inicioDoDia(f.de), fim = fimDoDiaExclusivo(f.ate);
@@ -128,6 +128,9 @@ async function vendas(f: Filtro): Promise<Relatorio> {
       (SELECT string_agg(DISTINCT p.forma::text, ', ') FROM venda_pagamento p WHERE p.venda_id = v.id) AS formas,
       v.total::text AS total,
       (SELECT coalesce(sum(vi.valor_imposto), 0) FROM venda_item vi WHERE vi.venda_id = v.id)::text AS imposto,
+      -- S3-11: desconto do produto (promoção) e desconto manual do PDV (nos itens e na venda), à parte
+      (SELECT coalesce(sum(vi.desconto_produto), 0) FROM venda_item vi WHERE vi.venda_id = v.id)::text AS desc_produto,
+      ((SELECT coalesce(sum(vi.desconto), 0) FROM venda_item vi WHERE vi.venda_id = v.id) + v.desconto)::text AS desc_pdv,
       (SELECT string_agg(DISTINCT c.nome, ', ') FROM venda_item vi JOIN item i ON i.id = vi.item_id JOIN categoria c ON c.id = i.categoria_id WHERE vi.venda_id = v.id) AS categorias,
       v.motivo_cancelamento AS motivo
     FROM venda v JOIN usuario u ON u.id = v.registrada_por_id
@@ -151,6 +154,10 @@ async function vendas(f: Filtro): Promise<Relatorio> {
     total: fromCents(conc.reduce((s, r) => s + cents(r.total), 0)),
     imposto: fromCents(conc.reduce((s, r) => s + cents(r.imposto), 0)),
   };
+  const totaisDesconto = {
+    descontoProduto: fromCents(conc.reduce((s, r) => s + cents(r.desc_produto), 0)),
+    descontoPdv: fromCents(conc.reduce((s, r) => s + cents(r.desc_pdv), 0)),
+  };
 
   if (!f.agrupar || !ROTULO_AGRUPAR[f.agrupar]) {
     return {
@@ -158,29 +165,35 @@ async function vendas(f: Filtro): Promise<Relatorio> {
       colunas: [
         { chave: 'numero', rotulo: 'Nº', tipo: 'number' }, { chave: 'data', rotulo: 'Data', tipo: 'date' }, { chave: 'operador', rotulo: 'Operador' },
         { chave: 'categorias', rotulo: 'Categorias' }, { chave: 'formas', rotulo: 'Formas de pagamento' },
+        { chave: 'descontoProduto', rotulo: 'Desconto do produto', tipo: 'money' }, { chave: 'descontoPdv', rotulo: 'Desconto no PDV', tipo: 'money' },
         { chave: 'imposto', rotulo: 'Imposto calculado', tipo: 'money' }, { chave: 'total', rotulo: 'Total', tipo: 'money' },
       ],
       linhas: conc.map((r) => ({
         numero: r.numero, data: r.ocorrida_em.toISOString(), operador: r.operador, categorias: r.categorias ?? '', formas: formas(r),
+        descontoProduto: Number(r.desc_produto).toFixed(2), descontoPdv: Number(r.desc_pdv).toFixed(2),
         imposto: Number(r.imposto).toFixed(2), total: Number(r.total).toFixed(2),
       })),
-      totais: { numero: conc.length, ...totaisGerais },
+      totais: { numero: conc.length, ...totaisDesconto, ...totaisGerais },
       blocos: [blocoCanceladas],
     };
   }
 
   // Agrupado: uma linha por grupo, só com vendas concluídas. Totais batem com o total geral.
-  type Agg = { grupo: string; vendas: bigint; total: string; imposto: string };
+  type Agg = { grupo: string; vendas: bigint; total: string; imposto: string; desc_produto?: string; desc_pdv?: string };
   let agg: Agg[];
   if (f.agrupar === 'dia') {
     agg = await prisma.$queryRaw<Agg[]>`
       SELECT to_char((v.ocorrida_em AT TIME ZONE ${TZ})::date, 'YYYY-MM-DD') AS grupo, count(*) AS vendas, sum(v.total)::text AS total,
+        coalesce(sum((SELECT sum(vi.desconto_produto) FROM venda_item vi WHERE vi.venda_id = v.id)), 0)::text AS desc_produto,
+        coalesce(sum((SELECT sum(vi.desconto) FROM venda_item vi WHERE vi.venda_id = v.id) + v.desconto), 0)::text AS desc_pdv,
         coalesce(sum((SELECT sum(vi.valor_imposto) FROM venda_item vi WHERE vi.venda_id = v.id)), 0)::text AS imposto
       FROM venda v WHERE v.status = 'FINALIZADA' AND v.ocorrida_em >= ${ini} AND v.ocorrida_em < ${fim}
       GROUP BY 1 ORDER BY 1`;
   } else if (f.agrupar === 'operador') {
     agg = await prisma.$queryRaw<Agg[]>`
       SELECT u.nome AS grupo, count(*) AS vendas, sum(v.total)::text AS total,
+        coalesce(sum((SELECT sum(vi.desconto_produto) FROM venda_item vi WHERE vi.venda_id = v.id)), 0)::text AS desc_produto,
+        coalesce(sum((SELECT sum(vi.desconto) FROM venda_item vi WHERE vi.venda_id = v.id) + v.desconto), 0)::text AS desc_pdv,
         coalesce(sum((SELECT sum(vi.valor_imposto) FROM venda_item vi WHERE vi.venda_id = v.id)), 0)::text AS imposto
       FROM venda v JOIN usuario u ON u.id = v.registrada_por_id
       WHERE v.status = 'FINALIZADA' AND v.ocorrida_em >= ${ini} AND v.ocorrida_em < ${fim}
@@ -201,21 +214,23 @@ async function vendas(f: Filtro): Promise<Relatorio> {
       WHERE v.status = 'FINALIZADA' AND v.ocorrida_em >= ${ini} AND v.ocorrida_em < ${fim}
       GROUP BY 1 ORDER BY 1`;
   }
+  const contaVendas = f.agrupar === 'dia' || f.agrupar === 'operador'; // forma/categoria: a mesma venda pode estar em mais de um grupo
   const linhas = agg.map((a) => ({
     grupo: f.agrupar === 'forma' ? ROTULO_FORMA[a.grupo] ?? a.grupo : a.grupo,
     vendas: Number(a.vendas), imposto: Number(a.imposto).toFixed(2), total: Number(a.total).toFixed(2),
+    ...(contaVendas ? { descontoProduto: Number(a.desc_produto ?? 0).toFixed(2), descontoPdv: Number(a.desc_pdv ?? 0).toFixed(2) } : {}),
   }));
-  const contaVendas = f.agrupar === 'dia' || f.agrupar === 'operador'; // forma/categoria: a mesma venda pode estar em mais de um grupo
   return {
     titulo: `Vendas concluídas por ${ROTULO_AGRUPAR[f.agrupar]!.toLowerCase()}`,
     colunas: [
       { chave: 'grupo', rotulo: ROTULO_AGRUPAR[f.agrupar]!, tipo: f.agrupar === 'dia' ? 'date' : 'text' },
       { chave: 'vendas', rotulo: 'Vendas', tipo: 'number' },
+      ...(contaVendas ? [{ chave: 'descontoProduto', rotulo: 'Desconto do produto', tipo: 'money' as const }, { chave: 'descontoPdv', rotulo: 'Desconto no PDV', tipo: 'money' as const }] : []),
       ...(f.agrupar === 'forma' ? [] : [{ chave: 'imposto', rotulo: 'Imposto calculado', tipo: 'money' as const }]),
       { chave: 'total', rotulo: f.agrupar === 'categoria' ? 'Receita (desconto rateado)' : 'Total', tipo: 'money' },
     ],
     linhas,
-    totais: { ...(contaVendas ? { vendas: conc.length } : {}), ...totaisGerais, total: fromCents(linhas.reduce((s, l) => s + toCents(l.total), 0)) },
+    totais: { ...(contaVendas ? { vendas: conc.length, ...totaisDesconto } : {}), ...totaisGerais, total: fromCents(linhas.reduce((s, l) => s + toCents(l.total), 0)) },
     blocos: [blocoCanceladas],
   };
 }
@@ -382,6 +397,17 @@ async function gerarPdf(r: Relatorio, f: Filtro, instituicao: string): Promise<B
   return fim;
 }
 
+/** Sem a permissão de ver custo (S3-05), a coluna de valor atribuído some do relatório (e da exportação). */
+function semCustoNoRelatorio(r: Relatorio, verCusto: boolean): Relatorio {
+  if (verCusto) return r;
+  const tira = (sec: Secao): Secao => ({
+    ...sec, colunas: sec.colunas.filter((c) => c.chave !== 'valorAtribuido'),
+    linhas: sec.linhas.map(({ valorAtribuido: _v, ...l }) => l),
+    ...(sec.totais ? { totais: Object.fromEntries(Object.entries(sec.totais).filter(([k]) => k !== 'valorAtribuido')) } : {}),
+  });
+  return { ...tira(r), ...(r.blocos ? { blocos: r.blocos.map(tira) } : {}) };
+}
+
 /** Relatórios de estoque podem ser vistos por quem tem `relatorios.estoque`; os demais (receita, vendas, fiado) exigem `relatorios.consultar`. */
 const TIPOS_DE_ESTOQUE = ['estoque', 'descartes', 'transferencias'];
 
@@ -393,7 +419,7 @@ export async function rotasRelatorios(app: FastifyInstance) {
     if (!gerar) throw new AppError(404, 'Relatório inexistente', 'RELATORIO_INEXISTENTE');
     if (!TIPOS_DE_ESTOQUE.includes(tipo) && !tem(u, 'relatorios.consultar')) proibido();
     const f = parse(zFiltro, req.query);
-    const r = await gerar(f);
+    const r = semCustoNoRelatorio(await gerar(f), tem(u, 'custo.consultar'));
     if (f.formato === 'json') return r;
 
     const cab = r.colunas.map((c) => c.rotulo);

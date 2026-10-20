@@ -3,22 +3,22 @@
  * Prova o conserto do foco das janelas (o foco ia para o ✕ a cada tecla). NÃO faz parte do build nem de nenhum script do projeto.
  *
  * Como rodar (a demonstração precisa estar no ar: `VITE_USE_MOCK=true npx vite --port 5174`, dentro de apps/web):
- *   1. numa pasta FORA do projeto: `npm init -y && npm i playwright-core`
- *   2. copie este arquivo para lá e rode: `URL=http://localhost:5174 SHOT=/tmp node janelas-ui.mjs`
- * Usa o Chromium que o Playwright já baixou em ~/.cache/ms-playwright/chromium-1243 (ajuste o caminho se a versão for outra).
+ *   1. o `playwright-core` já é dependência de desenvolvimento do apps/web (`npm install` na raiz)
+ *   2. dentro de apps/web: `URL=http://localhost:5174 SHOT=/tmp node tests-ui/janelas-ui.mjs`
+ * Usa o Chromium que o Playwright já baixou em ~/.cache/ms-playwright/chromium-1243, ou o do sistema com CHROME=/usr/bin/google-chrome-stable.
  */
 import { chromium } from 'playwright-core';
 const URL = process.env.URL ?? 'http://localhost:5174';
 const SHOT = process.env.SHOT ?? '/tmp';
 let falhas = 0;
 const check = (ok, nome, extra) => { console.log(`${ok ? '✔' : '✘'} ${nome}`, ok || extra === undefined ? '' : JSON.stringify(extra)); if (!ok) falhas++; };
-const browser = await chromium.launch({ executablePath: process.env.HOME + '/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome', headless: true, args: ['--no-sandbox'] });
+const browser = await chromium.launch({ executablePath: process.env.CHROME ?? process.env.HOME + '/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome', headless: true, args: ['--no-sandbox'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 const foco = () => page.evaluate(() => { const a = document.activeElement; return a ? `${a.tagName}${a.getAttribute('aria-label') ? '[' + a.getAttribute('aria-label') + ']' : ''}${a.placeholder ? '[ph=' + a.placeholder + ']' : ''}${a.innerText ? '[' + a.innerText.slice(0, 25) + ']' : ''}` : 'nada'; });
 const dentro = async () => page.evaluate(() => !!document.activeElement?.closest('[role=dialog]'));
 try {
   await page.goto(`${URL}/login`);
-  await page.getByLabel('Usuário').fill('vendedor'); await page.getByLabel('Senha').fill('Vendedor@123');
+  await page.getByLabel('Usuário').fill('vendedor'); await page.locator('input[type="password"]').fill('Vendedor@123');
   await page.getByRole('button', { name: 'Entrar' }).click();
   await page.waitForURL(/\/pdv/, { timeout: 15000 });
   await Promise.race([page.locator('.cat-btn').first().waitFor({ timeout: 15000 }), page.getByRole('heading', { name: 'Abrir caixa' }).waitFor({ timeout: 15000 })]);

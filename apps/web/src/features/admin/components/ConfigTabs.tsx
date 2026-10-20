@@ -5,7 +5,8 @@ import { importacoesApi, parametrosApi } from '../admin.api';
 import { regrasFiscaisApi } from '../../relatorios/relatorios.api';
 import { terminaisApi } from '../../caixa/caixa.api';
 import { errorMessage } from '../../../shared/api/http';
-import type { ImportacaoResultado, Instituicao, RegraFiscal } from '../../../shared/api/types';
+import type { CargaInicialResultado, ImportacaoResultado, Instituicao, RegraFiscal } from '../../../shared/api/types';
+import { estoqueApi } from '../../estoque/estoque.api';
 import { useAsync } from '../../../shared/hooks/useAsync';
 import { Badge, ErrorAlert, Field, TabelaRolavel } from '../../../shared/components/ui';
 import { formatDate, todayLocal } from '../../../shared/lib/format';
@@ -133,6 +134,30 @@ export function ImportacaoTab() {
           {res.erros.length > 0 && <ul>{res.erros.map((d) => <li key={d.linha}>Linha {d.linha}: {d.mensagem}</li>)}</ul>}
         </div>
       )}
+    </section>
+  );
+}
+
+/** Carga inicial do estoque por planilha (S3-07: área do Administrador). Tudo ou nada: com qualquer erro, nada é gravado. */
+export function CargaInicialTab() {
+  const [arquivo, setArquivo] = useState<File | null>(null);
+  const [res, setRes] = useState<CargaInicialResultado | null>(null);
+  const [erro, setErro] = useState<string | null>(null);
+  const [enviando, setEnviando] = useState(false);
+  async function enviar() {
+    if (!arquivo) return;
+    setEnviando(true); setErro(null); setRes(null);
+    try { setRes(await estoqueApi.cargaInicial(arquivo)); } catch (e) { setErro(errorMessage(e)); } finally { setEnviando(false); }
+  }
+  return (
+    <section className="narrow card">
+      <p>Envie a planilha (XLSX ou CSV) com o saldo inicial do estoque. Os itens já entram aprovados. Se houver qualquer erro, <strong>nada é gravado</strong> e o sistema lista os erros por linha.</p>
+      <Field label="Planilha"><input type="file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(e) => setArquivo(e.target.files?.[0] ?? null)} /></Field>
+      <button className="btn btn-primary" disabled={!arquivo || enviando} onClick={enviar}>{enviando ? 'Validando…' : 'Enviar'}</button>
+      <ErrorAlert erro={erro} />
+      {res && (res.gravado ? <div className="alert alert-ok">Carga gravada: {res.linhas} linha(s).</div> : (
+        <div className="alert alert-error"><p>Nada foi gravado. Corrija e reenvie:</p><ul>{res.erros.map((e) => <li key={e.linha}>Linha {e.linha}: {e.mensagem}</li>)}</ul></div>
+      ))}
     </section>
   );
 }

@@ -14,9 +14,10 @@ import type {
   CatalogoPdv, ContaReceber, FormaPagamento, HistoricoEvento, ItemEstoque, LocalEstoque, Me, Permissao,
   ProblemDetails, RelatorioResposta, Venda, VendaRequest,
 } from '../shared/api/types';
-import { PERMISSOES } from '../shared/api/types';
+import { PERFIL_ADMIN_ID, PERMISSOES } from '../shared/api/types';
 import { fromCents, toCents } from '../shared/lib/money';
 import { cpfValido, soDigitos } from '../shared/lib/cpf';
+import { uuid } from '../shared/lib/uuid';
 import { db, FORMAS, type CaixaDb, type ItemDb, type ProdutoDb, type UsuarioDb, type VendaDb } from './db';
 
 // ---------------- infraestrutura ----------------
@@ -30,7 +31,7 @@ function rota(method: string, path: string, regra: Regra, h: Handler) {
   const re = new RegExp('^' + path.replace(/:(\w+)/g, (_, k) => { keys.push(k); return '([^/]+)'; }) + '$');
   rotas.push({ method, re, keys, regra, h });
 }
-const uid = (): string => crypto.randomUUID();
+const uid = (): string => uuid(); // não crypto.randomUUID direto: ele não existe fora de https/localhost (celular pelo IP da rede)
 const now = () => new Date().toISOString();
 const ok = (body: unknown, status = 200, headers: Record<string, string> = {}): TransportResponse =>
   ({ status, headers: { 'content-type': 'application/json', ...headers }, body });
@@ -46,6 +47,31 @@ function paginar<T>(arr: T[], q: URLSearchParams) {
   return { items: arr.slice((page - 1) * pageSize, page * pageSize), page, pageSize, total: arr.length };
 }
 const perfilDe = (u: UsuarioDb) => db.perfis.find((p) => p.id === u.perfilId)!;
+/** Descrição e área de cada permissão (as mesmas da API real: usuarios.routes.ts). */
+const DESCRICOES: Record<Permissao, string> = {
+  'usuarios.gerenciar': 'Usuários e redefinição de senha', 'perfis.gerenciar': 'Perfis, permissões e limite de desconto',
+  'auditoria.consultar': 'Trilha de auditoria', 'cadastros.gerenciar': 'Categorias, parceiros, campanhas, motivos, importação',
+  'cadastros.consultar': 'Consultar cadastros', 'clientes.gerenciar': 'Clientes', 'parametros.gerenciar': 'Parâmetros e dados da instituição',
+  'entrada.registrar': 'Lotes, cadastro dos produtos do lote, descartes, etiquetas, encerrar o lote', 'triagem.reabrir': 'Reabrir lote, reverter descarte',
+  'produtos.aprovar': 'Aprovar ou devolver os produtos cadastrados nos lotes', 'parceiros.criar': 'Criar parceiro (doador) ao registrar o lote',
+  'estoque.consultar': 'Estoque, produtos e lotes (só leitura)', 'estoque.transferir': 'Transferir entre bazar e doações',
+  'estoque.ajustar': 'Baixa, ajuste de saída, preço da categoria, carga inicial',
+  'custo.consultar': 'Ver o custo (valor atribuído) dos produtos e do estoque', 'produtos.preco': 'Alterar o preço de venda do produto',
+  'produtos.desconto': 'Dar e encerrar desconto no produto', 'caixa.operar': 'Abrir/fechar caixa, vender, sangria, suprimento',
+  'venda.cancelar': 'Cancelar venda', 'venda.desconto_autorizar': 'Desconto acima do limite do perfil', 'terminais.gerenciar': 'Pontos de caixa',
+  'contas_pagar.gerenciar': 'Contas a pagar e lote de compra', 'contas_receber.receber': 'Receber fiado, extrato do cliente',
+  'contas_receber.lancar': 'Conta a receber manual', 'recebimento.estornar': 'Estornar recebimento',
+  'relatorios.consultar': 'Relatórios, prestação de contas, histórico de caixas', 'relatorios.estoque': 'Relatórios de estoque, descartes e transferências',
+  'fiscal.gerenciar': 'Regra de imposto', 'privacidade.gerenciar': 'Exportar e anonimizar titulares',
+};
+const GRUPO_DE: [string, Permissao[]][] = [
+  ['Vendas e caixa', ['caixa.operar', 'venda.cancelar', 'venda.desconto_autorizar', 'clientes.gerenciar']],
+  ['Entradas e estoque', ['entrada.registrar', 'triagem.reabrir', 'produtos.aprovar', 'parceiros.criar', 'estoque.consultar', 'estoque.transferir', 'estoque.ajustar', 'custo.consultar', 'produtos.preco', 'produtos.desconto', 'cadastros.consultar']],
+  ['Financeiro', ['contas_pagar.gerenciar', 'contas_receber.receber', 'contas_receber.lancar', 'recebimento.estornar']],
+  ['Relatórios', ['relatorios.consultar', 'relatorios.estoque']],
+  ['Administração', ['usuarios.gerenciar', 'perfis.gerenciar', 'auditoria.consultar', 'cadastros.gerenciar', 'parametros.gerenciar', 'terminais.gerenciar', 'fiscal.gerenciar', 'privacidade.gerenciar']],
+];
+const GRUPOS = Object.fromEntries(GRUPO_DE.flatMap(([g, ps]) => ps.map((p) => [p, g]))) as Record<Permissao, string>;
 const nomeUser = (id: string) => db.usuarios.find((u) => u.id === id)?.nome ?? '—';
 function auditar(user: UsuarioDb, acao: string, entidade: string, entidadeId: string) {
   // Sem PII: só ids e nome de ação (RN-29).
@@ -145,17 +171,32 @@ rota('POST', '/usuarios/:id/redefinir-senha', ['usuarios.gerenciar'], ({ user, p
   u.senha = senhaProvisoria(); u.trocarSenha = true; auditar(user, 'SENHA_REDEFINIDA', 'usuario', u.id);
   return ok({ senhaProvisoria: u.senha });
 });
-rota('GET', '/perfis', ['perfis.gerenciar', 'usuarios.gerenciar'], () => ok(db.perfis));
-rota('GET', '/permissoes', ['perfis.gerenciar'], () => ok(PERMISSOES.map((c) => ({ codigo: c, descricao: c.replace('.', ' — ').replace('_', ' ') }))));
+rota('GET', '/perfis', ['perfis.gerenciar', 'usuarios.gerenciar'], () => ok(db.perfis.filter((p) => p.ativo !== false)));
+rota('GET', '/permissoes', ['perfis.gerenciar'], () => ok(PERMISSOES.map((c) => ({ codigo: c, descricao: DESCRICOES[c], grupo: GRUPOS[c] }))));
+/** Nome de perfil único entre os ativos, sem diferença de maiúsculas (como a API real). */
+const nomePerfilUsado = (nome: string, ignorar?: string) => db.perfis.some((p) => p.ativo !== false && p.id !== ignorar && p.nome.trim().toLowerCase() === String(nome).trim().toLowerCase());
 rota('POST', '/perfis', ['perfis.gerenciar'], ({ user, body }) => {
   exigir(body?.nome, 'nome');
+  if (nomePerfilUsado(body.nome)) return problem(409, 'Já existe um perfil com este nome', 'NOME_DUPLICADO');
   const p = { id: body.id ?? uid(), nome: body.nome, padrao: false, permissoes: (body.permissoes ?? []).filter((x: string) => (PERMISSOES as readonly string[]).includes(x)), limiteDesconto: body.limiteDesconto ?? '0.00' };
   db.perfis.push(p); auditar(user, 'PERFIL_CRIADO', 'perfil', p.id); return ok(p, 201);
 });
 rota('PATCH', '/perfis/:id', ['perfis.gerenciar'], ({ user, params, body }) => {
   const p = db.perfis.find((x) => x.id === params.id); if (!p) return problem(404, 'Perfil não encontrado');
+  if (p.ativo === false) return problem(409, 'O perfil está desativado e não se edita', 'PERFIL_INATIVO');
+  if (p.padrao && body?.nome && body.nome !== p.nome) return problem(409, 'Perfis padrão não podem ser renomeados', 'PERFIL_PADRAO');
+  if (body?.nome && nomePerfilUsado(body.nome, p.id)) return problem(409, 'Já existe um perfil com este nome', 'NOME_DUPLICADO');
+  if (p.id === PERFIL_ADMIN_ID && body?.permissoes && !['usuarios.gerenciar', 'perfis.gerenciar'].every((x) => body.permissoes.includes(x))) {
+    return problem(409, 'O perfil Administrador precisa manter usuarios.gerenciar e perfis.gerenciar', 'PERFIL_ADMIN_PROTEGIDO');
+  }
   Object.assign(p, pick(body, ['nome', 'permissoes', 'limiteDesconto'])); auditar(user, 'PERFIL_ALTERADO', 'perfil', p.id);
   return ok(p);
+});
+rota('POST', '/perfis/:id/desativar', ['perfis.gerenciar'], ({ user, params }) => {
+  const p = db.perfis.find((x) => x.id === params.id); if (!p) return problem(404, 'Perfil não encontrado');
+  if (p.padrao) return problem(409, 'Perfis padrão não são desativados', 'PERFIL_PADRAO');
+  if (db.usuarios.some((u) => u.perfilId === p.id && u.ativo)) return problem(409, 'Há usuário ativo com este perfil: troque o perfil dele antes de desativar', 'PERFIL_EM_USO');
+  p.ativo = false; auditar(user, 'PERFIL_DESATIVADO', 'perfil', p.id); return ok(p);
 });
 rota('GET', '/auditoria', ['auditoria.consultar'], ({ query }) => ok(paginar(db.auditoria.filter((a) =>
   (!query.get('acao') || a.acao.includes(query.get('acao')!.toUpperCase())) && (!query.get('entidade') || a.entidade === query.get('entidade')) && noPeriodo(a.ocorridoEm, query)), query)));
@@ -237,9 +278,18 @@ function itemLoteDto(i: ItemDb) {
   return {
     id: i.id, controle: i.controle, codigo: i.codigo, descricao: i.descricao, categoriaId: i.categoriaId, categoriaNome: nomeCat(i.categoriaId),
     quantidade: i.quantidadeInicial, preco: fromCents(i.preco), valorAtribuido: fromCents(i.valorAtribuido ?? i.preco), localDestino: i.localInicial,
-    status: i.status, motivoDevolucao: i.motivoDevolucao, produto: p ? produtoDto(p) : undefined,
+    status: i.status, motivoDevolucao: i.motivoDevolucao, produto: p ? produtoDto(p) : undefined, criadoPorId: i.criadoPorId,
   };
 }
+/** Sem a permissão de ver custo (S3-05), o valor atribuído e o valor da compra não saem. */
+function semCusto<T extends Record<string, unknown>>(user: UsuarioDb, o: T): T {
+  if (perfilDe(user).permissoes.includes('custo.consultar')) return o;
+  const { valorAtribuido: _v, valorCompra: _c, ...resto } = o;
+  return resto as T;
+}
+/** Quem cadastrou não aprova nem devolve o próprio item; só o perfil Administrador pode (S3-22). */
+const podeConferir = (user: UsuarioDb, i: ItemDb) => user.perfilId === PERFIL_ADMIN_ID || !i.criadoPorId || i.criadoPorId !== user.id;
+const LEITURA_LOTES: Permissao[] = ['entrada.registrar', 'produtos.aprovar', 'estoque.consultar'];
 function loteDto(l: (typeof db.lotes)[number]) {
   const itens = db.itens.filter((i) => i.loteId === l.id);
   return {
@@ -252,14 +302,14 @@ function loteDto(l: (typeof db.lotes)[number]) {
     valorCompra: l.valorCompra !== undefined ? fromCents(l.valorCompra) : undefined, pago: l.pago,
   };
 }
-rota('GET', '/lotes', ['entrada.registrar'], ({ query }) => ok(paginar(db.lotes
+rota('GET', '/lotes', LEITURA_LOTES, ({ user, query }) => ok(paginar(db.lotes
   .filter((l) => (!query.get('parceiroId') || l.parceiroId === query.get('parceiroId')) && (!query.get('campanhaId') || l.campanhaId === query.get('campanhaId')) && (!query.get('status') || l.status === query.get('status')) && noPeriodo(l.recebidoEm, query))
-  .sort((a, b) => b.numero - a.numero).map(loteDto), query)));
-rota('GET', '/lotes/:id', ['entrada.registrar'], ({ params }) => {
+  .sort((a, b) => b.numero - a.numero).map((l) => semCusto(user, loteDto(l))), query)));
+rota('GET', '/lotes/:id', LEITURA_LOTES, ({ user, params }) => {
   const l = db.lotes.find((x) => x.id === params.id); if (!l) return problem(404, 'Lote não encontrado');
   return ok({
-    ...loteDto(l),
-    itens: db.itens.filter((i) => i.loteId === l.id).map(itemLoteDto),
+    ...semCusto(user, loteDto(l)),
+    itens: db.itens.filter((i) => i.loteId === l.id).map((i) => semCusto(user, itemLoteDto(i))),
     descartes: db.descartes.filter((d) => d.loteId === l.id).map((d) => ({ id: d.id, categoriaNome: nomeCat(d.categoriaId), motivoNome: db.motivosDescarte.find((m) => m.id === d.motivoId)?.nome ?? '—', registradoEm: d.registradoEm, revertido: d.revertido })),
   });
 });
@@ -284,7 +334,7 @@ rota('POST', '/lotes/:id/documento', ['entrada.registrar'], ({ params, body }) =
   if (!['application/pdf', 'image/png', 'image/jpeg'].includes(f.type)) return problem(415, 'Tipo de arquivo não aceito (PDF, PNG ou JPEG)', 'TIPO_INVALIDO');
   l.temAnexo = true; return { status: 204, headers: {}, body: null };
 });
-rota('GET', '/lotes/:id/documento', ['entrada.registrar'], () => ({ status: 200, headers: { 'content-type': 'text/plain' }, body: new Blob(['(anexo simulado)'], { type: 'text/plain' }) }));
+rota('GET', '/lotes/:id/documento', LEITURA_LOTES, () => ({ status: 200, headers: { 'content-type': 'text/plain' }, body: new Blob(['(anexo simulado)'], { type: 'text/plain' }) }));
 function loteAberto(id: string) {
   const l = db.lotes.find((x) => x.id === id); if (!l) falha(404, 'Lote não encontrado');
   if (l!.status !== 'ABERTO') falha(409, 'Lote já triado não aceita registros', 'LOTE_TRIADO');
@@ -320,6 +370,7 @@ rota('POST', '/lotes/:id/itens', ['entrada.registrar'], ({ user, params, body })
     categoriaId: body.categoriaId, controle: body.controle, preco: produto ? produto.preco : toCents(body.preco ?? body.valorAtribuido),
     valorAtribuido: body.valorAtribuido ? toCents(body.valorAtribuido) : undefined, loteId: l.id, criadoEm: now(), quantidadeInicial: body.quantidade,
     localInicial: body.localDestino, saldo: { BAZAR: 0, DOACOES: 0 }, produtoId: produto?.id, status: 'CADASTRADO', // sem estoque até a aprovação
+    criadoPorId: user.id,
   };
   db.itens.push(it); auditar(user, 'ITEM_CADASTRADO', 'item', it.id);
   return ok(itemLoteDto(it), 201);
@@ -351,6 +402,7 @@ function aprovarItem(it: ItemDb, user: UsuarioDb) {
 rota('POST', '/itens/:id/aprovar', ['produtos.aprovar'], ({ user, params }) => {
   const it = db.itens.find((i) => i.id === params.id); if (!it) return problem(404, 'Item não encontrado');
   if (it.status === 'DEVOLVIDO') return problem(409, 'Item devolvido: o estoquista corrige e reenvia antes da aprovação', 'ITEM_DEVOLVIDO');
+  if (it.status === 'CADASTRADO' && !podeConferir(user, it)) return problem(409, 'Quem cadastrou o item não aprova nem devolve o próprio cadastro: outra pessoa confere', 'AUTO_APROVACAO');
   if (it.status === 'CADASTRADO') aprovarItem(it, user);
   return ok(itemLoteDto(it));
 });
@@ -358,14 +410,24 @@ rota('POST', '/itens/:id/devolver', ['produtos.aprovar'], ({ user, params, body 
   const it = db.itens.find((i) => i.id === params.id); if (!it) return problem(404, 'Item não encontrado');
   exigir(String(body?.motivo ?? '').trim().length >= 5, 'motivo');
   if (it.status === 'APROVADO') return problem(409, 'Item já aprovado não é devolvido', 'ITEM_APROVADO');
+  if (!podeConferir(user, it)) return problem(409, 'Quem cadastrou o item não aprova nem devolve o próprio cadastro: outra pessoa confere', 'AUTO_APROVACAO');
   it.status = 'DEVOLVIDO'; it.motivoDevolucao = body.motivo.trim(); auditar(user, 'ITEM_DEVOLVIDO', 'item', it.id);
   return ok(itemLoteDto(it));
 });
 rota('POST', '/lotes/:id/aprovar', ['produtos.aprovar'], ({ user, params }) => {
   const l = db.lotes.find((x) => x.id === params.id); if (!l) return problem(404, 'Lote não encontrado');
-  const pend = db.itens.filter((i) => i.loteId === l.id && i.status === 'CADASTRADO');
+  const todos = db.itens.filter((i) => i.loteId === l.id && i.status === 'CADASTRADO');
+  const pend = todos.filter((i) => podeConferir(user, i)); // os próprios ficam para outra pessoa (S3-22)
   pend.forEach((i) => aprovarItem(i, user)); auditar(user, 'LOTE_APROVADO', 'lote_entrada', l.id);
-  return ok({ ...loteDto(l), aprovadosAgora: pend.length });
+  return ok({ ...semCusto(user, loteDto(l)), aprovadosAgora: pend.length, deixadosParaOutraPessoa: todos.length - pend.length });
+});
+rota('GET', '/aprovacoes', ['produtos.aprovar'], ({ user, query }) => {
+  const status = query.get('status') === 'DEVOLVIDO' ? 'DEVOLVIDO' : 'CADASTRADO';
+  return ok(db.itens.filter((i) => i.status === status).map((i) => {
+    const l = db.lotes.find((x) => x.id === i.loteId)!;
+    return { ...semCusto(user, itemLoteDto(i)), criadoPorNome: i.criadoPorId ? nomeUser(i.criadoPorId) : '—', criadoEm: i.criadoEm,
+      loteId: l.id, loteNumero: l.numero, loteTipo: l.tipo, parceiroNome: nomeParc(l.parceiroId), campanhaNome: nomeCamp(l.campanhaId), podeConferir: podeConferir(user, i) };
+  }));
 });
 rota('GET', '/produtos', ['entrada.registrar', 'estoque.consultar', 'produtos.aprovar'], ({ query }) => {
   const b = (query.get('busca') ?? '').trim().toLowerCase();
@@ -401,37 +463,50 @@ rota('GET', '/etiquetas', ['entrada.registrar'], ({ query }) => {
 });
 
 // ---------------- EST ----------------
-function itemDto(i: ItemDb): ItemEstoque {
+/** Preço efetivo do produto agora (S3-10): a mesma conta de fn_preco_efetivo na API real. */
+function efetivo(p: ProdutoDb): number {
+  const d = p.desconto;
+  if (!d || (d.ate && d.ate < localDate(now()))) return p.preco;
+  return d.tipo === 'PERCENTUAL' ? Math.max(1, Math.round((p.preco * (10_000 - d.valor)) / 10_000)) : Math.min(d.valor, p.preco);
+}
+function itemDto(i: ItemDb, user?: UsuarioDb): ItemEstoque {
   const l = db.lotes.find((x) => x.id === i.loteId)!;
-  return { id: i.id, codigo: i.codigo, descricao: i.descricao, categoriaId: i.categoriaId, categoriaNome: nomeCat(i.categoriaId), controle: i.controle, preco: fromCents(i.preco), loteId: l.id, loteNumero: l.numero, parceiroNome: nomeParc(l.parceiroId), campanhaNome: nomeCamp(l.campanhaId), saldoBazar: i.saldo.BAZAR, saldoDoacoes: i.saldo.DOACOES };
+  const p = db.produtos.find((x) => x.id === i.produtoId);
+  const preco = p ? efetivo(p) : i.preco;
+  return {
+    id: i.id, codigo: i.codigo, descricao: i.descricao, categoriaId: i.categoriaId, categoriaNome: nomeCat(i.categoriaId), controle: i.controle,
+    preco: fromCents(preco), ...(p && preco < p.preco ? { precoSemDesconto: fromCents(p.preco) } : {}), produtoId: p?.id, pecaUnica: p?.pecaUnica,
+    ...(user && perfilDe(user).permissoes.includes('custo.consultar') ? { valorAtribuido: fromCents(i.valorAtribuido ?? i.preco) } : {}),
+    loteId: l.id, loteNumero: l.numero, parceiroNome: nomeParc(l.parceiroId), campanhaNome: nomeCamp(l.campanhaId), saldoBazar: i.saldo.BAZAR, saldoDoacoes: i.saldo.DOACOES,
+  };
 }
 function mover(i: ItemDb, local: LocalEstoque, delta: number, tipo: HistoricoEvento['tipo'], user: string, descricao: string) {
   if (i.saldo[local] + delta < 0) falha(409, 'Saldo insuficiente', 'SALDO_INSUFICIENTE', `${i.descricao}: saldo ${i.saldo[local]} em ${local}`);
   i.saldo[local] += delta;
   db.movs.push({ id: uid(), itemId: i.id, tipo, quantidade: delta, local, ocorridoEm: now(), usuarioNome: user, descricao });
 }
-rota('GET', '/estoque', ['estoque.consultar'], ({ query }) => {
+rota('GET', '/estoque', ['estoque.consultar'], ({ user, query }) => {
   const b = (query.get('busca') ?? '').toLowerCase(); const local = query.get('local');
   return ok(paginar(db.itens.filter((i) => {
     const l = db.lotes.find((x) => x.id === i.loteId)!;
     return (i.saldo.BAZAR + i.saldo.DOACOES > 0) && (!local || i.saldo[local as LocalEstoque] > 0) && (!query.get('categoriaId') || i.categoriaId === query.get('categoriaId'))
       && (!query.get('parceiroId') || l.parceiroId === query.get('parceiroId')) && (!query.get('campanhaId') || l.campanhaId === query.get('campanhaId')) && (!query.get('loteId') || l.id === query.get('loteId'))
       && (!b || i.descricao.toLowerCase().includes(b) || (i.codigo ?? '').toLowerCase().includes(b));
-  }).map(itemDto), query));
+  }).map((i) => itemDto(i, user)), query));
 });
-rota('GET', '/itens/codigo/:codigo', ['estoque.consultar', 'caixa.operar'], ({ params }) => {
+rota('GET', '/itens/codigo/:codigo', ['estoque.consultar', 'caixa.operar'], ({ user, params }) => {
   const doCodigo = db.itens.filter((x) => x.status === 'APROVADO' && x.codigo === decodeURIComponent(params.codigo!).toUpperCase());
   const i = doCodigo.find((x) => x.saldo.BAZAR > 0) ?? doCodigo[0]; // a entrada que será vendida primeiro
-  return i ? ok(itemDto(i)) : problem(404, 'Código não encontrado', 'CODIGO_INEXISTENTE');
+  return i ? ok(itemDto(i, user)) : problem(404, 'Código não encontrado', 'CODIGO_INEXISTENTE');
 });
-rota('GET', '/itens/:id/historico', ['estoque.consultar'], ({ params }) => {
+rota('GET', '/itens/:id/historico', ['estoque.consultar'], ({ user, params }) => {
   const i = db.itens.find((x) => x.id === params.id); if (!i) return problem(404, 'Item não encontrado');
   const l = db.lotes.find((x) => x.id === i.loteId)!;
   const eventos: HistoricoEvento[] = [
     { ocorridoEm: l.recebidoEm, tipo: 'TRIAGEM' as const, descricao: `Lote ${l.numero} recebido — ${nomeParc(l.parceiroId) ?? nomeCamp(l.campanhaId)}`, quantidade: 0 },
     ...db.movs.filter((m) => m.itemId === i.id).map((m) => ({ ocorridoEm: m.ocorridoEm, tipo: m.tipo, descricao: m.descricao, quantidade: m.quantidade, local: m.local, usuarioNome: m.usuarioNome })),
   ].sort((a, b) => a.ocorridoEm.localeCompare(b.ocorridoEm));
-  return ok({ item: itemDto(i), eventos });
+  return ok({ item: itemDto(i, user), eventos });
 });
 function acharItem(body: any) {
   const i = body?.itemId ? db.itens.find((x) => x.id === body.itemId) : db.itens.find((x) => x.codigo === String(body?.codigo ?? '').toUpperCase());
@@ -455,20 +530,97 @@ rota('POST', '/baixas', ['estoque.ajustar'], ({ user, body }) => {
 });
 rota('POST', '/ajustes', ['estoque.ajustar'], ({ user, body }) => {
   if (idem(body?.id)) return { status: 204, headers: {}, body: null };
+  // S3-03: o ajuste de inventário é só de saída
+  exigir(body?.tipo === undefined || body.tipo === 'AJUSTE_SAIDA', 'tipo');
   const i = acharItem(body); exigir(String(body.motivo ?? '').trim().length >= 5, 'motivo');
-  const q = Number(body.quantidade) * (body.tipo === 'AJUSTE_SAIDA' ? -1 : 1);
+  const q = -Number(body.quantidade); body.tipo = 'AJUSTE_SAIDA';
   mover(i, body.local, q, body.tipo, user.nome, `Ajuste de inventário: ${body.motivo}`); auditar(user, body.tipo, 'item', i.id);
   return { status: 204, headers: {}, body: null };
 });
-rota('PATCH', '/itens/:id/preco', ['estoque.ajustar'], ({ user, params, body }) => {
+/** Preço do produto (S3-08): vale para todas as entradas; se não ficar acima do promocional, a promoção acaba. */
+function mudarPreco(user: UsuarioDb, p: ProdutoDb, body: any): TransportResponse {
+  const c = toCents(body?.preco ?? 0); exigir(c > 0, 'preco'); exigir(String(body?.motivo ?? '').trim().length >= 5, 'motivo');
+  const antes = p.preco;
+  p.preco = c; db.itens.filter((x) => x.produtoId === p.id).forEach((x) => { x.preco = p.preco; });
+  const encerrado = p.desconto?.tipo === 'PRECO' && p.desconto.valor >= c ? p.desconto : undefined;
+  historicoProduto(p.id, user, 'PRECO_PRODUTO', { preco: fromCents(antes) }, { preco: fromCents(c), motivo: body.motivo.trim() });
+  auditar(user, 'PRECO_PRODUTO', 'produto', p.id);
+  if (encerrado) {
+    p.desconto = undefined;
+    historicoProduto(p.id, user, 'DESCONTO_PRODUTO_ENCERRADO', { tipo: 'PRECO', valor: fromCents(encerrado.valor) }, { motivo: 'O preço novo ficou igual ou abaixo do preço promocional' });
+    auditar(user, 'DESCONTO_PRODUTO_ENCERRADO', 'produto', p.id);
+  }
+  return { status: 204, headers: {}, body: null };
+}
+rota('PATCH', '/itens/:id/preco', ['produtos.preco'], ({ user, params, body }) => {
   const i = db.itens.find((x) => x.id === params.id); if (!i) return problem(404, 'Item não encontrado');
   const p = db.produtos.find((x) => x.id === i.produtoId); if (!p) return problem(409, 'Item por categoria usa o preço padrão da categoria', 'PRECO_DA_CATEGORIA');
-  // o preço é do produto: vale para todas as entradas
-  p.preco = toCents(body.preco); db.itens.filter((x) => x.produtoId === p.id).forEach((x) => { x.preco = p.preco; });
-  auditar(user, 'PRECO_PRODUTO', 'produto', p.id); return { status: 204, headers: {}, body: null };
+  return mudarPreco(user, p, body);
+});
+// ---------------- produto (S3-04, S3-08, S3-09) ----------------
+const eventosProduto = new Map<string, { ocorridoEm: string; tipo: string; usuarioNome: string; antes?: Record<string, unknown>; depois?: Record<string, unknown> }[]>();
+function historicoProduto(id: string, user: UsuarioDb, tipo: string, antes?: Record<string, unknown>, depois?: Record<string, unknown>) {
+  eventosProduto.set(id, [...(eventosProduto.get(id) ?? []), { ocorridoEm: now(), tipo, usuarioNome: user.nome, antes, depois }]);
+}
+rota('GET', '/produtos/:id', ['estoque.consultar', 'entrada.registrar', 'produtos.aprovar'], ({ user, params }) => {
+  const p = db.produtos.find((x) => x.id === params.id); if (!p) return problem(404, 'Produto não encontrado');
+  const verCusto = perfilDe(user).permissoes.includes('custo.consultar');
+  const its = db.itens.filter((i) => i.produtoId === p.id);
+  const entradas = its.map((i) => {
+    const l = db.lotes.find((x) => x.id === i.loteId)!;
+    return { itemId: i.id, loteId: l.id, loteNumero: l.numero, recebidoEm: l.recebidoEm, origem: [nomeParc(l.parceiroId), nomeCamp(l.campanhaId)].filter(Boolean).join(' · ') || undefined,
+      status: i.status, quantidade: i.quantidadeInicial, saldoBazar: i.saldo.BAZAR, saldoDoacoes: i.saldo.DOACOES, ...(verCusto ? { valorAtribuido: fromCents(i.valorAtribuido ?? i.preco) } : {}) };
+  });
+  const LOCAL_MOV: Record<string, 'origem' | 'destino'> = {};
+  const eventos = [
+    ...db.movs.filter((m) => its.some((i) => i.id === m.itemId)).map((m) => ({
+      ocorridoEm: m.ocorridoEm, tipo: m.tipo, usuarioNome: m.usuarioNome, loteNumero: db.lotes.find((l) => l.id === its.find((i) => i.id === m.itemId)!.loteId)!.numero,
+      quantidade: Math.abs(m.quantidade), [LOCAL_MOV[m.tipo] ?? (m.quantidade < 0 ? 'origem' : 'destino')]: m.local, detalhe: m.descricao,
+    })),
+    ...(eventosProduto.get(p.id) ?? []),
+  ].sort((a, b) => a.ocorridoEm.localeCompare(b.ocorridoEm));
+  const d = p.desconto;
+  return ok({
+    ...produtoDto(p), desconto: undefined, categoriaNome: nomeCat(p.categoriaId), precoEfetivo: fromCents(efetivo(p)), ativo: true, criadoEm: its[0]?.criadoEm ?? now(),
+    ...(d ? { desconto: { tipo: d.tipo, valor: fromCents(d.valor), ate: d.ate, motivo: d.motivo, porNome: d.porNome, em: d.em, vigente: !d.ate || d.ate >= localDate(now()) } } : {}),
+    saldoBazar: entradas.reduce((s, e) => s + e.saldoBazar, 0), saldoDoacoes: entradas.reduce((s, e) => s + e.saldoDoacoes, 0), entradas, eventos,
+  });
+});
+rota('PATCH', '/produtos/:id', ['entrada.registrar'], ({ user, params, body }) => {
+  const p = db.produtos.find((x) => x.id === params.id); if (!p) return problem(404, 'Produto não encontrado');
+  const campos = pick(body, ['tituloEtiqueta', 'nome', 'modelo', 'marca', 'ano', 'tipo', 'tamanho', 'cor', 'condicao']);
+  if (!Object.keys(campos).length || Object.keys(body ?? {}).some((k) => !(k in campos))) return problem(400, 'Dados inválidos', 'VALIDACAO');
+  const antes = pick(p, Object.keys(campos));
+  Object.assign(p, Object.fromEntries(Object.entries(campos).map(([k, v]) => [k, v ?? undefined])));
+  if (campos.nome) db.itens.filter((i) => i.produtoId === p.id && i.controle === 'ETIQUETADO').forEach((i) => { i.descricao = p.nome; });
+  historicoProduto(p.id, user, 'PRODUTO_ALTERADO', antes, campos); auditar(user, 'PRODUTO_ALTERADO', 'produto', p.id);
+  return { status: 204, headers: {}, body: null };
+});
+rota('PATCH', '/produtos/:id/preco', ['produtos.preco'], ({ user, params, body }) => {
+  const p = db.produtos.find((x) => x.id === params.id); if (!p) return problem(404, 'Produto não encontrado');
+  return mudarPreco(user, p, body);
+});
+rota('PUT', '/produtos/:id/desconto', ['produtos.desconto'], ({ user, params, body }) => {
+  const p = db.produtos.find((x) => x.id === params.id); if (!p) return problem(404, 'Produto não encontrado');
+  const v = toCents(body?.valor ?? 0);
+  exigir(body?.tipo === 'PERCENTUAL' || body?.tipo === 'PRECO', 'tipo');
+  exigir(v > 0 && (body.tipo === 'PERCENTUAL' ? v < 10_000 : v < p.preco), 'valor');
+  exigir(!body.ate || body.ate >= localDate(now()), 'ate');
+  exigir(String(body.motivo ?? '').trim().length >= 5, 'motivo');
+  p.desconto = { tipo: body.tipo, valor: v, ate: body.ate || undefined, motivo: body.motivo.trim(), porNome: user.nome, em: now() };
+  historicoProduto(p.id, user, 'DESCONTO_PRODUTO', undefined, { tipo: body.tipo, valor: fromCents(v), ate: body.ate, motivo: body.motivo.trim() });
+  auditar(user, 'DESCONTO_PRODUTO', 'produto', p.id); return ok({ ok: true });
+});
+rota('POST', '/produtos/:id/desconto/encerrar', ['produtos.desconto'], ({ user, params, body }) => {
+  const p = db.produtos.find((x) => x.id === params.id); if (!p) return problem(404, 'Produto não encontrado');
+  exigir(String(body?.motivo ?? '').trim().length >= 5, 'motivo');
+  if (!p.desconto) return problem(409, 'O produto não tem desconto', 'SEM_DESCONTO');
+  p.desconto = undefined; historicoProduto(p.id, user, 'DESCONTO_PRODUTO_ENCERRADO', undefined, { motivo: body.motivo.trim() });
+  auditar(user, 'DESCONTO_PRODUTO_ENCERRADO', 'produto', p.id); return { status: 204, headers: {}, body: null };
 });
 rota('PATCH', '/categorias/:id/preco', ['estoque.ajustar'], ({ user, params, body }) => {
   const c = db.categorias.find((x) => x.id === params.id); if (!c) return problem(404, 'Categoria não encontrada');
+  exigir(toCents(body?.preco ?? 0) > 0, 'preco'); exigir(String(body?.motivo ?? '').trim().length >= 5, 'motivo');
   c.precoPadrao = fromCents(toCents(body.preco)); db.itens.filter((i) => i.categoriaId === c.id && i.controle === 'CATEGORIA').forEach((i) => { i.preco = toCents(body.preco); });
   auditar(user, 'PRECO_CATEGORIA', 'categoria', c.id); return { status: 204, headers: {}, body: null };
 });
@@ -487,7 +639,7 @@ rota('GET', '/pdv/catalogo', ['caixa.operar'], ({ headers }) => {
     })),
     // um por produto com saldo no Bazar, somando as entradas aprovadas
     itensEtiquetados: db.produtos.map((p) => ({ p, saldo: db.itens.filter((i) => i.produtoId === p.id).reduce((s, i) => s + i.saldo.BAZAR, 0) }))
-      .filter((x) => x.saldo > 0).map(({ p, saldo }) => ({ itemId: p.id, codigo: p.codigo, descricao: p.nome, preco: fromCents(p.preco), saldoBazar: saldo, pecaUnica: p.pecaUnica })),
+      .filter((x) => x.saldo > 0).map(({ p, saldo }) => ({ itemId: p.id, codigo: p.codigo, descricao: p.nome, preco: fromCents(efetivo(p)), ...(efetivo(p) < p.preco ? { precoSemDesconto: fromCents(p.preco) } : {}), saldoBazar: saldo, pecaUnica: p.pecaUnica })),
     clientesFiado: db.clientes.filter((c) => c.ativo && !c.anonimizado).map((c) => ({ id: c.id, nome: c.nome, telefone: c.telefone })),
     regrasFiscais: db.regrasFiscais.filter((r) => !r.vigenciaFim),
     cpfObrigatorio: cpfConfig().obrigatorio, cpfLimiteMensal: cpfConfig().limiteCents / 100,
@@ -535,8 +687,10 @@ function processarVenda(id: string, req: VendaRequest, user: UsuarioDb): VendaDb
         for (const i of cand) {
           if (!resta) break; const q = Math.min(resta, i.saldo.BAZAR);
           mover(i, 'BAZAR', -q, 'VENDA', user.nome, 'Venda');
-          alocacoes.push({ itemId: i.id, quantidade: q, precoUnit: p!.preco }); resta -= q;
-          linhas.push({ descricao: p!.nome, quantidade: q, precoUnitario: fromCents(p!.preco), total: fromCents(p!.preco * q), loteNumero: db.lotes.find((l) => l.id === i.loteId)!.numero });
+          // preço com o desconto vigente do produto (S3-10); o de tabela fica para o relatório (S3-11)
+          const pu = efetivo(p!);
+          alocacoes.push({ itemId: i.id, quantidade: q, precoUnit: pu, ...(pu < p!.preco ? { precoTabela: p!.preco } : {}) }); resta -= q;
+          linhas.push({ descricao: p!.nome, quantidade: q, precoUnitario: fromCents(pu), total: fromCents(pu * q), loteNumero: db.lotes.find((l) => l.id === i.loteId)!.numero });
         }
         if (resta > 0) falha(409, 'Saldo insuficiente', 'SALDO_INSUFICIENTE', `${p!.nome}: faltam ${resta}`);
       } else {
@@ -835,9 +989,12 @@ function relatorio(tipo: string, q: URLSearchParams): RelatorioResposta {
           linhas: [...grupos].sort((a, b) => a[0].localeCompare(b[0])).map(([grupo, g]) => ({ grupo, vendas: g.vendas.size, total: fromCents(g.cents) })),
           totais: { total: fromCents([...grupos.values()].reduce((s, g) => s + g.cents, 0)) }, blocos };
       }
-      return { titulo: 'Vendas concluídas no período', colunas: [{ chave: 'numero', rotulo: 'Nº', tipo: 'number' }, { chave: 'data', rotulo: 'Data', tipo: 'date' }, { chave: 'operador', rotulo: 'Operador' }, { chave: 'total', rotulo: 'Total', tipo: 'money' }],
-        linhas: conc.map((v) => ({ numero: v.numero, data: v.ocorridaEm, operador: v.operadorNome, total: v.total })),
-        totais: { numero: conc.length, total: soma(conc) }, blocos };
+      // S3-11: o desconto do produto (promoção) à parte do desconto do PDV
+      const descProd = (v: VendaDb) => v.alocacoes.reduce((s, a) => s + (a.precoTabela ? (a.precoTabela - a.precoUnit) * a.quantidade : 0), 0);
+      return { titulo: 'Vendas concluídas no período', colunas: [{ chave: 'numero', rotulo: 'Nº', tipo: 'number' }, { chave: 'data', rotulo: 'Data', tipo: 'date' }, { chave: 'operador', rotulo: 'Operador' },
+        { chave: 'descontoProduto', rotulo: 'Desconto do produto', tipo: 'money' }, { chave: 'descontoPdv', rotulo: 'Desconto no PDV', tipo: 'money' }, { chave: 'total', rotulo: 'Total', tipo: 'money' }],
+        linhas: conc.map((v) => ({ numero: v.numero, data: v.ocorridaEm, operador: v.operadorNome, descontoProduto: fromCents(descProd(v)), descontoPdv: v.desconto, total: v.total })),
+        totais: { numero: conc.length, descontoProduto: fromCents(conc.reduce((s, v) => s + descProd(v), 0)), descontoPdv: fromCents(conc.reduce((s, v) => s + toCents(v.desconto), 0)), total: soma(conc) }, blocos };
     }
     case 'estoque': return { titulo: 'Posição de estoque', colunas: [{ chave: 'categoria', rotulo: 'Categoria' }, { chave: 'bazar', rotulo: 'Bazar', tipo: 'number' }, { chave: 'doacoes', rotulo: 'Doações', tipo: 'number' }],
       linhas: db.categorias.map((c) => ({ categoria: c.nome, bazar: db.itens.filter((i) => i.categoriaId === c.id).reduce((s, i) => s + i.saldo.BAZAR, 0), doacoes: db.itens.filter((i) => i.categoriaId === c.id).reduce((s, i) => s + i.saldo.DOACOES, 0) })) };
@@ -864,7 +1021,10 @@ function relatorio(tipo: string, q: URLSearchParams): RelatorioResposta {
 }
 rota('GET', '/relatorios/:tipo', ['relatorios.consultar', 'relatorios.estoque'], ({ user, params, query }) => {
   if (!['estoque', 'descartes', 'transferencias'].includes(params.tipo!) && !perfilDe(user).permissoes.includes('relatorios.consultar')) return problem(403, 'Você não tem permissão para esta ação', 'SEM_PERMISSAO');
-  const r = relatorio(params.tipo!, query); const fmt = query.get('formato') ?? 'json';
+  const bruto = relatorio(params.tipo!, query); const fmt = query.get('formato') ?? 'json';
+  // sem "ver custo" (S3-05), a coluna de valor atribuído some
+  const tira = <T extends { colunas: { chave: string }[]; linhas: Record<string, unknown>[] }>(x: T): T => ({ ...x, colunas: x.colunas.filter((c) => c.chave !== 'valorAtribuido'), linhas: x.linhas.map(({ valorAtribuido: _v, ...l }) => l) });
+  const r = perfilDe(user).permissoes.includes('custo.consultar') ? bruto : { ...tira(bruto), ...(bruto.blocos ? { blocos: bruto.blocos.map(tira) } : {}) };
   if (fmt === 'json') return ok(r);
   const secao = (x: typeof r) => [x.colunas.map((c) => c.rotulo).join(';'), ...x.linhas.map((l) => x.colunas.map((c) => `"${String(l[c.chave] ?? '').replace(/"/g, '""')}"`).join(';'))];
   const csv = [...secao(r), ...(r.blocos ?? []).flatMap((b) => ['', b.titulo, ...secao(b)])].join('\n');

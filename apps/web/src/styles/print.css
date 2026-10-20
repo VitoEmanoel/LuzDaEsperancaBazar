@@ -7,4 +7,8 @@
   .comprovante { width: 80mm; font-size: 12px; }
   .aviso-nao-fiscal { border-color: #000; }
   .etiqueta { break-inside: avoid; border-color: #999; }
+  /* botões e avisos da tela não vão para o papel; tabela larga sai inteira (sem rolagem) */
+  .no-print, .print-area .no-print * { display: none !important; }
+  .print-area .tabela-rolavel { overflow: visible; }
+  .print-area.fechamento { box-shadow: none; border: 0; }
 }

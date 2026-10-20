@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { authApi } from '../auth.api';
 import { errorMessage } from '../../../shared/api/http';
 import { useAuth } from '../AuthContext';
-import { ErrorAlert, Field } from '../../../shared/components/ui';
+import { CampoSenha, ErrorAlert, Field } from '../../../shared/components/ui';
 import { useToast } from '../../../shared/components/Toast';
 import { BrandMark } from '../../../shared/components/BrandMark';
 
@@ -44,9 +44,9 @@ export function TrocarSenhaPage() {
       <form className="card login-card" onSubmit={salvar} noValidate>
         <h1>Trocar senha</h1>
         {me?.trocarSenha && <div className="alert alert-info">Você está usando uma senha provisória. Defina uma nova senha para continuar.</div>}
-        <Field label="Senha atual"><input type="password" value={atual} onChange={(e) => setAtual(e.target.value)} autoComplete="current-password" autoFocus /></Field>
-        <Field label="Nova senha" hint="Mínimo de 8 caracteres."><input type="password" value={nova} onChange={(e) => setNova(e.target.value)} autoComplete="new-password" /></Field>
-        <Field label="Confirmar nova senha"><input type="password" value={conf} onChange={(e) => setConf(e.target.value)} autoComplete="new-password" /></Field>
+        <Field label="Senha atual"><CampoSenha value={atual} onChange={(e) => setAtual(e.target.value)} autoComplete="current-password" autoFocus /></Field>
+        <Field label="Nova senha" hint="Mínimo de 8 caracteres."><CampoSenha value={nova} onChange={(e) => setNova(e.target.value)} autoComplete="new-password" /></Field>
+        <Field label="Confirmar nova senha"><CampoSenha value={conf} onChange={(e) => setConf(e.target.value)} autoComplete="new-password" /></Field>
         {problemas.map((p) => <small key={p} className="field-error">{p}</small>)}
         <ErrorAlert erro={erro} />
         <button className="btn btn-primary btn-block" disabled={enviando || problemas.length > 0 || !atual || !nova || !conf}>Salvar</button>

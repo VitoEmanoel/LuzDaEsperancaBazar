@@ -31,7 +31,7 @@ Quatro perfis padrão: **Admin, Estoquista, Vendedor e Financeiro**. O Admin cri
 | PDV, abrir e fechar caixa, sangria e suprimento | sim (só o dele) | — | sim (só o dele) | — |
 | Caixas do dia (todos, com detalhe) | sim | — | — | sim |
 | Lotes e cadastro de produtos | ver | sim (doações) | — | ver; lança compra |
-| Aprovação de produtos | sim | — | — | — |
+| Aprovação de produtos | sim | sim (não o que ele cadastrou) | — | — |
 | Estoque, transferência, etiquetas | sim | sim | só "restam N" no PDV | ver |
 | Custo / valor atribuído | sim | sim | — | sim |
 | Preço do produto | sim | sim | — | — |
@@ -179,21 +179,28 @@ Perfis e visibilidade
 ### Sprint 3 — Aprovação, estoque unificado e desconto (16/11 a 22/11)
 **Objetivo:** o Admin aprova; o estoque vira uma tela só; desconto no produto.
 
-- [ ] S3-01 Tela **Aprovação de produtos** (Admin): fila, aprovar item a item ou lote inteiro, devolver com motivo
-- [ ] S3-02 Estoque: baixa, ajuste de saída e alteração de preço como ações na lista de itens
-- [ ] S3-03 Remover a opção de **entrada** do ajuste (tela e API)
-- [ ] S3-04 Tela Produto: dados, edição dos campos e histórico
-- [ ] S3-05 Custo visível ao estoquista, ao Admin e ao Financeiro; escondido do Vendedor
-- [ ] S3-06 Manter a transferência Bazar e Doações
-- [ ] S3-07 Mover a carga inicial para a área do Admin
-- [ ] S3-08 Preço do produto alterável por Admin e Estoquista, com motivo e auditoria
-- [ ] S3-09 **Desconto no produto** (Financeiro e Admin): percentual ou preço promocional, motivo, validade, auditoria
-- [ ] S3-10 O PDV e as consultas passam a usar o preço efetivo (com desconto)
-- [ ] S3-11 Relatórios mostram o desconto concedido
-- [ ] S3-12 Financeiro: consulta de lotes e produtos em modo leitura
-- [ ] S3-15 Lista de Estoque com colunas claras: "Quantidade no Bazar" e "Quantidade em Doações" (hoje só "Bazar" e "Doações", o que confundiu) e uma coluna **Total** por produto *(proposta; o humano confirma)*
-- [ ] S3-13 Testes por perfil para as telas e ações novas
-- [ ] S3-14 Rodar a definição de pronto; revisão pelo agy; atualizar a documentação
+- [x] S3-01 Tela **Aprovação de produtos** (Admin): fila, aprovar item a item ou lote inteiro, devolver com motivo
+- [x] S3-02 Estoque: baixa, ajuste de saída e alteração de preço como ações na lista de itens
+- [x] S3-03 Remover a opção de **entrada** do ajuste (tela e API)
+- [x] S3-04 Tela Produto: dados, edição dos campos e histórico
+- [x] S3-05 Custo visível ao estoquista, ao Admin e ao Financeiro; escondido do Vendedor
+- [x] S3-06 Manter a transferência Bazar e Doações
+- [x] S3-07 Mover a carga inicial para a área do Admin
+- [x] S3-08 Preço do produto alterável por Admin e Estoquista, com motivo e auditoria
+- [x] S3-09 **Desconto no produto** (Financeiro e Admin): percentual ou preço promocional, motivo, validade, auditoria
+- [x] S3-10 O PDV e as consultas passam a usar o preço efetivo (com desconto)
+- [x] S3-11 Relatórios mostram o desconto concedido
+- [x] S3-12 Financeiro: consulta de lotes e produtos em modo leitura
+- [x] S3-15 Lista de Estoque com colunas claras: "Quantidade no Bazar" e "Quantidade em Doações" (hoje só "Bazar" e "Doações", o que confundiu) e uma coluna **Total** por produto *(confirmado pelo humano em 20/10/2026)*
+- [x] S3-16 Auditoria da alteração de parceiro (`PATCH /parceiros`) sem dado pessoal: hoje grava o nome e o CPF mascarado no antes/depois; passar a registrar só os campos alterados, sem o valor dos dados pessoais *(decisão do humano, 20/10/2026: entra na Sprint 3)*
+- [x] S3-17 Botão **Imprimir** do caixa fechado (`FecharCaixaPage`) imprime página em branco: a impressão só mostra `.print-area` e essa tela não tem; marcar o resumo do fechamento como área de impressão e esconder os botões no papel *(confirmado pelo humano em 20/10/2026)*
+- [x] S3-18 **Perfis e permissões** (Admin): mostrar cada permissão pela descrição em português (a API já tem em `DESCRICOES`), agrupada por área (Vendas e caixa, Entradas e estoque, Financeiro, Relatórios, Administração), com "marcar todas" por grupo; a demonstração com as mesmas descrições *(pedido do humano, 20/10/2026)*
+- [x] S3-19 **Copiar perfil**: criar um perfil novo a partir de outro (ex.: copiar o Administrador para fazer outro perfil de administração, ou o Estoquista e acrescentar o PDV) *(pedido do humano, 20/10/2026)*
+- [x] S3-20 **Desativar perfil** criado por engano: só se nenhum usuário ativo usar o perfil; perfis padrão não se desativam; nada se apaga. Rota nova na API com `perfis.gerenciar`, auditoria e teste de 403 *(pedido do humano, 20/10/2026)*
+- [x] S3-21 Conferir no navegador que o Admin cria perfil com permissões personalizadas, cria outro usuário Administrador e que o perfil novo vê só o que é dele (menu e 403 da API) *(pedido do humano, 20/10/2026; hoje já é possível, falta provar na tela)*
+- [x] S3-22 **Estoquista também aprova** e devolve os produtos dos lotes (triagem junto com o Admin), **mas não o que ele mesmo cadastrou**: outra pessoa confere. O Administrador continua aprovando qualquer item. Vale na API e no banco *(decisão do humano, 20/10/2026)*
+- [x] S3-13 Testes por perfil para as telas e ações novas
+- [x] S3-14 Rodar a definição de pronto; revisão pelo agy; atualizar a documentação
 
 ### Sprint 4 — Etiquetas e PDV com produto (23/11 a 29/11)
 **Objetivo:** etiquetas em lote e o PDV lendo o produto de código único. As regras de venda e caixa foram para a Sprint 1B.
@@ -285,6 +292,7 @@ Ficha de cada tela (objetivo, quem usa, esboço, ações, requisitos funcionais 
 Fechamento
 - [ ] S7-16 Revisão de cada lote de fichas pelo agy, com os achados conferidos
 - [ ] S7-17 Product backlog formal e sprints seguintes
+- [ ] S7-18 Atualizar os três documentos de planejamento da faculdade (WBS/EAP, Product Backlog e Sprint Planning, em `/home/VT/Documentos/referencia/docBazar/`, fonte em `docBazar/fonte/`) com o que o protótipo validou, incluindo os pedidos novos (perfis e permissões, celular, impressão do fechamento) *(decisão do humano, 20/10/2026: depois de finalizar o protótipo)*
 
 ---
 
@@ -293,9 +301,9 @@ Fechamento
 - [ ] P-02 Modelo da impressora e tamanho do rolo de etiqueta (bloqueia S4-06)
 - [ ] P-03 Onde hospedar com HTTPS e quem mantém (bloqueia S5-13; a câmera no celular só abre com HTTPS)
 - [x] P-04 Valor recebido obrigatório: **em todas as formas de pagamento** (decidido pelo humano em 19/10/2026; vai para a S1B-04 a S1B-06)
-- [ ] P-05 Desconto: a validade é obrigatória ou opcional (S3-09)
+- [x] P-05 Desconto: a validade é **opcional** (decidido em 20/10/2026): sem data de fim, vale até alguém encerrar. O desconto manual do PDV **pode somar** ao do produto, calculado sobre o preço já com desconto e dentro do limite do perfil. O custo tem **permissão própria** ("Ver custo"), ligada no Admin, no Estoquista e no Financeiro
 - [x] P-06 Prefixo do código do produto e campos obrigatórios do cadastro (S2-03). Decidido em 19/10/2026: o código continua **`BZ` + 6 dígitos**, na mesma sequência de hoje (as etiquetas já impressas valem). Obrigatórios: **título da etiqueta, nome, categoria, preço, quantidade e valor atribuído**; modelo, marca, ano, tipo, tamanho, cor e condição são opcionais
-- [ ] P-07 Financeiro e Admin com consulta de lotes: confirmar que é só leitura (S3-12)
+- [x] P-07 Financeiro consulta lotes e produtos **só para leitura** (confirmado em 20/10/2026; S3-12)
 - [ ] P-08 "Pouco saldo" no dashboard do Estoque: um valor único (sugestão: 5 unidades, configurável pelo Admin em Parâmetros) ou um valor por categoria (S5-15, S5-17)
 - [ ] P-09 O Vendedor pode **ver** o limite da sangria? Para bloquear com uma mensagem útil ("só há R$ X em dinheiro no caixa"), o sistema mostra o dinheiro da gaveta; isso desfaz o fechamento "às cegas". Confirmar (S1B-07)
 - [x] P-10 Pagar conta "com dinheiro do caixa" e receber fiado na gaveta exigem caixa aberto de quem faz. Decidido em 19/10/2026: o **Administrador** pode abrir caixa (S1B-16). O Financeiro continua sem caixa; se ele precisar dessas duas operações na gaveta, o Admin ou um perfil personalizado as faz
@@ -303,6 +311,7 @@ Fechamento
 - [x] P-12 CPF e limite: o limite é em **valor (R$) por CPF por mês**, por exemplo R$ 2.000 ou R$ 5.000 (decidido pelo humano em 19/10/2026). **O Admin decide, em Parâmetros, se o CPF é obrigatório** (decidido em 19/10/2026). Se não for obrigatório, sem CPF o limite não vale para aquela venda.
 - [x] P-13 Esc no PDV com o campo do código vazio tira uma unidade da última linha. Decidido em 19/10/2026: **pedir confirmação** antes de tirar (tarefa S4-19)
 - [x] P-14 Decisões da Sprint 2 (19/10/2026): a **venda por categoria continua** ao lado do produto de código único; item **devolvido** pelo Admin fica editável e o estoquista reenvia; a nova entrada **não muda o preço** (o preço é do produto; mudar é a S3-08); no lote de doação a **campanha é opcional** e o parceiro do lote não precisa ser o da campanha
+- [x] P-16 Quem aprova a entrada no estoque: **Admin e Estoquista** (decidido em 20/10/2026, muda a decisão da Sprint 2 de só o Admin). O Estoquista não aprova nem devolve o item que ele mesmo cadastrou; o Admin aprova qualquer um (S3-22)
 - [x] P-15 Admin sem segundo aprovador: decidido em 19/10/2026 que o cancelamento **pede motivo**. Já é assim para todos os perfis (mínimo de 5 caracteres, testado no smoke); nada a mudar
 
 ## 4. Riscos
