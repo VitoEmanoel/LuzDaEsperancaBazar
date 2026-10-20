@@ -206,17 +206,17 @@ Perfis e visibilidade
 **Objetivo:** etiquetas em lote e o PDV lendo o produto de código único. As regras de venda e caixa foram para a Sprint 1B.
 
 Etiquetas
-- [ ] S4-01 Parâmetro de tamanho do rolo (Admin)
-- [ ] S4-02 Etiqueta com título, valor e código Code 128, com página no tamanho do rolo
-- [ ] S4-03 Tela **Imprimir etiquetas**: lista com busca, seleção, quantidade livre por produto e pré-visualização
-- [ ] S4-04 Impressão individual ou em lote, também a partir do Estoque
-- [ ] S4-05 Histórico de impressão (quem, quando, quantas) **(corte possível)**
+- [x] S4-01 Parâmetro de tamanho do rolo (Admin)
+- [x] S4-02 Etiqueta com título, valor e código Code 128, com página no tamanho do rolo
+- [x] S4-03 Tela **Imprimir etiquetas**: lista com busca, seleção, quantidade livre por produto e pré-visualização
+- [x] S4-04 Impressão individual ou em lote, também a partir do Estoque
+- [x] S4-05 Histórico de impressão (quem, quando, quantas) **(corte possível)**
 - [ ] S4-06 Teste de impressão numa impressora real, quando houver
 
 PDV e caixa
 - S4-07 ~~Abertura de caixa com **saldo inicial (troco)** obrigatório~~ → movida para a S1B-08
-- [ ] S4-08 PDV: ao ler o código, mostrar produto, preço atual e "restam N"
-- [ ] S4-09 Padrão `n*código`; recusar quantidade maior que 1 em peça única
+- [x] S4-08 PDV: ao ler o código, mostrar produto, preço atual e "restam N"
+- [x] S4-09 Padrão `n*código`; recusar quantidade maior que 1 em peça única
 - S4-10 ~~Alerta de estoque insuficiente~~ → movida para a S1B-01
 - S4-11 ~~Cancelar item do carrinho antes de pagar; remover o desconto da tela do Vendedor~~ → movida para a S1B-03
 - S4-12 ~~Sangria e suprimento no PDV (conferir o que já existe)~~ → movida para a S1B-07
@@ -225,8 +225,9 @@ PDV e caixa
 - S4-15 ~~Fechamento com a **linha do tempo completa**: cada venda, sangria e suprimento, da abertura ao fechamento~~ → movida para a S1B-09
 - S4-16 ~~PDF do fechamento de caixa~~ → movida para a S1B-11
 - S4-17 ~~PDV responsivo (celular, tablet e computador)~~ → movida para a S1B-12
-- [ ] S4-19 Esc no PDV com o campo vazio pede confirmação antes de tirar uma unidade (P-13)
-- [ ] S4-18 Testes e rodar a definição de pronto; análise das tarefas e QA pelo agy; atualizar a documentação
+- [x] S4-19 Esc no PDV com o campo vazio pede confirmação antes de tirar uma unidade (P-13)
+- [x] S4-20 Campo de senha: o botão Mostrar/Esconder fica dentro do `<label>` e o leitor de tela lê "Senha Mostrar a senha"; o campo deve se chamar só "Senha" *(achado nos testes de tela da Sprint 3; o humano mandou entrar na Sprint 4, 20/10/2026)*
+- [x] S4-18 Testes e rodar a definição de pronto; análise das tarefas e QA pelo agy; atualizar a documentação
 
 ### Sprint 5 — Importação, visões, dashboards e câmera (30/11 a 06/12)
 **Objetivo:** importar lotes, dar a cada perfil suas visões e dashboards com gráficos e filtros, e ler pela câmera.
@@ -297,8 +298,8 @@ Fechamento
 ---
 
 ## 3. Pendências abertas
-- [ ] P-01 Modelo do bipador (provavelmente 1D; o Code 128 funciona nos dois tipos)
-- [ ] P-02 Modelo da impressora e tamanho do rolo de etiqueta (bloqueia S4-06)
+- [x] P-01 Bipador: o modelo ainda não existe; a etiqueta usa código de barras comum (Code 128), então basta um **leitor 1D** (decidido pelo humano em 20/10/2026)
+- [ ] P-02 Modelo da impressora e tamanho do rolo de etiqueta (bloqueia só a S4-06). Ainda não há impressora (20/10/2026): o **tamanho do rolo é configurável** pelo Admin (S4-01), com um padrão até a compra
 - [ ] P-03 Onde hospedar com HTTPS e quem mantém (bloqueia S5-13; a câmera no celular só abre com HTTPS)
 - [x] P-04 Valor recebido obrigatório: **em todas as formas de pagamento** (decidido pelo humano em 19/10/2026; vai para a S1B-04 a S1B-06)
 - [x] P-05 Desconto: a validade é **opcional** (decidido em 20/10/2026): sem data de fim, vale até alguém encerrar. O desconto manual do PDV **pode somar** ao do produto, calculado sobre o preço já com desconto e dentro do limite do perfil. O custo tem **permissão própria** ("Ver custo"), ligada no Admin, no Estoquista e no Financeiro
@@ -312,6 +313,8 @@ Fechamento
 - [x] P-13 Esc no PDV com o campo do código vazio tira uma unidade da última linha. Decidido em 19/10/2026: **pedir confirmação** antes de tirar (tarefa S4-19)
 - [x] P-14 Decisões da Sprint 2 (19/10/2026): a **venda por categoria continua** ao lado do produto de código único; item **devolvido** pelo Admin fica editável e o estoquista reenvia; a nova entrada **não muda o preço** (o preço é do produto; mudar é a S3-08); no lote de doação a **campanha é opcional** e o parceiro do lote não precisa ser o da campanha
 - [x] P-16 Quem aprova a entrada no estoque: **Admin e Estoquista** (decidido em 20/10/2026, muda a decisão da Sprint 2 de só o Admin). O Estoquista não aprova nem devolve o item que ele mesmo cadastrou; o Admin aprova qualquer um (S3-22)
+- [x] P-17 Valor potencial do relatório de posição de estoque: continua pelo **preço normal** do produto, sem o desconto (decidido pelo humano em 20/10/2026)
+- [x] P-18 Decisões da Sprint 4 (humano, 20/10/2026): a etiqueta imprime **só o preço normal** do produto (o desconto aparece no caixa; não obriga reetiquetar); rolo padrão **50 × 30 mm** até a impressora chegar (o Admin muda); o histórico de impressão (S4-05) vai **na auditoria**, sem tabela nova; dá para imprimir etiqueta de **qualquer produto ativo**, mesmo sem saldo no Bazar; código de barras passa de Code 39 para **Code 128** (as etiquetas já coladas continuam lidas); permissão nova **Imprimir etiquetas** (Admin e Estoquista, como a S1-11 previa). PDV: `n*código` acima do saldo é **recusado inteiro** com aviso; "restam N" **só na mensagem do bip**; a confirmação do Esc abre com o foco em **Cancelar**, tira com **S** ou clique em **Tirar**, ignora a digitação rápida do leitor e vale também para o botão "Remover último"
 - [x] P-15 Admin sem segundo aprovador: decidido em 19/10/2026 que o cancelamento **pede motivo**. Já é assim para todos os perfis (mínimo de 5 caracteres, testado no smoke); nada a mudar
 
 ## 4. Riscos

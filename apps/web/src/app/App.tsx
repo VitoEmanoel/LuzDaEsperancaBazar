@@ -18,6 +18,7 @@ import { EstoquePage } from '../features/estoque/pages/EstoquePage';
 import { HistoricoItemPage } from '../features/estoque/pages/HistoricoItemPage';
 import { TransferenciaPage } from '../features/estoque/pages/TransferenciaPage';
 import { ProdutoPage } from '../features/estoque/pages/ProdutoPage';
+import { EtiquetasPage } from '../features/estoque/pages/EtiquetasPage';
 import { AprovacaoPage } from '../features/entradas/pages/AprovacaoPage';
 import { ContasPagarPage } from '../features/financeiro/pages/ContasPagarPage';
 import { ContasReceberPage } from '../features/financeiro/pages/ContasReceberPage';
@@ -55,6 +56,7 @@ export function App() {
               <Route path="estoque/itens/:id" element={P(['estoque.consultar'], <HistoricoItemPage />)} />
               <Route path="estoque/produtos/:id" element={P(['estoque.consultar', 'entrada.registrar', 'produtos.aprovar'], <ProdutoPage />)} />
               <Route path="estoque/transferir" element={P(['estoque.transferir'], <TransferenciaPage />)} />
+              <Route path="estoque/etiquetas" element={P(['etiquetas.imprimir'], <EtiquetasPage />)} />
               <Route path="financeiro/pagar" element={P(['contas_pagar.gerenciar'], <ContasPagarPage />)} />
               <Route path="financeiro/receber" element={P(['contas_receber.receber'], <ContasReceberPage />)} />
               <Route path="financeiro/resumo" element={P(['relatorios.consultar'], <ResumoFinanceiroPage />)} />

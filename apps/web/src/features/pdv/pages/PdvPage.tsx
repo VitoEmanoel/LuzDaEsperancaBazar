@@ -1,15 +1,17 @@
 /**
  * PDV — tela cheia, operável só com teclado e leitor (RNF-01/02).
- * Atalhos: F2 categoria · F4 pagamento · Esc remove último item · F6 sangria/suprimento.
+ * Atalhos: F2 categoria · F4 pagamento · Esc tira 1 do último item (pergunta antes) · F6 sangria/suprimento.
+ * No campo do código, `3*BZ000123` lança 3 unidades de uma vez (S4-09).
  * A venda é gravada direto no servidor (idempotente pelo id: reenviar não duplica).
  */
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
 import { usePdvSessao } from '../hooks/usePdvSessao';
-import { paraItensRequest, subtotalCents, type LinhaCarrinho } from '../carrinho';
+import { lerEntrada, paraItensRequest, subtotalCents, type LinhaCarrinho } from '../carrinho';
 import { PagamentoModal, type ResultadoPagamento } from '../components/PagamentoModal';
 import { RemoverQuantidadeModal } from '../components/RemoverQuantidadeModal';
+import { ConfirmarRemoverUltimoModal } from '../components/ConfirmarRemoverUltimoModal';
 import { CpfModal, type DecisaoCpf } from '../components/CpfModal';
 import { ResumoCaixaModal } from '../../caixa/components/ResumoCaixaModal';
 import { ComprovanteModal } from '../components/ComprovanteModal';
@@ -63,6 +65,7 @@ export function PdvPage() {
   const [lancando, setLancando] = useState(false);
   const [resumindo, setResumindo] = useState(false);
   const [removendo, setRemovendo] = useState<LinhaCarrinho | null>(null);
+  const [confirmandoUltimo, setConfirmandoUltimo] = useState(false);
   const [comprovante, setComprovante] = useState<Venda | null>(null);
   const codigoRef = useRef<HTMLInputElement>(null);
   const qtdRef = useRef<HTMLInputElement>(null);
@@ -74,7 +77,7 @@ export function PdvPage() {
   useEffect(() => { if (linhas.length === 0) { cpfAtual.current = null; setCpfSel(null); } }, [linhas.length]);
   useEffect(() => { if ((restaurado.current?.linhas.length ?? 0) > 0) setCpfAberto(true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const modalAberto = pagando || lancando || resumindo || !!removendo || !!comprovante || cpfAberto;
+  const modalAberto = pagando || lancando || resumindo || !!removendo || !!comprovante || cpfAberto || (confirmandoUltimo && linhas.length > 0);
   const focarCodigo = useCallback(() => { setTimeout(() => codigoRef.current?.focus(), 0); }, []);
 
   useEffect(() => {
@@ -96,8 +99,8 @@ export function PdvPage() {
         const el = document.activeElement;
         if (el instanceof HTMLInputElement && el.value !== '') {
           e.preventDefault();
-          if (el === codigoRef.current) setCodigo(''); else if (el === qtdRef.current) setQtd('1'); else el.blur();
-        } else { e.preventDefault(); removerUltimo(); }
+          if (el === codigoRef.current) setCodigo(''); else if (el === qtdRef.current) { setQtd('1'); focarCodigo(); } else el.blur();
+        } else { e.preventDefault(); pedirRemoverUltimo(); }
       }
     };
     window.addEventListener('keydown', onKey);
@@ -149,42 +152,53 @@ export function PdvPage() {
 
   function lerCodigo(e: FormEvent) {
     e.preventDefault();
-    const c = codigo.trim().toUpperCase();
+    const bruto = codigo.trim().toUpperCase();
     setCodigo('');
-    if (!c) return;
-    exigirCpf(() => void lerCodigoAgora(c), c); // o primeiro bip da venda pergunta o CPF; o item lido espera a resposta
+    if (!bruto) return;
+    const lido = lerEntrada(bruto); // `código` ou `n*código` (S4-09)
+    if ('erro' in lido) { feedback('erro', lido.erro); setCodigo(bruto); return; }
+    // o primeiro bip da venda pergunta o CPF; o que foi lido (com o n*) espera a resposta
+    exigirCpf(() => void lerCodigoAgora(lido.codigo, lido.quantidade), bruto);
   }
 
-  async function lerCodigoAgora(c: string) {
+  async function lerCodigoAgora(c: string, n = 1) {
     let item = catalogo.itensEtiquetados.find((i) => i.codigo === c);
     const noCarrinho = linhas.find((l) => l.codigo === c);
-    if (noCarrinho) {
-      // produto de várias unidades: cada bip soma uma, até o saldo do Bazar (o servidor confere de novo ao gravar)
-      if (!item || item.pecaUnica !== false) { feedback('erro', `A peça ${c} já está no carrinho.`); return; }
-      if (noCarrinho.quantidade >= (item.saldoBazar ?? 1)) { feedback('erro', `Só há ${item.saldoBazar ?? 1} de ${item.descricao} no Bazar.`); return; }
-      if (!cabeNoSaldoCpf(toCents(item.preco))) return;
-      setLinhas((ls) => ls.map((l) => (l === noCarrinho ? { ...l, quantidade: l.quantidade + 1 } : l)));
-      feedback('ok', `${noCarrinho.quantidade + 1}× ${item.descricao}`);
-      return;
-    }
     let foraDoBazar = false;
     if (!item) {
-      // Peça fora do catálogo carregado (cadastrada depois): confirma no servidor.
+      // Peça fora do catálogo carregado (cadastrada depois): confirma no servidor, também no 2º bip antes do catálogo voltar.
       try {
         const r = await estoqueApi.porCodigo(c);
         if (r.controle === 'ETIQUETADO' && r.saldoBazar > 0) {
-          item = { itemId: r.id, codigo: r.codigo!, descricao: r.descricao, preco: r.preco, ...(r.precoSemDesconto ? { precoSemDesconto: r.precoSemDesconto } : {}) };
+          item = { itemId: r.id, codigo: r.codigo!, descricao: r.descricao, preco: r.preco, saldoBazar: r.saldoBazar, pecaUnica: !!r.pecaUnica,
+            ...(r.precoSemDesconto ? { precoSemDesconto: r.precoSemDesconto } : {}) };
           void sessao.recarregarCatalogo().catch(() => {}); // traz o produto novo (com o saldo e a peça única) para o próximo bip
         }
         else if (r.saldoDoacoes > 0) foraDoBazar = true;
       } catch { /* trata abaixo como não encontrado */ }
     }
-    if (!item) { feedback('erro', foraDoBazar ? `A peça ${c} está no estoque de Doações e não pode ser vendida.` : `Código ${c} não encontrado ou sem saldo no Bazar.`); return; }
+    if (!item) {
+      feedback('erro', noCarrinho ? `A peça ${c} já está no carrinho.` : foraDoBazar ? `A peça ${c} está no estoque de Doações e não pode ser vendida.` : `Código ${c} não encontrado ou sem saldo no Bazar.`);
+      return;
+    }
     const it = item;
-    if (!cabeNoSaldoCpf(toCents(it.preco))) return;
-    setLinhas((ls) => [...ls, { key: uuid(), tipo: 'codigo', codigo: it.codigo, descricao: it.descricao, precoCents: toCents(it.preco), quantidade: 1 }]);
-    // produto com desconto (S3-10): o preço já vem com ele; o operador vê que está em promoção
-    feedback('ok', `${it.descricao} — ${it.precoSemDesconto ? `de ${formatMoney(it.precoSemDesconto)} por ` : ''}${formatMoney(it.preco)}`);
+    const unica = it.pecaUnica !== false;
+    if (unica && noCarrinho) { feedback('erro', `A peça ${c} já está no carrinho (peça única).`); return; }
+    if (unica && n > 1) { feedback('erro', `${it.descricao} é peça única: só 1 por venda.`); return; }
+    // nunca mais do que há no Bazar; o pedido acima do saldo é recusado inteiro (P-18; o servidor confere de novo ao gravar)
+    const saldo = it.saldoBazar ?? 1;
+    const ja = noCarrinho?.quantidade ?? 0;
+    if (ja + n > saldo) {
+      feedback('erro', `Só há ${saldo} de ${it.descricao} no Bazar${ja ? ` (${ja} já no carrinho)` : ''}: dá para lançar no máximo ${Math.max(0, saldo - ja)}.`);
+      return;
+    }
+    if (!cabeNoSaldoCpf(toCents(it.preco) * n)) return;
+    if (noCarrinho) setLinhas((ls) => ls.map((l) => (l.key === noCarrinho.key ? { ...l, quantidade: l.quantidade + n } : l)));
+    else setLinhas((ls) => [...ls, { key: uuid(), tipo: 'codigo', codigo: it.codigo, descricao: it.descricao, precoCents: toCents(it.preco), quantidade: n }]);
+    // S4-08: produto, preço de agora (com desconto, S3-10) e quanto sobra no Bazar depois deste carrinho
+    const restam = saldo - ja - n;
+    feedback('ok', `${ja + n > 1 ? `${ja + n}× ` : ''}${it.descricao} — ${it.precoSemDesconto ? `de ${formatMoney(it.precoSemDesconto)} por ` : ''}${formatMoney(it.preco)}`
+      + ` · ${unica ? 'peça única' : restam === 0 ? 'última unidade do Bazar' : `restam ${restam} no Bazar`}`);
   }
 
   function adicionarCategoria(categoriaId: string) { exigirCpf(() => adicionarCategoriaAgora(categoriaId)); }
@@ -214,8 +228,11 @@ export function PdvPage() {
     focarCodigo();
   }
 
-  /** Esc: tira UMA unidade da última linha (a linha some quando chega a zero). */
+  /** Esc com o campo vazio e o botão "Remover último" perguntam antes (S4-19). */
+  function pedirRemoverUltimo() { if (linhas.length) setConfirmandoUltimo(true); }
+  /** Tira UMA unidade da última linha (a linha some quando chega a zero). */
   function removerUltimo() {
+    setConfirmandoUltimo(false);
     setLinhas((ls) => {
       const ultima = ls[ls.length - 1];
       if (!ultima) return ls;
@@ -351,7 +368,7 @@ export function PdvPage() {
           <div className="carrinho-total"><span>Subtotal</span><strong>{formatMoney(subtotal)}</strong></div>
           <small className="hint">Valores conferidos pelo servidor ao gravar.</small>
           <div className="row">
-            <button className="btn" onClick={removerUltimo} disabled={!linhas.length}>Remover último (Esc)</button>
+            <button className="btn" onClick={pedirRemoverUltimo} disabled={!linhas.length}>Remover último (Esc)</button>
             <button className="btn btn-primary btn-lg grow" onClick={() => exigirCpf(() => setPagando(true))} disabled={!linhas.length}>Pagamento (F4)</button>
           </div>
         </section>
@@ -365,6 +382,8 @@ export function PdvPage() {
         onFechar={() => setPagando(false)}
       />
       <CpfModal aberto={cpfAberto} obrigatorio={catalogo.cpfObrigatorio ?? false} carrinhoCents={subtotal} onDecidir={aoDecidirCpf} onCancelar={cancelarCpf} />
+      <ConfirmarRemoverUltimoModal linha={confirmandoUltimo ? linhas[linhas.length - 1] ?? null : null} onConfirmar={removerUltimo}
+        onFechar={() => { setConfirmandoUltimo(false); focarCodigo(); }} />
       <RemoverQuantidadeModal linha={removendo} onConfirmar={(n) => tirarQuantidade(removendo!, n)} onFechar={() => { setRemovendo(null); focarCodigo(); }} />
       <ResumoCaixaModal aberto={resumindo} caixaId={caixa.id} onFechar={() => setResumindo(false)} />
       <LancamentoModal aberto={lancando} caixaId={caixa.id} onFechar={() => setLancando(false)} onOk={(m) => toast(m)} />

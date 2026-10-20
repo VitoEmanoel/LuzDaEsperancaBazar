@@ -50,7 +50,7 @@ const PERFIL_ADMIN = PERFIL_ADMIN_ID, PERFIL_VENDEDOR = sid('perfcxa'), PERFIL_E
 // Mesmas permissões dos perfis padrão (migrações 0005 e 0006: o Administrador tem tudo, inclusive abrir caixa).
 const vendedorPerms: Permissao[] = ['caixa.operar', 'clientes.gerenciar'];
 // 0010 (Sprint 3): o Estoquista vê o custo, muda o preço e aprova (não o próprio); o Financeiro vê o custo e dá desconto
-const estoquistaPerms: Permissao[] = ['entrada.registrar', 'estoque.consultar', 'estoque.transferir', 'cadastros.consultar', 'relatorios.estoque', 'parceiros.criar', 'custo.consultar', 'produtos.preco', 'produtos.aprovar'];
+const estoquistaPerms: Permissao[] = ['entrada.registrar', 'estoque.consultar', 'estoque.transferir', 'cadastros.consultar', 'relatorios.estoque', 'parceiros.criar', 'custo.consultar', 'produtos.preco', 'produtos.aprovar', 'etiquetas.imprimir'];
 const financeiroPerms: Permissao[] = ['contas_pagar.gerenciar', 'contas_receber.receber', 'contas_receber.lancar', 'relatorios.consultar', 'relatorios.estoque', 'estoque.consultar', 'custo.consultar', 'produtos.desconto'];
 
 const catRoupaAd = sid('catroup'), catRoupaInf = sid('catinf'), catCalc = sid('catcalc'), catLivro = sid('catliv'), catUtens = sid('catute'), catPeca = sid('catpeca');
@@ -141,6 +141,8 @@ export const db = {
     { chave: 'anexo.tamanho_max_mb', valor: '5', descricao: 'Tamanho máximo do anexo do lote (MB)', tipo: 'number' },
     { chave: 'cpf.limite_mensal', valor: '0', descricao: 'Limite de compras por CPF no mês, em reais (0 = sem limite)', tipo: 'number' },
     { chave: 'cpf.obrigatorio', valor: '0', descricao: 'CPF obrigatório na venda', tipo: 'bool' },
+    { chave: 'etiqueta.altura_mm', valor: '30', descricao: 'Altura da etiqueta do rolo, em milímetros', tipo: 'number' },
+    { chave: 'etiqueta.largura_mm', valor: '50', descricao: 'Largura da etiqueta do rolo, em milímetros', tipo: 'number' },
   ] as Parametro[],
   auditoria: [] as AuditoriaRegistro[],
 };

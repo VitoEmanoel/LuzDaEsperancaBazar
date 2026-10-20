@@ -52,12 +52,13 @@ const DESCRICOES: Record<Permissao, string> = {
   'usuarios.gerenciar': 'Usuários e redefinição de senha', 'perfis.gerenciar': 'Perfis, permissões e limite de desconto',
   'auditoria.consultar': 'Trilha de auditoria', 'cadastros.gerenciar': 'Categorias, parceiros, campanhas, motivos, importação',
   'cadastros.consultar': 'Consultar cadastros', 'clientes.gerenciar': 'Clientes', 'parametros.gerenciar': 'Parâmetros e dados da instituição',
-  'entrada.registrar': 'Lotes, cadastro dos produtos do lote, descartes, etiquetas, encerrar o lote', 'triagem.reabrir': 'Reabrir lote, reverter descarte',
+  'entrada.registrar': 'Lotes, cadastro dos produtos do lote, descartes, encerrar o lote', 'triagem.reabrir': 'Reabrir lote, reverter descarte',
   'produtos.aprovar': 'Aprovar ou devolver os produtos cadastrados nos lotes', 'parceiros.criar': 'Criar parceiro (doador) ao registrar o lote',
   'estoque.consultar': 'Estoque, produtos e lotes (só leitura)', 'estoque.transferir': 'Transferir entre bazar e doações',
   'estoque.ajustar': 'Baixa, ajuste de saída, preço da categoria, carga inicial',
   'custo.consultar': 'Ver o custo (valor atribuído) dos produtos e do estoque', 'produtos.preco': 'Alterar o preço de venda do produto',
-  'produtos.desconto': 'Dar e encerrar desconto no produto', 'caixa.operar': 'Abrir/fechar caixa, vender, sangria, suprimento',
+  'produtos.desconto': 'Dar e encerrar desconto no produto', 'etiquetas.imprimir': 'Imprimir etiquetas dos produtos',
+  'caixa.operar': 'Abrir/fechar caixa, vender, sangria, suprimento',
   'venda.cancelar': 'Cancelar venda', 'venda.desconto_autorizar': 'Desconto acima do limite do perfil', 'terminais.gerenciar': 'Pontos de caixa',
   'contas_pagar.gerenciar': 'Contas a pagar e lote de compra', 'contas_receber.receber': 'Receber fiado, extrato do cliente',
   'contas_receber.lancar': 'Conta a receber manual', 'recebimento.estornar': 'Estornar recebimento',
@@ -66,7 +67,7 @@ const DESCRICOES: Record<Permissao, string> = {
 };
 const GRUPO_DE: [string, Permissao[]][] = [
   ['Vendas e caixa', ['caixa.operar', 'venda.cancelar', 'venda.desconto_autorizar', 'clientes.gerenciar']],
-  ['Entradas e estoque', ['entrada.registrar', 'triagem.reabrir', 'produtos.aprovar', 'parceiros.criar', 'estoque.consultar', 'estoque.transferir', 'estoque.ajustar', 'custo.consultar', 'produtos.preco', 'produtos.desconto', 'cadastros.consultar']],
+  ['Entradas e estoque', ['entrada.registrar', 'triagem.reabrir', 'produtos.aprovar', 'parceiros.criar', 'estoque.consultar', 'estoque.transferir', 'estoque.ajustar', 'custo.consultar', 'produtos.preco', 'produtos.desconto', 'etiquetas.imprimir', 'cadastros.consultar']],
   ['Financeiro', ['contas_pagar.gerenciar', 'contas_receber.receber', 'contas_receber.lancar', 'recebimento.estornar']],
   ['Relatórios', ['relatorios.consultar', 'relatorios.estoque']],
   ['Administração', ['usuarios.gerenciar', 'perfis.gerenciar', 'auditoria.consultar', 'cadastros.gerenciar', 'parametros.gerenciar', 'terminais.gerenciar', 'fiscal.gerenciar', 'privacidade.gerenciar']],
@@ -429,7 +430,7 @@ rota('GET', '/aprovacoes', ['produtos.aprovar'], ({ user, query }) => {
       loteId: l.id, loteNumero: l.numero, loteTipo: l.tipo, parceiroNome: nomeParc(l.parceiroId), campanhaNome: nomeCamp(l.campanhaId), podeConferir: podeConferir(user, i) };
   }));
 });
-rota('GET', '/produtos', ['entrada.registrar', 'estoque.consultar', 'produtos.aprovar'], ({ query }) => {
+rota('GET', '/produtos', ['entrada.registrar', 'estoque.consultar', 'produtos.aprovar', 'etiquetas.imprimir'], ({ query }) => {
   const b = (query.get('busca') ?? '').trim().toLowerCase();
   return ok(paginar(db.produtos.filter((p) => !b || p.codigo.toLowerCase() === b || p.nome.toLowerCase().includes(b) || p.tituloEtiqueta.toLowerCase().includes(b))
     .map((p) => {
@@ -457,9 +458,33 @@ rota('POST', '/descartes/:id/reverter', ['triagem.reabrir'], ({ user, params, bo
   const l = db.lotes.find((x) => x.id === d.loteId)!; l.status = 'ABERTO'; d.revertido = true; // item deve passar por nova triagem
   auditar(user, 'DESCARTE_REVERTIDO', 'descarte', d.id); return { status: 204, headers: {}, body: null };
 });
-rota('GET', '/etiquetas', ['entrada.registrar'], ({ query }) => {
-  const ids = (query.get('itens') ?? '').split(',').filter(Boolean);
-  return ok(db.itens.filter((i) => ids.includes(i.id) && i.produtoId).map((i) => { const p = db.produtos.find((x) => x.id === i.produtoId)!; return { itemId: i.id, codigo: p.codigo, descricao: p.tituloEtiqueta, preco: fromCents(p.preco) }; }));
+// ---------------- etiquetas (S4-01 a S4-05): preço normal, rolo dos parâmetros, histórico na auditoria ----------------
+const entre = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
+const rolo = () => ({ // os mesmos limites da API real (30 a 120 x 20 a 100 mm)
+  larguraMm: entre(Number(db.parametros.find((p) => p.chave === 'etiqueta.largura_mm')?.valor) || 50, 30, 120),
+  alturaMm: entre(Number(db.parametros.find((p) => p.chave === 'etiqueta.altura_mm')?.valor) || 30, 20, 100),
+});
+function montarEtiquetas(body: any): TransportResponse | { itens: { produtoId: string; codigo: string; titulo: string; nome: string; preco: string; quantidade: number }[] } {
+  const pedido: { produtoId: string; quantidade: number }[] = Array.isArray(body?.produtos) ? body.produtos : [];
+  if (!pedido.length || pedido.some((p) => !Number.isInteger(p.quantidade) || p.quantidade < 1)) return problem(400, 'Dados inválidos', 'VALIDACAO');
+  if (pedido.reduce((s, p) => s + p.quantidade, 0) > 500) return problem(400, 'No máximo 500 etiquetas por impressão', 'ETIQUETAS_DEMAIS');
+  if (new Set(pedido.map((p) => p.produtoId)).size !== pedido.length) return problem(400, 'Produto repetido no pedido: some as quantidades', 'VALIDACAO');
+  const itens = pedido.map((p) => ({ p, prod: db.produtos.find((x) => x.id === p.produtoId) }));
+  if (itens.some((i) => !i.prod)) return problem(400, 'Produto inexistente ou inativo', 'VALIDACAO');
+  return { itens: itens.map(({ p, prod }) => ({ produtoId: prod!.id, codigo: prod!.codigo, titulo: prod!.tituloEtiqueta, nome: prod!.nome, preco: fromCents(prod!.preco), quantidade: p.quantidade })) };
+}
+rota('GET', '/etiquetas/config', ['etiquetas.imprimir'], () => ok(rolo()));
+rota('POST', '/etiquetas/preparar', ['etiquetas.imprimir'], ({ body }) => {
+  const r = montarEtiquetas(body); return 'itens' in r ? ok({ ...rolo(), ...r }) : r;
+});
+rota('POST', '/etiquetas/impressoes', ['etiquetas.imprimir'], ({ user, body }) => {
+  const r = montarEtiquetas(body); if (!('itens' in r)) return r;
+  const { larguraMm, alturaMm } = rolo();
+  for (const i of r.itens) {
+    auditar(user, 'ETIQUETAS_IMPRESSAS', 'produto', i.produtoId);
+    historicoProduto(i.produtoId, user, 'ETIQUETAS_IMPRESSAS', undefined, { quantidade: i.quantidade, preco: i.preco, rolo: `${larguraMm}x${alturaMm}` });
+  }
+  return ok({ larguraMm, alturaMm, ...r });
 });
 
 // ---------------- EST ----------------

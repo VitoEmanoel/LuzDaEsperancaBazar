@@ -89,30 +89,31 @@ export function PrecoProdutoModal({ produtoId, descricao, precoAtual, onFechar, 
   );
 }
 
-/** Preço padrão da categoria (venda por categoria): Administrador. */
-export function PrecoCategoriaModal({ onFechar, onOk }: { onFechar: () => void; onOk: () => Promise<void> }) {
+/** Preço padrão da categoria (venda por categoria): Administrador. Aberto da linha do Estoque, já vem com a categoria daquela linha. */
+export function PrecoCategoriaModal({ categoriaInicial, onFechar, onOk }: { categoriaInicial?: string; onFechar: () => void; onOk: () => Promise<void> }) {
   const toast = useToast();
   const cats = useAsync(() => cadastrosApi.listar('categorias', { ativo: true }), []);
-  const [categoriaId, setCategoriaId] = useState('');
+  const [categoriaId, setCategoriaId] = useState(categoriaInicial ?? '');
   const [preco, setPreco] = useState('');
   const [motivo, setMotivo] = useState('');
   const [erro, setErro] = useState<string | null>(null);
+  const [enviando, setEnviando] = useState(false);
   const cents = tryCents(preco);
   const valido = !!categoriaId && cents !== null && cents > 0 && motivo.trim().length >= 5;
   async function salvar() {
-    if (!valido) return;
-    setErro(null);
+    if (!valido || enviando) return;
+    setEnviando(true); setErro(null);
     try {
       await estoqueApi.precoCategoria(categoriaId, fromCents(cents!), motivo.trim());
       toast('Preço padrão da categoria alterado.');
       await onOk();
-    } catch (e) { setErro(errorMessage(e)); }
+    } catch (e) { setErro(errorMessage(e)); } finally { setEnviando(false); }
   }
   return (
     <Modal titulo="Preço padrão da categoria" aberto onFechar={onFechar}
-      rodape={<><button className="btn" onClick={onFechar}>Cancelar</button><button className="btn btn-primary" disabled={!valido} onClick={salvar}>Salvar preço</button></>}>
-      <Field label="Categoria"><select value={categoriaId} onChange={(e) => setCategoriaId(e.target.value)} autoFocus><option value="">Selecione…</option>{cats.data?.map((c) => <option key={c.id} value={c.id}>{c.nome} (atual {c.precoPadrao.replace('.', ',')})</option>)}</select></Field>
-      <Field label="Novo preço (R$)"><input inputMode="decimal" value={preco} onChange={(e) => setPreco(e.target.value)} /></Field>
+      rodape={<><button className="btn" onClick={onFechar}>Cancelar</button><button className="btn btn-primary" disabled={!valido || enviando} onClick={salvar}>Salvar preço</button></>}>
+      <Field label="Categoria"><select value={categoriaId} onChange={(e) => setCategoriaId(e.target.value)} autoFocus={!categoriaInicial}><option value="">Selecione…</option>{cats.data?.map((c) => <option key={c.id} value={c.id}>{c.nome} (atual {c.precoPadrao.replace('.', ',')})</option>)}</select></Field>
+      <Field label="Novo preço (R$)"><input inputMode="decimal" value={preco} onChange={(e) => setPreco(e.target.value)} autoFocus={!!categoriaInicial} /></Field>
       <Field label="Motivo (mín. 5 caracteres)"><input value={motivo} onChange={(e) => setMotivo(e.target.value)} maxLength={200} /></Field>
       <ErrorAlert erro={erro ?? cats.erro} />
     </Modal>

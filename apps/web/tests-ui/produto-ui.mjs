@@ -20,7 +20,7 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 const naJanela = () => page.evaluate(() => !!document.activeElement?.closest('[role=dialog]') && ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName));
 
 async function entrar(usuario, senha) {
-  await page.getByLabel('Usuário').fill(usuario); await page.locator('input[type="password"]').fill(senha);
+  await page.getByLabel('Usuário').fill(usuario); await page.getByLabel('Senha', { exact: true }).fill(senha);
   await page.getByRole('button', { name: 'Entrar' }).click();
   if (usuario === 'vendedor') await page.waitForURL(/\/pdv/, { timeout: 15000 }); // o PDV é tela cheia, sem o menu
   else await page.getByRole('button', { name: 'Sair' }).waitFor({ timeout: 15000 });

@@ -22,7 +22,8 @@
     "test:perfis": "tsx tests/perfis.ts",
     "test:cpf": "tsx tests/cpf.ts",
     "test:produto": "tsx tests/produto.ts",
-    "test:sprint3": "tsx tests/sprint3.ts"
+    "test:sprint3": "tsx tests/sprint3.ts",
+    "test:sprint4": "tsx tests/sprint4.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",

@@ -6,7 +6,12 @@
   .print-area { position: absolute; left: 0; top: 0; width: 100%; color: #000; background: #fff; }
   .comprovante { width: 80mm; font-size: 12px; }
   .aviso-nao-fiscal { border-color: #000; }
-  .etiqueta { break-inside: avoid; border-color: #999; }
+  /* etiquetas (S4-02): só o papel do rolo, uma etiqueta por página do tamanho dela (o @page vem da tela) */
+  body:has(> .etiquetas-papel) > :not(.etiquetas-papel) { display: none !important; }
+  .etiquetas-papel { display: block !important; visibility: visible; }
+  .etiquetas-papel * { visibility: visible; }
+  .etiquetas-papel .etiqueta { border: 0; break-after: page; page-break-after: always; }
+  .etiquetas-papel .etiqueta:last-child { break-after: auto; page-break-after: auto; }
   /* botões e avisos da tela não vão para o papel; tabela larga sai inteira (sem rolagem) */
   .no-print, .print-area .no-print * { display: none !important; }
   .print-area .tabela-rolavel { overflow: visible; }

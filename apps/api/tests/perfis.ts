@@ -67,6 +67,10 @@ const ACESSOS: [string, string, unknown, Perfil[], number[]?][] = [
   ['POST', '/parceiros', {}, ['admin', 'estoquista'], [400]],
   ['PATCH', `/parceiros/${uuid()}`, {}, ['admin'], [404]],
   ['GET', '/produtos', undefined, ['admin', 'estoquista', 'financeiro']],
+  // etiquetas (S4-01 a S4-05): Admin e Estoquista; pedido vazio é recusado (400) por quem pode
+  ['GET', '/etiquetas/config', undefined, ['admin', 'estoquista']],
+  ['POST', '/etiquetas/preparar', { produtos: [] }, ['admin', 'estoquista'], [400]],
+  ['POST', '/etiquetas/impressoes', { produtos: [] }, ['admin', 'estoquista'], [400]],
   ['GET', '/estoque', undefined, ['admin', 'estoquista', 'financeiro']],
   ['GET', '/itens/codigo/BZ999999', undefined, TODOS, [404]], // leitura de código: PDV (vendedor) e estoque
   ['GET', '/contas-pagar', undefined, ['admin', 'financeiro']],
@@ -93,8 +97,8 @@ const ACESSOS: [string, string, unknown, Perfil[], number[]?][] = [
 const PERMISSOES_ESPERADAS: Record<Perfil, string[]> = {
   admin: [], // calculado: todas as permissões (inclusive abrir caixa)
   vendedor: ['caixa.operar', 'clientes.gerenciar'],
-  // parceiros.criar: 0009; custo, preço e aprovação: 0010
-  estoquista: ['cadastros.consultar', 'custo.consultar', 'entrada.registrar', 'estoque.consultar', 'estoque.transferir', 'parceiros.criar', 'produtos.aprovar', 'produtos.preco', 'relatorios.estoque'],
+  // parceiros.criar: 0009; custo, preço e aprovação: 0010; etiquetas: 0011
+  estoquista: ['cadastros.consultar', 'custo.consultar', 'entrada.registrar', 'estoque.consultar', 'estoque.transferir', 'etiquetas.imprimir', 'parceiros.criar', 'produtos.aprovar', 'produtos.preco', 'relatorios.estoque'],
   financeiro: ['contas_pagar.gerenciar', 'contas_receber.lancar', 'contas_receber.receber', 'custo.consultar', 'estoque.consultar', 'produtos.desconto', 'relatorios.consultar', 'relatorios.estoque'],
 };
 

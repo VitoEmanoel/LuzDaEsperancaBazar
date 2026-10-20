@@ -3,25 +3,25 @@
  *  Cadastrar: produto novo (código BZ gerado), nova entrada de um produto que já existe, ou item por categoria.
  *  O item fica "aguardando aprovação" e só entra no estoque quando o Administrador aprova (item a item ou o lote).
  *  O Administrador pode devolver com motivo; o estoquista corrige e o item volta para a aprovação.
- *  Descartar: item a item com motivo (nunca entra no estoque — RN-01). Etiquetas, encerrar/reabrir lote, reverter descarte.
+ *  Descartar: item a item com motivo (nunca entra no estoque — RN-01). Etiquetas (abre Imprimir etiquetas), encerrar/reabrir lote, reverter descarte.
  */
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { cadastrosApi } from '../../cadastros/cadastros.api';
 import { lotesApi } from '../entradas.api';
 import { errorMessage } from '../../../shared/api/http';
-import { PERFIL_ADMIN_ID, type CamposProduto, type Etiqueta, type ItemLote, type LocalEstoque, type ProdutoBusca, type StatusItem, type TipoEntrada } from '../../../shared/api/types';
+import { PERFIL_ADMIN_ID, type CamposProduto, type ItemLote, type LocalEstoque, type ProdutoBusca, type StatusItem, type TipoEntrada } from '../../../shared/api/types';
 import { useAsync } from '../../../shared/hooks/useAsync';
 import { Badge, ErrorAlert, Field, MoneyText, PageHeader, TabelaRolavel } from '../../../shared/components/ui';
 import { ConfirmMotivo } from '../../../shared/components/ConfirmMotivo';
 import { Modal } from '../../../shared/components/Modal';
-import { Barcode } from '../../../shared/components/Barcode';
 import { Can } from '../../auth/guards';
 import { useAuth } from '../../auth/AuthContext';
 import { formatDateTime } from '../../../shared/lib/format';
 import { formatMoney, fromCents, toCents, tryCents } from '../../../shared/lib/money';
 import { uuid } from '../../../shared/lib/uuid';
 import { useToast } from '../../../shared/components/Toast';
+import { caminhoEtiquetas } from '../../estoque/etiquetas';
 
 type Categoria = { id: string; nome: string; precoPadrao: string };
 const SITUACAO: Record<StatusItem, { rotulo: string; tom: 'ok' | 'alerta' | 'erro' }> = {
@@ -40,7 +40,6 @@ export function TriagemPage() {
   const [reverter, setReverter] = useState<string | null>(null);
   const [devolver, setDevolver] = useState<ItemLote | null>(null);
   const [corrigir, setCorrigir] = useState<ItemLote | null>(null);
-  const [etiquetas, setEtiquetas] = useState<Etiqueta[] | null>(null);
   const [aprovando, setAprovando] = useState(false);
 
   const l = lote.data;
@@ -52,15 +51,13 @@ export function TriagemPage() {
   const verCusto = can('custo.consultar'); // S3-05
   // quem cadastrou não confere o próprio item; o Administrador pode (S3-22)
   const podeConferir = (i: ItemLote) => aprovador && (me?.perfil.id === PERFIL_ADMIN_ID || i.criadoPorId !== me?.id);
-  const etiquetaveis = useMemo(() => l?.itens.filter((i) => i.codigo).map((i) => i.id) ?? [], [l]);
+  // etiqueta é do produto: uma por unidade cadastrada no lote (peças antigas sem produto não entram)
+  const etiquetaveis = useMemo(() => l?.itens.filter((i) => i.produto).map((i) => ({ produtoId: i.produto!.id, quantidade: i.quantidade })) ?? [], [l]);
   const pendentes = l?.itens.filter((i) => i.status === 'CADASTRADO').length ?? 0;
   const conferiveis = l?.itens.filter((i) => i.status === 'CADASTRADO' && podeConferir(i)).length ?? 0;
 
   async function encerrar() {
     try { await lotesApi.encerrar(id); toast('Lote encerrado.'); await lote.reload(); } catch (e) { toast(errorMessage(e), 'erro'); }
-  }
-  async function imprimirEtiquetas(ids: string[]) {
-    try { setEtiquetas(await lotesApi.etiquetas(ids)); } catch (e) { toast(errorMessage(e), 'erro'); }
   }
   async function aprovarItem(i: ItemLote) {
     try { await lotesApi.aprovarItem(i.id); toast(`${i.descricao}: aprovado e no estoque.`); await lote.reload(); } catch (e) { toast(errorMessage(e), 'erro'); }
@@ -81,7 +78,8 @@ export function TriagemPage() {
   return (
     <div className="page">
       <PageHeader titulo={`Lote #${l.numero} — cadastro de produtos`}>
-        {registra && etiquetaveis.length > 0 && <button className="btn" onClick={() => imprimirEtiquetas(etiquetaveis)}>Imprimir etiquetas ({etiquetaveis.length})</button>}
+        {/* as etiquetas do lote abrem na tela Imprimir etiquetas, uma por unidade (S4-04) */}
+        {can('etiquetas.imprimir') && etiquetaveis.length > 0 && <Link className="btn" to={caminhoEtiquetas(etiquetaveis)}>Imprimir etiquetas ({etiquetaveis.reduce((s, e) => s + e.quantidade, 0)})</Link>}
         {conferiveis > 0 && <button className="btn btn-primary" disabled={aprovando} onClick={aprovarLote}>Aprovar lote ({conferiveis})</button>}
         {aberto ? registra && <button className="btn" onClick={encerrar}>Encerrar lote</button>
           : <Can perm="triagem.reabrir"><button className="btn" onClick={() => setReabrir(true)}>Reabrir lote</button></Can>}
@@ -153,18 +151,6 @@ export function TriagemPage() {
       <ConfirmMotivo aberto={!!devolver} titulo="Devolver ao estoquista" descricao={`${devolver?.descricao ?? ''}: diga o que precisa ser corrigido.`} rotuloConfirmar="Devolver"
         onFechar={() => setDevolver(null)} onConfirmar={async (m) => { await lotesApi.devolverItem(devolver!.id, m); toast('Item devolvido.'); await lote.reload(); }} />
       {corrigir && <CorrigirModal loteId={id} compra={l.tipo === 'COMPRA'} item={corrigir} onFechar={() => setCorrigir(null)} onOk={async () => { setCorrigir(null); toast('Item corrigido e enviado para aprovação.'); await lote.reload(); }} />}
-      <Modal titulo="Etiquetas" aberto={!!etiquetas} onFechar={() => setEtiquetas(null)} largura="lg"
-        rodape={<><button className="btn" onClick={() => setEtiquetas(null)}>Fechar</button><button className="btn btn-primary" onClick={() => window.print()}>Imprimir</button></>}>
-        <div className="print-area etiquetas">
-          {etiquetas?.map((e) => (
-            <div key={e.itemId} className="etiqueta">
-              <div className="etq-desc">{e.descricao}</div>
-              <Barcode value={e.codigo} />
-              <div className="etq-rodape"><code>{e.codigo}</code><strong>{formatMoney(e.preco)}</strong></div>
-            </div>
-          ))}
-        </div>
-      </Modal>
     </div>
   );
 }

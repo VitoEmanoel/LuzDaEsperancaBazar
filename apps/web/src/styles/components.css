@@ -24,7 +24,7 @@
 
 /* --- Campos --- */
 .field { display: flex; flex-direction: column; gap: .3rem; margin-bottom: .85rem; flex: 1; min-width: 160px; }
-.field > span { font-weight: 700; font-size: .93rem; color: var(--text); }
+.field > span, .field > .field-rotulo { font-weight: 700; font-size: .93rem; color: var(--text); }
 .field-error { color: var(--danger); font-size: .86rem; display: block; }
 input, select, textarea {
   font: inherit; font-size: 1rem; min-height: 44px; padding: .45rem .7rem; width: 100%;

@@ -1,6 +1,6 @@
 /** EST — estoque (saldo sempre vem de vw_saldo_estoque no servidor). */
 import { http } from '../../shared/api/http';
-import type { AjusteRequest, BaixaRequest, CamposProduto, CargaInicialResultado, HistoricoEvento, ItemEstoque, LocalEstoque, LocalDate, Money, Page, ProdutoDetalhe, TipoDesconto, TransferenciaRequest } from '../../shared/api/types';
+import type { AjusteRequest, BaixaRequest, CamposProduto, CargaInicialResultado, EtiquetasPreparadas, HistoricoEvento, ItemEstoque, LocalEstoque, LocalDate, Money, Page, PedidoEtiquetas, ProdutoDetalhe, TamanhoRolo, TipoDesconto, TransferenciaRequest } from '../../shared/api/types';
 
 export const estoqueApi = {
   listar: (q: { local?: LocalEstoque; categoriaId?: string; parceiroId?: string; campanhaId?: string; loteId?: string; busca?: string; page?: number }) =>
@@ -18,6 +18,11 @@ export const estoqueApi = {
   precoProduto: (id: string, preco: Money, motivo: string) => http.patch<void>(`/produtos/${id}/preco`, { preco, motivo }),
   darDesconto: (id: string, d: { tipo: TipoDesconto; valor: Money; ate?: LocalDate; motivo: string }) => http.put<{ ok: true }>(`/produtos/${id}/desconto`, d),
   encerrarDesconto: (id: string, motivo: string) => http.post<void>(`/produtos/${id}/desconto/encerrar`, { motivo }),
+  // ---------- etiquetas (S4-01 a S4-05) ----------
+  tamanhoRolo: () => http.get<TamanhoRolo>('/etiquetas/config'),
+  prepararEtiquetas: (p: PedidoEtiquetas) => http.post<EtiquetasPreparadas>('/etiquetas/preparar', p),
+  /** Registra a impressão no histórico do produto e devolve os dados atuais para o papel. */
+  imprimirEtiquetas: (p: PedidoEtiquetas) => http.post<EtiquetasPreparadas>('/etiquetas/impressoes', p),
   cargaInicial: (arquivo: File) => {
     const fd = new FormData(); fd.append('arquivo', arquivo);
     return http.upload<CargaInicialResultado>('/carga-inicial', fd);

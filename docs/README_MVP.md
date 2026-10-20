@@ -45,7 +45,7 @@ O MVP é hoje um **monolito single-tenant** (uma instituição por instalação:
 | **Estoquista** | Registra lotes de doação, cadastra itens (com etiqueta), **aprova e devolve o que outra pessoa cadastrou** (Sprint 3), muda o preço do produto, transfere entre estoques, consulta estoque, custo e relatórios de estoque | Backoffice → Entradas e Estoque |
 | **Financeiro** | Contas a pagar e a receber, resumo financeiro, relatórios, consulta de estoque, de lotes e de produtos (só leitura), custo e **desconto no produto** (Sprint 3) | Backoffice → Financeiro |
 
-Os perfis são **compostos por 29 permissões** (ex.: `caixa.operar`, `estoque.transferir`, `relatorios.consultar`, `custo.consultar`). O Administrador cria perfis novos em **Administração › Perfis e permissões**: as permissões aparecem em português, agrupadas por área (Vendas e caixa, Entradas e estoque, Financeiro, Relatórios, Administração), com "marcar todas" por grupo; um perfil pode nascer como **cópia** de outro; o perfil criado por engano é **desativado** (só sem usuário ativo; os padrão nunca), e o nome fica livre. Outro Administrador é só um usuário com o perfil Administrador. O menu só esconde o que o usuário não usaria; **quem decide é sempre o servidor**.
+Os perfis são **compostos por 30 permissões** (ex.: `caixa.operar`, `estoque.transferir`, `relatorios.consultar`, `custo.consultar`, `etiquetas.imprimir`). O Administrador cria perfis novos em **Administração › Perfis e permissões**: as permissões aparecem em português, agrupadas por área (Vendas e caixa, Entradas e estoque, Financeiro, Relatórios, Administração), com "marcar todas" por grupo; um perfil pode nascer como **cópia** de outro; o perfil criado por engano é **desativado** (só sem usuário ativo; os padrão nunca), e o nome fica livre. Outro Administrador é só um usuário com o perfil Administrador. O menu só esconde o que o usuário não usaria; **quem decide é sempre o servidor**.
 
 ---
 
@@ -115,7 +115,7 @@ Cada domínio tem **o mesmo nome no front e no back** (ex.: `features/financeiro
      Em todos: **valor atribuído unitário** (compra: o **custo**) e o estoque de destino (Bazar ou Doações), usado na aprovação.
    - **Descartar:** um registro por item, com motivo. Descartado nunca entra no estoque.
 3. **Aprovar** (Administrador e Estoquista, `produtos.aprovar`; Sprint 3, P-16): aprova item a item, o lote inteiro ou pela fila **Aprovação de produtos** (`/aprovacoes`, todos os lotes); o estoque recebe a quantidade no local escolhido. **Quem cadastrou não aprova nem devolve o próprio item** (outra pessoa confere; só o perfil Administrador pode o próprio): ao aprovar o lote, os itens da própria pessoa ficam para outra. Vale na API e no banco (`AUTO_APROVACAO`). **Devolver** exige motivo: o item fica "devolvido", o estoquista corrige (quantidade, valor, destino e, se o produto nasceu nessa entrada, título, nome e preço) e ele volta para a aprovação. Aprovado não volta atrás. Tudo na auditoria.
-4. **Etiquetas** Code 39 impressas pelo navegador: título curto, preço atual e código do produto.
+4. **Etiquetas** (Sprint 4, permissão `etiquetas.imprimir`: Administrador e Estoquista): tela **Imprimir etiquetas** (`/estoque/etiquetas`) com busca, quantidade livre por produto (sugere uma por unidade em estoque) e pré-visualização no tamanho real do rolo; também abre já preenchida a partir do lote, da lista do Estoque e da tela do produto. A etiqueta leva o título curto, o código de barras **Code 128** (lido por qualquer leitor 1D; as etiquetas antigas em Code 39 têm o mesmo texto e continuam sendo lidas), o código legível e o **preço normal** do produto (o desconto aparece no caixa e não obriga reetiquetar; P-18). O papel sai com uma página do tamanho do rolo por etiqueta; o tamanho fica em **Parâmetros** (`etiqueta.largura_mm` e `etiqueta.altura_mm`, padrão 50 × 30 mm até a impressora chegar). Qualquer produto ativo ganha etiqueta, mesmo sem saldo no Bazar; no máximo 500 por vez. Cada impressão fica no **histórico do produto** (quem, quando, quantas), pela auditoria.
 5. **Encerrar o lote.** Lote encerrado não aceita item novo (RN-28), mas os itens dele ainda são aprovados, devolvidos e corrigidos; reabrir ou reverter descarte exige permissão e motivo, e vai para a auditoria. Item de descarte revertido também passa pela aprovação.
 
 ### 5.2 Estoque duplo (Bazar ⇄ Doações)
@@ -133,13 +133,14 @@ Cada domínio tem **o mesmo nome no front e no back** (ex.: `features/financeiro
 
 Tela cheia, pensada para leitor de código e tablet de 10".
 
-- **Leitura de código:** campo sempre focado; leitor USB funciona como teclado (Enter); feedback sonoro e visual. Bipar de novo um produto de várias unidades soma uma unidade na mesma linha (até o saldo do Bazar); peça única não entra duas vezes.
+- **Leitura de código:** campo sempre focado; leitor USB funciona como teclado (Enter); feedback sonoro e visual. Ao ler, mostra o produto, o preço de agora (com o desconto, se houver) e **quantas restam no Bazar** (ou "peça única"). Bipar de novo um produto de várias unidades soma uma unidade na mesma linha (até o saldo do Bazar); peça única não entra duas vezes.
+- **Várias unidades de uma vez (`n*código`):** digitar `3*` antes de bipar (ou `3*BZ000123` + Enter) lança 3 unidades, de 1 a 999. Pedido acima do saldo do Bazar é **recusado inteiro**, com o aviso de quanto cabe; peça única só aceita 1.
 - **Venda por categoria:** botões com preço para itens comuns, com quantidade (F2).
-- **Atalhos:** F2 quantidade · F4 pagamento · Esc remove o último · F6 sangria/suprimento.
+- **Atalhos:** F2 quantidade · F4 pagamento · Esc tira 1 do último item (pergunta antes) · F6 sangria/suprimento.
 - **Pagamento** (F4): o operador **digita quanto recebeu em cada forma** (dinheiro, PIX, débito, crédito) e o sistema faz a conta: mostra o que falta e, em dinheiro, o **troco** (conta de R$ 20 paga com nota de R$ 100: troco de R$ 80). A venda só finaliza quando a soma cobre o total. PIX e cartão não aceitam receber mais do que falta. No fiado o valor digitado é o que fica na conta do cliente (RN-15). Desconto só até o limite do perfil (o Vendedor padrão não dá desconto).
 - **CPF na compra (S1B-17 a S1B-21):** no **primeiro bip** de cada venda o PDV pergunta "A compra é com CPF?" (**S**im / **N**ão). Em Sim, o vendedor digita o CPF (com máscara; o sistema confere os dígitos e não segue com CPF inválido) e vê o **saldo do CPF no mês**; o PDV bloqueia o que passar do saldo. O CPF aparece **inteiro** só no comprovante (nunca nas listas nem na auditoria), fica guardado na tabela `venda_cpf` até o fim do mês e **depois é apagado** (e o saldo zera). O CPF não fica guardado no aparelho. O **Administrador decide**, em Parâmetros, o **limite de compras por CPF no mês em reais** (0 = sem limite) e se o **CPF é obrigatório** (com ele obrigatório o "Não" não aparece e o servidor recusa venda sem CPF válido). Venda cancelada devolve o saldo. Duas vendas ao mesmo tempo do mesmo CPF não passam juntas do limite.
 - **Estoque no PDV:** o catálogo traz o saldo do Bazar por categoria; o botão mostra "N em estoque" e o sistema **bloqueia e avisa a quantidade** ao passar do que há (o servidor confere de novo ao gravar). Peça que está no estoque de Doações avisa que não pode ser vendida.
-- **Tirar do carrinho por quantidade:** o ✕ pergunta quantas unidades tirar (peça única sai inteira). Esc tira uma unidade da última linha, e só se o campo estiver vazio (com texto digitado, Esc só limpa o campo).
+- **Tirar do carrinho por quantidade:** o ✕ pergunta quantas unidades tirar (peça única sai inteira). Esc com o campo vazio (e o botão "Remover último") **pergunta antes** de tirar uma unidade da última linha: a janela abre com o foco em **Cancelar**, então o Enter que o leitor manda no fim de cada código nunca tira item sem querer; tira com **S** ou com o clique em "Sim, tirar 1" (o S colado em outra tecla, como o leitor digita, não vale). Com texto digitado, Esc só limpa o campo.
 - **Fiado:** exige cliente e vencimento; **cadastro rápido de cliente** com ciência do aviso de privacidade (LGPD); se o telefone já existe, pergunta "É a mesma pessoa?".
 - **Comprovante não fiscal** com nome, CNPJ e endereço da instituição (impressão 80 mm).
 - **O servidor recalcula tudo** (preço, subtotal, desconto, total, troco); a tela é só conferência.
@@ -298,16 +299,19 @@ Segue o brandbook da instituição (`docs/marca/`):
 | `tests/smoke.ts` (fluxos críticos e segurança) | 157 ok |
 | `tests/concorrencia.ts` (disputa da última peça, IDOR) | OK |
 | `tests/reteste-qa.ts` (regressão dos 12 tickets) | 37 ok |
-| `tests/perfis.ts` (acesso de cada perfil, perfil personalizado, proteção dos perfis padrão, custo escondido, desativação) | 200 ok |
+| `tests/perfis.ts` (acesso de cada perfil, perfil personalizado, proteção dos perfis padrão, custo escondido, desativação) | 212 ok |
 | `tests/cpf.ts` (CPF: dígitos, limite em reais, obrigatório, só no comprovante, trava entre vendas, limpeza do mês) | 37 ok |
 | `tests/produto.ts` (Sprint 2: cadastro, devolução, aprovação, nova entrada, PEPS por produto, estorno, disputa da última unidade) | 49 ok |
 | `tests/sprint3.ts` (Sprint 3: aprovação por outra pessoa, fila, ajuste só de saída, produto, custo, preço, desconto no PDV e na venda, relatórios, auditoria do parceiro) | 46 ok |
+| `tests/sprint4.ts` (Sprint 4: tamanho do rolo, etiqueta com preço normal, limites do pedido, histórico na auditoria, permissão, venda acima do saldo) | 22 ok |
 | `database/04_testes_0003.sql` (tentativas de violar regras do banco) | 23 de 23 (28 com o papel da API) |
 | `database/08_testes_0009.sql` (regras do produto e da aprovação no banco) | 32 de 32 (35 com o papel da API) |
 | `database/09_testes_0010.sql` (Sprint 3: quem aprova e devolve, ajuste só de saída, desconto e preço efetivo, perfis, auditoria do parceiro) | 34 de 34 |
+| `database/10_testes_0011.sql` (Sprint 4: permissão de etiquetas, rolo padrão, auditoria da impressão sem dado pessoal) | 9 de 9 |
 | `database/07_manutencao_rotina.sql` (conferência de saldo e prestação de contas) | 0 divergência |
-| Telas no navegador (`apps/web/tests-ui/`: CPF, janelas do PDV, cadastro e aprovação de produtos) | 11, 14 e 19 ok |
+| Telas no navegador (`apps/web/tests-ui/`: CPF, janelas do PDV, cadastro e aprovação de produtos, PDV e etiquetas da Sprint 4) | 11, 14, 19 e 30 ok |
 | Telas da Sprint 3 no navegador (Chrome por CDP, sistema real) | 20 + 9 (perfis pela tela) + 11 (correções do QA e impressão do caixa) ok |
+| Etiquetas no sistema real (PDF no tamanho do rolo, código lido pelo `zbarimg` de 30 × 20 a 120 × 100 mm) | 5 ok, todos os tamanhos lidos |
 | Typecheck web + api e `npm audit` | 0 erros, 0 vulnerabilidades |
 
 Teste de volume (`05_carga_volume_teste.sql`): cerca de 5 anos simulados — 64 mil itens, 129 mil movimentações, 60 mil vendas.

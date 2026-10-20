@@ -20,6 +20,9 @@ const TIPOS_PARAM: Record<string, { tipo: 'number' | 'text' | 'bool'; min?: numb
   'anexo.tamanho_max_mb': { tipo: 'number', min: 1, max: 10 },
   'cpf.limite_mensal': { tipo: 'number', min: 0, max: 1_000_000, vazio: true }, // em reais; 0 ou em branco = sem limite
   'cpf.obrigatorio': { tipo: 'bool' }, // 1 = sim, 0 = não
+  // tamanho do rolo (S4-01): abaixo de 30 x 20 mm o Code 128 do BZ + 6 dígitos não cabe com barras que o leitor 1D lê
+  'etiqueta.largura_mm': { tipo: 'number', min: 30, max: 120 },
+  'etiqueta.altura_mm': { tipo: 'number', min: 20, max: 100 },
 };
 
 export async function rotasAdmin(app: FastifyInstance) {

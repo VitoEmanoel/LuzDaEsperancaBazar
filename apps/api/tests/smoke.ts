@@ -139,8 +139,8 @@ async function main() {
   check((await admin.post(`/lotes/${lote2.id}/aprovar`)).data?.aprovadosAgora === 1, 'Admin aprova o segundo lote');
   const det = (await tri.get(`/lotes/${lote1.id}`)).data;
   check(det.aprovados === 8 && det.descartados === 1 && det.valorAtribuido === '190.00', 'resumo do lote', det);
-  const et = (await tri.get(`/etiquetas?itens=${pec1.id},${pec2.id}`)).data;
-  check(et.length === 2, 'etiquetas');
+  const et = (await tri.post('/etiquetas/preparar', { produtos: [{ produtoId: pec1.produto.id, quantidade: 1 }, { produtoId: pec2.produto.id, quantidade: 2 }] })).data;
+  check(et.itens?.length === 2 && et.itens[1].quantidade === 2 && et.larguraMm === 50 && et.alturaMm === 30, 'etiquetas (rolo padrão 50 x 30 mm)', et);
   const pdf = new FormData(); pdf.append('arquivo', new Blob([Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF')], { type: 'application/pdf' }), 'termo.pdf');
   check((await tri.req('POST', `/lotes/${lote1.id}/documento`, undefined, { form: pdf })).status === 204, 'anexo PDF aceito');
   const falso = new FormData(); falso.append('arquivo', new Blob(['<script>alert(1)</script>'], { type: 'application/pdf' }), 'x.pdf');

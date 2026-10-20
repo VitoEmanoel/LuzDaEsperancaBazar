@@ -1,6 +1,6 @@
 /** ENT/TRI — lotes de entrada, cadastro dos produtos do lote e aprovação. */
 import { http } from '../../shared/api/http';
-import type { CorrecaoItemRequest, Etiqueta, ItemAprovacao, ItemLote, LoteDetalhe, LoteEntrada, NovoLoteRequest, Page, ProdutoBusca, TriagemDescarteRequest, TriagemItemRequest } from '../../shared/api/types';
+import type { CorrecaoItemRequest, ItemAprovacao, ItemLote, LoteDetalhe, LoteEntrada, NovoLoteRequest, Page, ProdutoBusca, TriagemDescarteRequest, TriagemItemRequest } from '../../shared/api/types';
 
 export const lotesApi = {
   listar: (q: { parceiroId?: string; campanhaId?: string; status?: string; de?: string; ate?: string; page?: number }) =>
@@ -27,5 +27,4 @@ export const lotesApi = {
   encerrar: (id: string) => http.post<LoteEntrada>(`/lotes/${id}/encerrar`),
   reabrir: (id: string, motivo: string) => http.post<LoteEntrada>(`/lotes/${id}/reabrir`, { motivo }),
   reverterDescarte: (descarteId: string, motivo: string) => http.post<void>(`/descartes/${descarteId}/reverter`, { motivo }),
-  etiquetas: (itemIds: string[]) => http.get<Etiqueta[]>('/etiquetas', { query: { itens: itemIds.join(',') } }),
 };
