@@ -1,6 +1,6 @@
 /**
  * ENT/TRI — lotes de entrada, anexo do documento, cadastro dos produtos do lote e descartes,
- * aprovação pelo Administrador, encerramento/reabertura, reversão de descarte e etiquetas
+ * aprovação pelo Administrador, encerramento/reabertura e reversão de descarte (as etiquetas ficam em estoque/etiquetas.routes.ts)
  * (RF-ENT-01..03, RF-TRI-01..05; Sprint 2: docs/arquitetura/produto-e-aprovacao.md).
  * O item nasce CADASTRADO e não mexe no estoque: a ENTRADA só é gravada na aprovação.
  */
@@ -507,7 +507,7 @@ export async function rotasLotes(app: FastifyInstance) {
   });
 
   // ---------------- produtos: busca para a nova entrada ----------------
-  app.get('/produtos', { config: { acesso: ['entrada.registrar', 'estoque.consultar', 'produtos.aprovar'] } }, async (req) => {
+  app.get('/produtos', { config: { acesso: ['entrada.registrar', 'estoque.consultar', 'produtos.aprovar', 'etiquetas.imprimir'] } }, async (req) => {
     const q = parse(zPage.extend({ busca: z.string().trim().max(100).optional(), categoriaId: zUuid.optional() }), req.query);
     const where: Prisma.ProdutoWhereInput = {
       ativo: true,
@@ -585,16 +585,6 @@ export async function rotasLotes(app: FastifyInstance) {
       await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'DESCARTE_REVERTIDO', 'descarte', id, undefined, { loteId: d!.loteId, motivo });
     });
     return reply.code(204).send();
-  });
-
-  app.get('/etiquetas', { config: { acesso: ['entrada.registrar'] } }, async (req) => {
-    const q = parse(z.object({ itens: z.string().max(200 * 37) }), req.query);
-    const ids = q.itens.split(',').map((s) => s.trim()).filter(Boolean);
-    if (ids.length > 200 || !ids.every((x) => zUuid.safeParse(x).success)) throw new AppError(400, 'Lista de itens inválida (até 200 ids)', 'VALIDACAO');
-    // a etiqueta é do produto: título curto, preço atual e código (P-06)
-    const itens = await prisma.item.findMany({ where: { id: { in: ids }, tipoControle: 'ETIQUETADO' }, include: { produto: true } });
-    return itens.map((i) => ({ itemId: i.id, codigo: i.produto!.codigo, descricao: i.produto!.tituloEtiqueta, preco: money(i.produto!.precoVenda) }))
-      .sort((a, b) => a.codigo.localeCompare(b.codigo));
   });
 }
 

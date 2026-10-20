@@ -80,8 +80,8 @@ async function main() {
   check(vestido.status === 201 && vestido.data.produto.pecaUnica, 'peça única cadastrada', vestido.data);
   let lA = (await est.get(`/lotes/${loteA.id}`)).data;
   check(lA.aprovados === 0 && lA.pendentes === 2 && lA.valorAtribuido === '0.00', 'prestação do lote não conta o que não foi aprovado', lA);
-  const et = (await est.get(`/etiquetas?itens=${itA.data.id}`)).data;
-  check(et.length === 1 && et[0].codigo === codigo && et[0].descricao === 'Caneca branca' && et[0].preco === '7.00', 'etiqueta do produto: título curto, preço e código', et);
+  const et = (await est.post('/etiquetas/preparar', { produtos: [{ produtoId: itA.data.produto.id, quantidade: 3 }] })).data.itens;
+  check(et?.length === 1 && et[0].codigo === codigo && et[0].titulo === 'Caneca branca' && et[0].preco === '7.00' && et[0].quantidade === 3, 'etiqueta do produto: título curto, preço e código', et);
 
   console.log('Devolução e correção (P-14)');
   check((await est.post(`/itens/${itA.data.id}/aprovar`)).data?.code === 'AUTO_APROVACAO', 'Estoquista não aprova o que ele mesmo cadastrou (S3-22)');

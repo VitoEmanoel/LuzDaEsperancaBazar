@@ -3,7 +3,7 @@ export const PERMISSOES = [
   'usuarios.gerenciar', 'perfis.gerenciar', 'auditoria.consultar',
   'cadastros.gerenciar', 'cadastros.consultar', 'clientes.gerenciar', 'parametros.gerenciar',
   'entrada.registrar', 'triagem.reabrir', 'produtos.aprovar', 'parceiros.criar',
-  'estoque.consultar', 'estoque.transferir', 'estoque.ajustar', 'custo.consultar', 'produtos.preco', 'produtos.desconto',
+  'estoque.consultar', 'estoque.transferir', 'estoque.ajustar', 'custo.consultar', 'produtos.preco', 'produtos.desconto', 'etiquetas.imprimir',
   'caixa.operar', 'venda.cancelar', 'venda.desconto_autorizar', 'terminais.gerenciar',
   'contas_pagar.gerenciar', 'contas_receber.receber', 'contas_receber.lancar', 'recebimento.estornar',
   'relatorios.consultar', 'relatorios.estoque', 'fiscal.gerenciar', 'privacidade.gerenciar',

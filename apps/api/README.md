@@ -27,7 +27,8 @@ API_URL=http://localhost:3000/api/v1 npm run test:reteste                       
 API_URL=http://localhost:3000/api/v1 npm run test:perfis                                  # 144 verificações de acesso por perfil (depois do smoke)
 API_URL=http://localhost:3000/api/v1 npm run test:cpf                                     # 37 verificações do CPF na venda (depois do smoke)
 API_URL=http://localhost:3000/api/v1 npm run test:produto                                 # 49 verificações do produto, do cadastro no lote e da aprovação (Sprint 2, depois do smoke)
-API_URL=http://localhost:3000/api/v1 npm run test:sprint3                                 # 42 verificações da Sprint 3: aprovação por outra pessoa, fila, custo, preço, desconto e preço efetivo na venda (depois do smoke)
+API_URL=http://localhost:3000/api/v1 npm run test:sprint3                                 # 46 verificações da Sprint 3: aprovação por outra pessoa, fila, custo, preço, desconto e preço efetivo na venda (depois do smoke)
+API_URL=http://localhost:3000/api/v1 npm run test:sprint4                                 # Sprint 4: etiquetas (rolo, preço normal, teto, histórico, quem imprime) e venda acima do saldo (depois do smoke)
 npm run typecheck && npm run audit --prefix ../..                                                       # 0 erros, 0 vulnerabilidades
 ```
 

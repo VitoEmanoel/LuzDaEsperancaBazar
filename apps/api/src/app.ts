@@ -20,6 +20,7 @@ import { rotasClientes } from './modules/cadastros/clientes.routes.js';
 import { rotasLotes } from './modules/entradas/lotes.routes.js';
 import { rotasEstoque } from './modules/estoque/estoque.routes.js';
 import { rotasProdutos } from './modules/estoque/produtos.routes.js';
+import { rotasEtiquetas } from './modules/estoque/etiquetas.routes.js';
 import { rotasPdv } from './modules/pdv/pdv.routes.js';
 import { rotasCaixa } from './modules/caixa/caixa.routes.js';
 import { rotasFinanceiro } from './modules/financeiro/financeiro.routes.js';
@@ -124,6 +125,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     await api.register(rotasLotes);
     await api.register(rotasEstoque);
     await api.register(rotasProdutos);
+    await api.register(rotasEtiquetas);
     await api.register(rotasPdv);
     await api.register(rotasCaixa);
     await api.register(rotasFinanceiro);
