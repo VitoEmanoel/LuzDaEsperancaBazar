@@ -156,25 +156,25 @@ Perfis e visibilidade
 - [x] S1B-21 Testes do CPF (validação dos dígitos, limite e saldo em reais, soma entre vendas do mesmo CPF, virada do mês, venda cancelada devolve o saldo) e aviso de privacidade (LGPD) na tela
 - [x] S1B-15 Rodar a definição de pronto; análise das tarefas e QA pelo agy; atualizar a documentação *(feito: análise antes e revisão depois, duas rodadas; achados conferidos nos arquivos)*
 
-### Sprint 2 — Produto, lote e cadastro (09/11 a 15/11)
+### Sprint 2 — Produto, lote e cadastro (09/11 a 15/11) · concluída em 19/10/2026, aguardando validação do humano
 **Objetivo:** o produto com código único e várias unidades, e o cadastro separado da aprovação, no banco e na API.
 
-- [ ] S2-01 Ler o `schema.prisma` completo e desenhar o modelo: produto, entradas por lote e estados do item
-- [ ] S2-02 Tabela de produto com título da etiqueta, nome, modelo, marca, ano, tipo, tamanho, cor, condição, categoria e preço
-- [ ] S2-03 Gerar o código curto do produto (sequencial, compatível com Code 128), sem quebrar os códigos já existentes
-- [ ] S2-04 Migração nova ligando produto a lote e origem (parceiro ou campanha), com os estados **cadastrado** e **aprovado**
-- [ ] S2-05 Regras no banco: o saldo só sobe na aprovação; peça única continua com quantidade 1
-- [ ] S2-06 Parceiro obrigatório no lote (tela, API e banco); estoquista pode criar parceiro
-- [ ] S2-07 API: cadastrar produto no lote (fica "cadastrado", sem efeito no estoque)
-- [ ] S2-08 API: nova entrada para produto já existente (soma ao saldo por movimentação, com origem)
-- [ ] S2-09 API: aprovar item a item e o lote inteiro; devolver ao estoquista com motivo; tudo na auditoria
-- [ ] S2-10 Venda por PEPS sobre o produto, mantendo a atribuição da receita ao parceiro de origem
-- [ ] S2-11 Manter o descarte com motivo no cadastro do lote
-- [ ] S2-12 Tela Novo lote (com criação de parceiro na hora)
-- [ ] S2-13 Tela Cadastrar produtos do lote (substitui a triagem)
-- [ ] S2-14 Adaptar a prestação de contas e o conferidor de saldo (`07_manutencao_rotina.sql`) ao produto
-- [ ] S2-15 Testes: aprovação, devolução, PEPS por produto e duas vendas disputando a última unidade; e as lacunas achadas pelo QA em 19/10/2026: preço adulterado na venda, campo extra recusado, reenvio de recebimento com o mesmo id e corpo do erro no padrão RFC 9457
-- [ ] S2-16 Rodar a definição de pronto; revisão pelo agy; atualizar a documentação
+- [x] S2-01 Ler o `schema.prisma` completo e desenhar o modelo: produto, entradas por lote e estados do item
+- [x] S2-02 Tabela de produto com título da etiqueta, nome, modelo, marca, ano, tipo, tamanho, cor, condição, categoria e preço
+- [x] S2-03 Gerar o código curto do produto (sequencial, compatível com Code 128), sem quebrar os códigos já existentes
+- [x] S2-04 Migração nova ligando produto a lote e origem (parceiro ou campanha), com os estados **cadastrado** e **aprovado**
+- [x] S2-05 Regras no banco: o saldo só sobe na aprovação; peça única continua com quantidade 1
+- [x] S2-06 Parceiro obrigatório no lote (tela, API e banco); estoquista pode criar parceiro
+- [x] S2-07 API: cadastrar produto no lote (fica "cadastrado", sem efeito no estoque)
+- [x] S2-08 API: nova entrada para produto já existente (soma ao saldo por movimentação, com origem)
+- [x] S2-09 API: aprovar item a item e o lote inteiro; devolver ao estoquista com motivo; tudo na auditoria
+- [x] S2-10 Venda por PEPS sobre o produto, mantendo a atribuição da receita ao parceiro de origem
+- [x] S2-11 Manter o descarte com motivo no cadastro do lote
+- [x] S2-12 Tela Novo lote (com criação de parceiro na hora)
+- [x] S2-13 Tela Cadastrar produtos do lote (substitui a triagem)
+- [x] S2-14 Adaptar a prestação de contas e o conferidor de saldo (`07_manutencao_rotina.sql`) ao produto
+- [x] S2-15 Testes: aprovação, devolução, PEPS por produto e duas vendas disputando a última unidade; e as lacunas achadas pelo QA em 19/10/2026: preço adulterado na venda, campo extra recusado, reenvio de recebimento com o mesmo id e corpo do erro no padrão RFC 9457
+- [x] S2-16 Rodar a definição de pronto; revisão pelo agy; atualizar a documentação
 
 ### Sprint 3 — Aprovação, estoque unificado e desconto (16/11 a 22/11)
 **Objetivo:** o Admin aprova; o estoque vira uma tela só; desconto no produto.

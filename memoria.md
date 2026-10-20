@@ -6,6 +6,7 @@ Anotações de quem trabalha no código (Claude Code ou pessoa). Atualize ao ter
 - **Só codar com autorização explícita do humano, para aquela tarefa.** Pergunta, dúvida, relato de problema, descrição de ideia ou "temos que consertar" **não são ordem**. Eu quebrei isso duas vezes em 19/10/2026 (abri uma branch sem ordem e implementei o limite de estoque enquanto ele esperava as dúvidas). Se ele pedir para esperar, esperar. **A Sprint 2 só começa quando ele mandar.**
 - **Terceirizar com o `agy`; a palavra final é do Claude** (conferir, decidir, responder ao humano). O agy é sempre o QA: testa o que foi implementado e analisa as tarefas antes de começar.
 - **Acompanhar o agy até ele responder de verdade.** Chamada grande estoura o tempo (`exit=124`, sem resposta): quebrar em fatias pequenas, conferir o código de saída e **refazer a fatia que falhou**. O que ele diz é opinião: conferir cada achado nos arquivos, aceitar o que é real, recusar o resto com o motivo e contar ao humano.
+- **Commit só no fim da sprint** (ordem do humano, 19/10/2026): **não fazer commits durante a sprint**. Só commitar quando tiver certeza de que a sprint terminou e está tudo certo, depois dos testes e da validação (QA do agy conferido). O agy trabalha só lendo, então não precisa de commit antes da chamada. Na Sprint 2 eu já tinha feito 5 commits locais antes de saber disso.
 - **Ao terminar uma sprint: commit e push da branch** (a ordem do humano). **Quem faz o merge é o humano**, pelo pull request. Correção depois do merge vai numa branch própria.
 - **Sem `Co-Authored-By` do Claude** em commits e PRs.
 - Ao fim de uma sprint, parar e mostrar tudo que foi feito e alterado.
@@ -13,9 +14,11 @@ Anotações de quem trabalha no código (Claude Code ou pessoa). Atualize ao ter
 
 ## 2. Estado atual (19/10/2026)
 - Fase: protótipo. Sprint 0, Sprint 1 (sem offline, perfis) e Sprint 1B (regras de venda e caixa, mais o CPF) **concluídas e mergeadas no `main`** (PR nº 1 `f64cdd9`; correção do foco no PR nº 2 `5b1cb34`).
-- **Em andamento: Sprint 2** (produto, lote e cadastro), autorizada pelo humano em 19/10/2026, na branch `sprint-2-produto-lote-cadastro`. Decisões de produto tomadas (P-06, P-13 a P-15 no plano). O `agy` já analisou as tarefas (desenho: tabela nova `produto`; `item` vira a entrada por lote do produto, com estado; a `ENTRADA` em `movimentacao` só nasce na aprovação; tudo na migração nova 0009).
+- **Sprint 2 (produto, lote e cadastro): S2-01 a S2-16 prontas e verificadas em 19/10/2026, aguardando a validação do humano** na branch `sprint-2-produto-lote-cadastro`. Desenho em `docs/arquitetura/produto-e-aprovacao.md` (tabela `produto`; `item` = entrada do produto no lote, com estado CADASTRADO, DEVOLVIDO ou APROVADO; a `ENTRADA` só nasce na aprovação; migração 0009). QA do agy em duas rodadas, achados conferidos. Há 5 commits locais feitos antes da regra "commit só no fim"; o resto (correções do QA, CLAUDE.md, memória, plano) está sem commit, esperando a validação. Nada foi enviado ao GitHub.
 - Verificação de 19/10/2026 nesta máquina (banco novo): números iguais aos da seção 4; QA do `agy` sobre a cobertura dos testes conferido (lacunas pequenas foram para a S2-15).
 - Pendente do humano: conferir no navegador as telas de cada perfil (S1-19).
+- **Documentos de planejamento para a faculdade (20/10/2026, fora do repositório):** WBS/EAP, Product Backlog e Sprint Planning do Bazar, no formato dos documentos do CRM da mesma instituição (`/home/VT/Documentos/referencia/*.pdf`). Planejam o sistema **do zero**, como se não houvesse código, nas mesmas datas do CRM (20/10 a 03/12/2026), com a equipe: líder José Wilk Souza Lima; devs Victor Emanoel Lima Silva, Eric Silva Patricio, Henrique Veras Cordeiro, Luis Felipe Ferreira Martins, Adonias Pereira dos Santos Terceiro. Saída em `/home/VT/Documentos/referencia/docBazar/` (HTML com fontes embutidas + PDF; o professor escolhe). Fonte editável em `docBazar/fonte/` (`dados_wbs.py`, `dados_backlog.py`); regenerar com `python3 gerar.py` nessa pasta, que antes confere dependências × sprints, MoSCoW, cobertura das telas e capacidade. Números: 10 módulos, 41 telas, 41 tabelas, 60 itens + HO-01, 31 dias úteis, 930 h dev (o CRM diz 30 dias e 876 h, mas a conta dele não fecha). QA do agy em 3 fatias, achados conferidos.
+- **Tabela mais larga que o cabeçalho (20/10/2026, sem commit, junto da Sprint 2):** com a janela entre 901 e ~1700 px (notebook com a tela dividida), a tabela empurrava a página para o lado e passava do cabeçalho (até 702 px em 960). Correção: toda `.table` fica dentro de `TabelaRolavel` (`shared/components/ui.tsx`, classe `.tabela-rolavel` em `components.css`), que rola sozinha em qualquer largura; saiu a regra `.table {display:block}` do `@media 900px` e a duplicata do `pdv.css`; títulos `th.num` podem quebrar linha. Tabela nova: sempre dentro de `<TabelaRolavel>`. Verificado por varredura CDP em 390/683/960/1100/1366 px (página não rola mais), typecheck, build e QA do agy. Ainda em aberto, à espera do humano: tabelas em cartões e abas cortadas no celular.
 
 ## 3. Repositório, pastas e ambiente
 - Repositório oficial: `VitoEmanoel/LuzDaEsperancaBazar`, remoto `origin` **via SSH** (`git@github.com:...`); o HTTPS não tem credenciais.
@@ -30,8 +33,8 @@ Anotações de quem trabalha no código (Claude Code ou pessoa). Atualize ao ter
   - **O proxy do Vite aponta por padrão para a 3000** (outro projeto): subir o front real com `VITE_USE_MOCK=false VITE_API_PROXY=http://127.0.0.1:3100 npx vite --port 5173`.
   - Sem o Chromium do Playwright: os testes de tela usam `/usr/bin/google-chrome-stable` (trocar o `executablePath` só na cópia, fora do projeto).
 
-## 4. Referência de testes (Sprint 1B + CPF, banco novo)
-`typecheck` e `build` sem erros, `npm audit` 0 vulnerabilidades, `test:smoke` 151, `test:concorrencia` 5, `test:reteste` 36, `test:perfis` 120, `test:cpf` 37, SQL `04_testes_0003` 23 de 23, `07_manutencao_rotina` sem divergência, 24 permissões. Testes de tela no navegador (`apps/web/tests-ui/`): CPF 11 de 11 e janelas do PDV 14 de 14 (seção 5).
+## 4. Referência de testes (Sprint 2, banco novo, 19/10/2026)
+`typecheck` e `build` sem erros, `npm audit` 0 vulnerabilidades, `test:smoke` 156, `test:concorrencia` 5, `test:reteste` 37, `test:perfis` 144, `test:cpf` 37, `test:produto` 49, SQL `04_testes_0003` 23 (28 com o papel da API), `08_testes_0009` 32 (35), `07_manutencao_rotina` sem divergência (5 conferências), 26 permissões. Testes de tela (`apps/web/tests-ui/`): CPF 11, janelas do PDV 14, produto 19. Ordem das baterias: smoke, concorrencia, reteste, perfis, cpf, produto (65 s entre elas).
 
 ## 5. Como verificar
 - **Banco de teste limpo antes de cada rodada** (a suíte troca a senha do admin): derrubar a API da 3100, `DROP/CREATE DATABASE`, `npm run db:deploy`, `database/03_seguranca_papeis.sql`, `npm run db:seed`, subir a API. **Nunca encadear esse script num pipe** (`| tail`): o servidor em segundo plano segura o cano e o comando trava; usar `> arquivo 2>&1 < /dev/null`.
@@ -54,6 +57,14 @@ Anotações de quem trabalha no código (Claude Code ou pessoa). Atualize ao ter
 - Migrações já aplicadas **não se editam** (checksum). Toda mudança de banco entra em migração nova. A `0005` e a `0006` foram editadas só antes de qualquer push.
 
 ## 7. Decisões técnicas (por área)
+**Produto e aprovação** (Sprint 2, migração 0009)
+- `produto`: código `BZ` + 6 dígitos (mesma sequência `seq_codigo_barras`), preço do produto (vale para todas as entradas), `peca_unica`. Cada peça antiga virou produto de peça única com o **mesmo id do item** e o mesmo código.
+- `item` ganhou `produto_id`, `status`, `local_destino_id`, `motivo_devolucao`, `aprovado_por_id`, `aprovado_em`. `item.codigo_barras` e `item.preco_venda` só nos itens antigos; o código e o preço são lidos do produto.
+- Só o Administrador aprova (`produtos.aprovar`); o Estoquista cria parceiro (`parceiros.criar`). Doação exige parceiro (gatilho em INSERT e UPDATE de tipo/parceiro; lotes antigos só com campanha continuam válidos).
+- **Travas sempre na ordem do `item.id`** (`travarItens` em `lotes.routes.ts`): venda (todas as entradas de uma vez), aprovação e o estorno do banco usam a mesma ordem. A ENTRADA trava o produto `FOR SHARE`; a correção trava `FOR UPDATE`.
+- Venda: o mesmo código repetido soma; PEPS entre entradas aprovadas; uma linha de venda por entrada consumida.
+- Na correção (PATCH), deixar de ser peça única grava antes do item e virar peça única grava depois (o gatilho confere com a quantidade nova).
+
 **Perfis e permissões** (migrações 0005 e 0006)
 - Quatro perfis padrão: **Administrador** (todas as 24 permissões, **inclusive abrir caixa**), **Vendedor** (`caixa.operar`, `clientes.gerenciar`), **Estoquista** (`entrada.registrar`, `estoque.consultar`, `estoque.transferir`, `cadastros.consultar`, `relatorios.estoque`), **Financeiro** (`contas_pagar.gerenciar`, `contas_receber.receber`, `contas_receber.lancar`, `relatorios.consultar`, `relatorios.estoque`, `estoque.consultar`). O Admin cria perfis personalizados (`padrao = false`, não são tocados pelas migrações).
 - Permissão `relatorios.estoque`: relatórios de estoque, descartes e transferências; receita, vendas, fiado e prestação de contas exigem `relatorios.consultar`.
@@ -86,7 +97,8 @@ Anotações de quem trabalha no código (Claude Code ou pessoa). Atualize ao ter
 - **Admin sem freio:** decidido (P-15): basta o motivo no cancelamento, que já é obrigatório para todos.
 - Esc com o campo vazio: o humano decidiu pedir confirmação (S4-19).
 - Limite do CPF só em reais inteiros (R$ 2.000, R$ 5.000), por escolha.
-- Sprint 2 em diante: ver `docs/PLANO-DE-SPRINTS.md` (produto de código único, aprovação pelo Admin, estoque unificado, desconto no produto, etiquetas, importação, dashboards).
+- **Pendências da Sprint 2:** `05_carga_volume_teste.sql` ainda insere itens no modelo antigo (adaptar na S6-03). `02_dml_dados_iniciais.sql` está desatualizado desde a 0005 (perfis Caixa e Triagem). Achado antigo (de antes da Sprint 2) a decidir: a auditoria de `PATCH /parceiros` grava o nome do parceiro e o CPF mascarado (dado pessoal na auditoria). A API simulada não faz tudo igual à real (PATCH de categoria, filtros de produto).
+- Sprint 3 em diante: ver `docs/PLANO-DE-SPRINTS.md` (produto de código único, aprovação pelo Admin, estoque unificado, desconto no produto, etiquetas, importação, dashboards).
 
 ## 9. Registro de trabalho
 Uma linha por dia de trabalho ou por tarefa: `AAAA-MM-DD | tarefa | o que foi feito | o que ficou pendente`.
@@ -98,3 +110,4 @@ Uma linha por dia de trabalho ou por tarefa: `AAAA-MM-DD | tarefa | o que foi fe
 - 2026-10-19 | merge | humano fez o merge no `main` (PR nº 1, `f64cdd9`); branch antiga apagada; verificado: conteúdo idêntico ao testado, sem segredos | —
 - 2026-10-19 | correção do foco do CPF | humano relatou que o foco saía do campo para o ✕ e o "Sim" não respondia; causa: `onFechar` no efeito do `Modal` e `autoFocus` ignorado; corrigido na branch `correcao-foco-do-cpf`; provado no navegador (6 falhas no código antigo, 11 de 11 no novo) | — (mergeado no PR nº 2, `5b1cb34`; branch apagada)
 - 2026-10-19 | verificação em máquina nova | ambiente montado (Node do sistema, `bazar_proto` na 5432, `.env` local); todas as baterias, SQL e testes de tela verdes; QA do agy (cobertura dos testes e análise da Sprint 2) conferido; decisões P-06, P-13 a P-15 | Sprint 2 começando
+- 2026-10-19 | S2-01 a S2-16 | produto de código único, cadastro no lote, aprovação e devolução pelo Admin, PEPS por produto, telas Novo lote e Cadastrar produtos, testes (test:produto, 08_testes_0009, produto-ui); QA do agy em 2 rodadas | validação do humano; commit e push só depois dela
