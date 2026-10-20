@@ -119,7 +119,6 @@
   .sidebar.open { transform: none; }
   .menu-toggle { display: inline-flex; }
   .contadores { grid-template-columns: repeat(2, 1fr); }
-  .table { display: block; overflow-x: auto; }
   .content { padding: 1rem; }
   .auth-page { grid-template-columns: 1fr; }
   .auth-hero { padding: 2rem 1.5rem; }

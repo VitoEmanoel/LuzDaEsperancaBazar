@@ -9,7 +9,7 @@ import { contasReceberApi } from '../financeiro.api';
 import { errorMessage } from '../../../shared/api/http';
 import { FORMAS_QUITACAO, type CaixaSessao, type Cliente, type ContaReceber, type ExtratoCliente, type FormaQuitacao } from '../../../shared/api/types';
 import { useAsync } from '../../../shared/hooks/useAsync';
-import { Badge, Empty, ErrorAlert, Field, MoneyText, PageHeader, Pagination } from '../../../shared/components/ui';
+import { Badge, Empty, ErrorAlert, Field, MoneyText, PageHeader, Pagination, TabelaRolavel } from '../../../shared/components/ui';
 import { Modal } from '../../../shared/components/Modal';
 import { ConfirmMotivo } from '../../../shared/components/ConfirmMotivo';
 import { Can } from '../../auth/guards';
@@ -38,7 +38,7 @@ export function ContasReceberPage() {
       </div>
       <ErrorAlert erro={erro} />
       {carregando ? <p>Carregando…</p> : !data?.items.length ? <Empty /> : (
-        <table className="table">
+        <TabelaRolavel><table className="table">
           <thead><tr><th>Cliente</th><th>Origem</th><th>Vencimento</th><th>Status</th><th className="num">Valor</th><th className="num">Saldo</th><th /></tr></thead>
           <tbody>{data.items.map((c) => (
             <tr key={c.id} className={(c.status === 'ABERTA' || c.status === 'PARCIAL') && c.vencimento < hoje ? 'linha-vencida' : ''}>
@@ -49,7 +49,7 @@ export function ContasReceberPage() {
               <td>{(c.status === 'ABERTA' || c.status === 'PARCIAL') && <button className="btn btn-sm btn-primary" onClick={() => setReceber(c)}>Receber</button>}</td>
             </tr>
           ))}</tbody>
-        </table>
+        </table></TabelaRolavel>
       )}
       {data && <Pagination page={data.page} pageSize={data.pageSize} total={data.total} onChange={setPage} />}
       <ReceberModal conta={receber} onFechar={() => setReceber(null)} onOk={async () => { toast('Recebimento registrado.'); await reload(); }} />
@@ -107,14 +107,14 @@ function ExtratoModal({ clienteId, onFechar, onAlterou }: { clienteId: string | 
       {ext.data && (<>
         <p>Saldo devedor: <strong><MoneyText value={ext.data.saldoDevedor} /></strong></p>
         <h3>Contas</h3>
-        <table className="table compact"><thead><tr><th>Origem</th><th>Vencimento</th><th>Status</th><th className="num">Valor</th><th className="num">Saldo</th></tr></thead>
-          <tbody>{ext.data.contas.map((c) => <tr key={c.id}><td>{c.vendaNumero ? `Venda ${c.vendaNumero}` : c.descricao}</td><td>{formatDate(c.vencimento)}</td><td>{c.status}</td><td className="num"><MoneyText value={c.valor} /></td><td className="num"><MoneyText value={c.saldo} /></td></tr>)}</tbody></table>
+        <TabelaRolavel><table className="table compact"><thead><tr><th>Origem</th><th>Vencimento</th><th>Status</th><th className="num">Valor</th><th className="num">Saldo</th></tr></thead>
+          <tbody>{ext.data.contas.map((c) => <tr key={c.id}><td>{c.vendaNumero ? `Venda ${c.vendaNumero}` : c.descricao}</td><td>{formatDate(c.vencimento)}</td><td>{c.status}</td><td className="num"><MoneyText value={c.valor} /></td><td className="num"><MoneyText value={c.saldo} /></td></tr>)}</tbody></table></TabelaRolavel>
         <h3>Recebimentos</h3>
-        <table className="table compact"><thead><tr><th>Data</th><th>Onde</th><th className="num">Valor</th><th /></tr></thead>
+        <TabelaRolavel><table className="table compact"><thead><tr><th>Data</th><th>Onde</th><th className="num">Valor</th><th /></tr></thead>
           <tbody>{ext.data.recebimentos.map((r) => (
             <tr key={r.id} className={r.estornado ? 'riscado' : ''}><td>{formatDateTime(r.recebidoEm)}</td><td>{r.caixaId ? 'No caixa' : 'Fora do caixa'}{r.forma && ` · ${FORMAS_QUITACAO.find((f) => f.value === r.forma)?.label ?? r.forma}`}{r.estornado && ' · estornado'}</td><td className="num"><MoneyText value={r.valor} /></td>
               <td><Can perm="recebimento.estornar">{!r.estornado && <button className="btn btn-sm btn-danger" onClick={() => setEstornar(r.id)}>Estornar</button>}</Can></td></tr>
-          ))}</tbody></table>
+          ))}</tbody></table></TabelaRolavel>
       </>)}
       <ConfirmMotivo aberto={!!estornar} titulo="Estornar recebimento" descricao="O estorno é do valor inteiro e só pode ser feito uma vez." rotuloConfirmar="Estornar" onFechar={() => setEstornar(null)}
         onConfirmar={async (m) => { await contasReceberApi.estornar(estornar!, m); toast('Recebimento estornado.'); await ext.reload(); await onAlterou(); }} />

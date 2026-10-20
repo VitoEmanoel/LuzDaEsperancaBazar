@@ -12,7 +12,7 @@ import { lotesApi } from '../entradas.api';
 import { errorMessage } from '../../../shared/api/http';
 import type { CamposProduto, Etiqueta, ItemLote, LocalEstoque, ProdutoBusca, StatusItem, TipoEntrada } from '../../../shared/api/types';
 import { useAsync } from '../../../shared/hooks/useAsync';
-import { Badge, ErrorAlert, Field, MoneyText, PageHeader } from '../../../shared/components/ui';
+import { Badge, ErrorAlert, Field, MoneyText, PageHeader, TabelaRolavel } from '../../../shared/components/ui';
 import { ConfirmMotivo } from '../../../shared/components/ConfirmMotivo';
 import { Modal } from '../../../shared/components/Modal';
 import { Barcode } from '../../../shared/components/Barcode';
@@ -100,7 +100,7 @@ export function TriagemPage() {
 
       <section>
         <h2>Itens do lote</h2>
-        <table className="table compact">
+        <TabelaRolavel><table className="table compact">
           <thead><tr><th>Código</th><th>Descrição</th><th className="num">Qtd.</th><th className="num">Preço</th><th>Destino</th><th>Situação</th><th /></tr></thead>
           <tbody>{l.itens.map((i) => (
             <tr key={i.id}>
@@ -119,11 +119,11 @@ export function TriagemPage() {
               </td>
             </tr>
           ))}</tbody>
-        </table>
+        </table></TabelaRolavel>
       </section>
       <section>
         <h2>Descartes</h2>
-        <table className="table compact">
+        <TabelaRolavel><table className="table compact">
           <thead><tr><th>Quando</th><th>Categoria</th><th>Motivo</th><th /></tr></thead>
           <tbody>{l.descartes.map((d) => (
             <tr key={d.id} className={d.revertido ? 'riscado' : ''}>
@@ -131,7 +131,7 @@ export function TriagemPage() {
               <td><Can perm="triagem.reabrir">{!d.revertido && <button className="btn btn-sm" onClick={() => setReverter(d.id)}>Reverter</button>}</Can></td>
             </tr>
           ))}</tbody>
-        </table>
+        </table></TabelaRolavel>
       </section>
 
       <ConfirmMotivo aberto={reabrir} titulo="Reabrir lote" descricao="O lote voltará a aceitar cadastros e descartes." onFechar={() => setReabrir(false)}

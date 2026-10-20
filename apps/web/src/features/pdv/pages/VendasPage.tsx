@@ -4,7 +4,7 @@ import { pdvApi } from '../pdv.api';
 import { errorMessage } from '../../../shared/api/http';
 import type { Venda } from '../../../shared/api/types';
 import { useAsync } from '../../../shared/hooks/useAsync';
-import { Badge, Empty, ErrorAlert, Field, MoneyText, PageHeader, Pagination } from '../../../shared/components/ui';
+import { Badge, Empty, ErrorAlert, Field, MoneyText, PageHeader, Pagination, TabelaRolavel } from '../../../shared/components/ui';
 import { ConfirmMotivo } from '../../../shared/components/ConfirmMotivo';
 import { ComprovanteModal } from '../components/ComprovanteModal';
 import { carregarInstituicao } from '../instituicao';
@@ -35,7 +35,7 @@ export function VendasPage() {
       </div>
       <ErrorAlert erro={erro} />
       {carregando ? <p>Carregando…</p> : !data?.items.length ? <Empty /> : (
-        <table className="table">
+        <TabelaRolavel><table className="table">
           <thead><tr><th>Nº</th><th>Data/hora</th><th>Operador</th><th>Status</th><th className="num">Total</th><th /></tr></thead>
           <tbody>
             {data.items.map((v) => (
@@ -52,7 +52,7 @@ export function VendasPage() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></TabelaRolavel>
       )}
       {data && <Pagination page={data.page} pageSize={data.pageSize} total={data.total} onChange={setPage} />}
       <ConfirmMotivo aberto={!!cancelar} titulo={`Cancelar venda ${cancelar?.numero ?? ''}`}

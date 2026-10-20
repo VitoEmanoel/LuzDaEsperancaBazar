@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { cadastrosApi } from '../../cadastros/cadastros.api';
 import { lotesApi } from '../entradas.api';
 import { useAsync } from '../../../shared/hooks/useAsync';
-import { Badge, Empty, ErrorAlert, Field, MoneyText, PageHeader, Pagination } from '../../../shared/components/ui';
+import { Badge, Empty, ErrorAlert, Field, MoneyText, PageHeader, Pagination, TabelaRolavel } from '../../../shared/components/ui';
 import { formatDate } from '../../../shared/lib/format';
 
 const TIPO: Record<string, string> = { DOACAO: 'Doação', COMPRA: 'Compra', SALDO_INICIAL: 'Saldo inicial' };
@@ -28,7 +28,7 @@ export function LotesPage() {
       </div>
       <ErrorAlert erro={erro} />
       {carregando ? <p>Carregando…</p> : !data?.items.length ? <Empty /> : (
-        <table className="table">
+        <TabelaRolavel><table className="table">
           <thead><tr><th>Lote</th><th>Recebido</th><th>Tipo</th><th>Parceiro / campanha</th><th>Status</th><th className="num">No estoque</th><th className="num">Aguardando aprovação</th><th className="num">Descartados</th><th className="num">Valor atribuído</th><th /></tr></thead>
           <tbody>
             {data.items.map((l) => (
@@ -41,7 +41,7 @@ export function LotesPage() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></TabelaRolavel>
       )}
       {data && <Pagination page={data.page} pageSize={data.pageSize} total={data.total} onChange={setPage} />}
     </div>

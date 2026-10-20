@@ -5,7 +5,7 @@ import { contasPagarApi } from '../financeiro.api';
 import { errorMessage } from '../../../shared/api/http';
 import { FORMAS_QUITACAO, type ContaPagar, type FormaQuitacao } from '../../../shared/api/types';
 import { useAsync } from '../../../shared/hooks/useAsync';
-import { Badge, Empty, ErrorAlert, Field, MoneyText, PageHeader, Pagination } from '../../../shared/components/ui';
+import { Badge, Empty, ErrorAlert, Field, MoneyText, PageHeader, Pagination, TabelaRolavel } from '../../../shared/components/ui';
 import { Modal } from '../../../shared/components/Modal';
 import { ConfirmMotivo } from '../../../shared/components/ConfirmMotivo';
 import { formatDate, todayLocal } from '../../../shared/lib/format';
@@ -31,7 +31,7 @@ export function ContasPagarPage() {
       </div>
       <ErrorAlert erro={erro} />
       {carregando ? <p>Carregando…</p> : !data?.items.length ? <Empty /> : (
-        <table className="table">
+        <TabelaRolavel><table className="table">
           <thead><tr><th>Vencimento</th><th>Descrição</th><th>Categoria</th><th>Status</th><th className="num">Valor</th><th /></tr></thead>
           <tbody>{data.items.map((c) => {
             const vencida = c.status === 'ABERTA' && c.vencimento < hoje;
@@ -45,7 +45,7 @@ export function ContasPagarPage() {
               </tr>
             );
           })}</tbody>
-        </table>
+        </table></TabelaRolavel>
       )}
       {data && <Pagination page={data.page} pageSize={data.pageSize} total={data.total} onChange={setPage} />}
       <NovaContaModal aberto={novo} onFechar={() => setNovo(false)} onOk={async () => { toast('Conta lançada.'); await reload(); }} />

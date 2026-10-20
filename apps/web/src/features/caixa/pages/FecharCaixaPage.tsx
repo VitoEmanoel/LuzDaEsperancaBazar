@@ -6,7 +6,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { caixaApi } from '../caixa.api';
 import { errorMessage } from '../../../shared/api/http';
 import { FORMAS_PAGAMENTO, type CaixaSessao, type PreviaFechamento } from '../../../shared/api/types';
-import { ErrorAlert, Field, MoneyText } from '../../../shared/components/ui';
+import { ErrorAlert, Field, MoneyText, TabelaRolavel } from '../../../shared/components/ui';
 import { useAsync } from '../../../shared/hooks/useAsync';
 import { downloadBlob } from '../../../shared/lib/download';
 import { LinhaDoTempoCaixa } from '../components/LinhaDoTempoCaixa';
@@ -83,7 +83,7 @@ export function FecharCaixaPage() {
         <form onSubmit={(e) => { e.preventDefault(); void fechar(); }}>
         {previa && (
           <>
-            <table className="table">
+            <TabelaRolavel><table className="table">
               <tbody>
                 <tr><td>Fundo de troco</td><td className="num"><MoneyText value={previa.fundoTroco} /></td></tr>
                 {FORMAS_PAGAMENTO.map((f) => <tr key={f.value}><td>Vendas — {f.label}</td><td className="num"><MoneyText value={previa.totaisPorForma[f.value]} /></td></tr>)}
@@ -91,7 +91,7 @@ export function FecharCaixaPage() {
                 <tr><td>Sangrias</td><td className="num">− <MoneyText value={previa.sangrias} /></td></tr>
                 <tr className="destaque"><td>Dinheiro esperado na gaveta</td><td className="num"><MoneyText value={previa.esperadoDinheiro} /></td></tr>
               </tbody>
-            </table>
+            </table></TabelaRolavel>
             <p className="muted">{previa.quantidadeVendas} venda(s) neste caixa.</p>
             <details>
               <summary>Ver tudo o que aconteceu neste caixa</summary>

@@ -4,7 +4,7 @@ import { perfisApi, usuariosApi } from '../../auth/auth.api';
 import { errorMessage } from '../../../shared/api/http';
 import type { Usuario } from '../../../shared/api/types';
 import { useAsync } from '../../../shared/hooks/useAsync';
-import { Badge, Empty, ErrorAlert, Field, Pagination } from '../../../shared/components/ui';
+import { Badge, Empty, ErrorAlert, Field, Pagination, TabelaRolavel } from '../../../shared/components/ui';
 import { Modal } from '../../../shared/components/Modal';
 import { uuid } from '../../../shared/lib/uuid';
 import { useToast } from '../../../shared/components/Toast';
@@ -29,7 +29,7 @@ export function UsuariosTab() {
       <div className="row"><button className="btn btn-primary" onClick={() => setNovo(true)}>+ Novo usuário</button></div>
       <ErrorAlert erro={erro} />
       {carregando ? <p>Carregando…</p> : !data?.items.length ? <Empty /> : (
-        <table className="table">
+        <TabelaRolavel><table className="table">
           <thead><tr><th>Nome</th><th>Login</th><th>Perfil</th><th>Situação</th><th /></tr></thead>
           <tbody>{data.items.map((u) => (
             <tr key={u.id}>
@@ -39,7 +39,7 @@ export function UsuariosTab() {
               <td className="actions"><button className="btn btn-sm" onClick={() => redefinir(u)}>Redefinir senha</button><button className="btn btn-sm" onClick={() => alterar(u, { ativo: !u.ativo })}>{u.ativo ? 'Desativar' : 'Reativar'}</button></td>
             </tr>
           ))}</tbody>
-        </table>
+        </table></TabelaRolavel>
       )}
       {data && <Pagination page={data.page} pageSize={data.pageSize} total={data.total} onChange={setPage} />}
       <NovoUsuario aberto={novo} perfis={perfis.data ?? []} onFechar={() => setNovo(false)} onOk={async (login, s) => { setSenha({ login, senha: s }); await reload(); }} />
