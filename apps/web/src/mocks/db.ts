@@ -7,7 +7,7 @@
 import type {
   CaixaSessao, Campanha, Categoria, CategoriaDespesa, Cliente, ContaPagar, ContaReceber, FormaPagamento,
   HistoricoEvento, Instituicao, LocalEstoque, Motivo, Parametro, Parceiro, Perfil, Permissao,
-  Recebimento, RegraFiscal, Terminal, TipoControle, TipoEntrada, Venda, AuditoriaRegistro,
+  Recebimento, RegraFiscal, StatusItem, Terminal, TipoControle, TipoEntrada, Venda, AuditoriaRegistro,
 } from '../shared/api/types';
 import { PERMISSOES } from '../shared/api/types';
 
@@ -22,12 +22,19 @@ export interface LoteDb {
   id: string; numero: number; tipo: TipoEntrada; parceiroId?: string; campanhaId?: string; documento?: string;
   temAnexo: boolean; recebidoEm: string; status: 'ABERTO' | 'TRIADO'; valorCompra?: number; pago?: boolean;
 }
+/** Produto de código único (Sprint 2): preço em centavos; vale para todas as entradas. */
+export interface ProdutoDb {
+  id: string; codigo: string; tituloEtiqueta: string; nome: string; categoriaId: string; preco: number; pecaUnica: boolean;
+  modelo?: string; marca?: string; ano?: number; tipo?: string; tamanho?: string; cor?: string; condicao?: string;
+}
+/** Entrada num lote. `codigo` e `preco` espelham o produto (ETIQUETADO); o saldo só existe depois da aprovação. */
 export interface ItemDb {
   id: string; codigo?: string; descricao: string; categoriaId: string; controle: TipoControle; preco: number;
   /** Valor atribuído unitário em centavos (RN-33); ausente = preço. */
   valorAtribuido?: number;
   loteId: string; criadoEm: string; quantidadeInicial: number; localInicial: LocalEstoque;
   saldo: Record<LocalEstoque, number>;
+  produtoId?: string; status: StatusItem; motivoDevolucao?: string;
 }
 export interface MovDb { id: string; itemId: string; tipo: HistoricoEvento['tipo']; quantidade: number; local?: LocalEstoque; ocorridoEm: string; usuarioNome: string; descricao: string }
 export interface DescarteDb { id: string; loteId: string; categoriaId: string; motivoId: string; registradoEm: string; revertido: boolean }
@@ -37,7 +44,7 @@ export interface CaixaDb extends CaixaSessao { operadorId: string; lancamentos: 
 const PERFIL_ADMIN = sid('perfadm'), PERFIL_VENDEDOR = sid('perfcxa'), PERFIL_ESTOQUISTA = sid('perftri'), PERFIL_FINANCEIRO = sid('perffin');
 // Mesmas permissões dos perfis padrão (migrações 0005 e 0006: o Administrador tem tudo, inclusive abrir caixa).
 const vendedorPerms: Permissao[] = ['caixa.operar', 'clientes.gerenciar'];
-const estoquistaPerms: Permissao[] = ['entrada.registrar', 'estoque.consultar', 'estoque.transferir', 'cadastros.consultar', 'relatorios.estoque'];
+const estoquistaPerms: Permissao[] = ['entrada.registrar', 'estoque.consultar', 'estoque.transferir', 'cadastros.consultar', 'relatorios.estoque', 'parceiros.criar'];
 const financeiroPerms: Permissao[] = ['contas_pagar.gerenciar', 'contas_receber.receber', 'contas_receber.lancar', 'relatorios.consultar', 'relatorios.estoque', 'estoque.consultar'];
 
 const catRoupaAd = sid('catroup'), catRoupaInf = sid('catinf'), catCalc = sid('catcalc'), catLivro = sid('catliv'), catUtens = sid('catute'), catPeca = sid('catpeca');
@@ -104,6 +111,7 @@ export const db = {
     { id: lote2, numero: 2, tipo: 'DOACAO', parceiroId: parcB, campanhaId: campAgasalho, temAnexo: false, recebidoEm: dias(-3), status: 'ABERTO' },
   ] as LoteDb[],
   itens: [] as ItemDb[],
+  produtos: [] as ProdutoDb[],
   movs: [] as MovDb[],
   descartes: [] as DescarteDb[],
   vendas: [] as VendaDb[],
@@ -132,15 +140,26 @@ export const db = {
 };
 
 // ---------- Seed de itens e movimentações ----------
-function addItem(p: Omit<ItemDb, 'id' | 'criadoEm' | 'saldo'> & { id?: string }) {
-  const it: ItemDb = { ...p, id: p.id ?? sid('item'), criadoEm: dias(-19), saldo: { BAZAR: 0, DOACOES: 0 } };
-  it.saldo[p.localInicial] = p.quantidadeInicial;
+function addItem(p: Omit<ItemDb, 'id' | 'criadoEm' | 'saldo' | 'status'> & { id?: string; status?: StatusItem }) {
+  const it: ItemDb = { ...p, id: p.id ?? sid('item'), criadoEm: dias(-19), saldo: { BAZAR: 0, DOACOES: 0 }, status: p.status ?? 'APROVADO' };
   db.itens.push(it);
-  db.movs.push({ id: sid('mov'), itemId: it.id, tipo: 'ENTRADA', quantidade: p.quantidadeInicial, local: p.localInicial, ocorridoEm: it.criadoEm, usuarioNome: 'Teresa da Triagem', descricao: 'Entrada pela triagem' });
+  if (it.status === 'APROVADO') { // o estoque só recebe na aprovação
+    it.saldo[p.localInicial] = p.quantidadeInicial;
+    db.movs.push({ id: sid('mov'), itemId: it.id, tipo: 'ENTRADA', quantidade: p.quantidadeInicial, local: p.localInicial, ocorridoEm: it.criadoEm, usuarioNome: 'Teresa da Triagem', descricao: 'Entrada (aprovação do lote)' });
+  }
   return it;
 }
-['Jaqueta jeans', 'Vestido de festa', 'Bolsa de couro', 'Terno masculino', 'Liquidificador'].forEach((d, i) =>
-  addItem({ codigo: `BZ${String(i + 1).padStart(6, '0')}`, descricao: d, categoriaId: catPeca, controle: 'ETIQUETADO', preco: [3500, 6000, 4500, 8000, 3000][i]!, loteId: lote1, quantidadeInicial: 1, localInicial: 'BAZAR' }));
+function addProduto(p: Omit<ProdutoDb, 'id'>) { const pr = { ...p, id: sid('prod') }; db.produtos.push(pr); return pr; }
+// peças antigas: cada uma é um produto de peça única com o mesmo código
+['Jaqueta jeans', 'Vestido de festa', 'Bolsa de couro', 'Terno masculino', 'Liquidificador'].forEach((d, i) => {
+  const pr = addProduto({ codigo: `BZ${String(i + 1).padStart(6, '0')}`, tituloEtiqueta: d, nome: d, categoriaId: catPeca, preco: [3500, 6000, 4500, 8000, 3000][i]!, pecaUnica: true });
+  addItem({ codigo: pr.codigo, descricao: d, categoriaId: catPeca, controle: 'ETIQUETADO', preco: pr.preco, loteId: lote1, quantidadeInicial: 1, localInicial: 'BAZAR', produtoId: pr.id });
+});
+// produto de várias unidades (Sprint 2), aprovado, e um cadastro aguardando a aprovação do Administrador
+const caneca = addProduto({ codigo: 'BZ000006', tituloEtiqueta: 'Caneca branca', nome: 'Caneca de porcelana branca', categoriaId: catUtens, preco: 700, pecaUnica: false, cor: 'branca' });
+addItem({ codigo: caneca.codigo, descricao: caneca.nome, categoriaId: catUtens, controle: 'ETIQUETADO', preco: caneca.preco, valorAtribuido: 200, loteId: lote1, quantidadeInicial: 6, localInicial: 'BAZAR', produtoId: caneca.id });
+const prato = addProduto({ codigo: 'BZ000007', tituloEtiqueta: 'Prato fundo', nome: 'Prato fundo de louça', categoriaId: catUtens, preco: 500, pecaUnica: false });
+addItem({ codigo: prato.codigo, descricao: prato.nome, categoriaId: catUtens, controle: 'ETIQUETADO', preco: prato.preco, valorAtribuido: 150, loteId: lote2, quantidadeInicial: 4, localInicial: 'BAZAR', produtoId: prato.id, status: 'CADASTRADO' });
 addItem({ descricao: 'Roupa adulto (lote 1)', categoriaId: catRoupaAd, controle: 'CATEGORIA', preco: 1000, loteId: lote1, quantidadeInicial: 30, localInicial: 'BAZAR' });
 addItem({ descricao: 'Livros (lote 1)', categoriaId: catLivro, controle: 'CATEGORIA', preco: 300, loteId: lote1, quantidadeInicial: 20, localInicial: 'BAZAR' });
 addItem({ descricao: 'Roupa infantil (lote 1)', categoriaId: catRoupaInf, controle: 'CATEGORIA', preco: 500, loteId: lote1, quantidadeInicial: 15, localInicial: 'DOACOES' });

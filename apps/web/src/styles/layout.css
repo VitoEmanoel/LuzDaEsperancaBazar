@@ -95,11 +95,14 @@
 .fechamento { width: min(640px, 100%); }
 
 /* --- Blocos de domínio --- */
-.contadores { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+.contadores { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; }
 .contadores .card { display: flex; flex-direction: column; }
 .contadores strong { font-size: 1.7rem; font-family: var(--fonte-titulo); color: var(--heading); }
 .col-aprovar { border-top: 4px solid var(--ok); }
 .col-descartar { border-top: 4px solid var(--danger); }
+.modo-cadastro { display: flex; flex-wrap: wrap; gap: .25rem 1rem; }
+.mais-detalhes summary { cursor: pointer; font-weight: 600; margin: .25rem 0 .5rem; }
+.motivo-devolucao { color: var(--danger); display: block; }
 .lista-escolha, .lista-clientes { list-style: none; padding: 0; margin: .5rem 0; display: grid; gap: .35rem; }
 .lista-escolha .btn, .lista-clientes .btn { justify-content: flex-start; text-align: left; font-weight: 600; }
 .timeline { list-style: none; padding: 0; border-left: 3px solid var(--marca-salvia); margin-left: .5rem; }
@@ -115,7 +118,7 @@
   .sidebar { position: fixed; inset: 0 auto 0 0; width: min(300px, 85vw); height: 100vh; z-index: 40; transform: translateX(-100%); transition: transform .2s; box-shadow: var(--shadow-lg); }
   .sidebar.open { transform: none; }
   .menu-toggle { display: inline-flex; }
-  .contadores { grid-template-columns: 1fr; }
+  .contadores { grid-template-columns: repeat(2, 1fr); }
   .table { display: block; overflow-x: auto; }
   .content { padding: 1rem; }
   .auth-page { grid-template-columns: 1fr; }

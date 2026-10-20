@@ -1,14 +1,16 @@
 /**
- * Novo lote: tipo, parceiro e/ou campanha (RN-04), documento e anexo.
+ * Novo lote (S2-12): tipo, parceiro OBRIGATÓRIO (RN-04; campanha opcional), documento e anexo.
+ * O estoquista cria o parceiro na hora, sem sair da tela (parceiros.criar).
  * Compra pede valor e se foi pago (cria conta a pagar no servidor, exige contas_pagar.gerenciar).
  * Anexo: checagem de tamanho/tipo aqui é só UX — o servidor valida magic bytes (RNF-18).
  */
 import { useState, type FormEvent } from 'react';
+import { Modal } from '../../../shared/components/Modal';
 import { useNavigate } from 'react-router-dom';
 import { cadastrosApi } from '../../cadastros/cadastros.api';
 import { lotesApi } from '../entradas.api';
 import { errorMessage } from '../../../shared/api/http';
-import type { TipoEntrada } from '../../../shared/api/types';
+import { TIPOS_PARCEIRO, type Parceiro, type TipoEntrada, type TipoParceiro } from '../../../shared/api/types';
 import { useAsync } from '../../../shared/hooks/useAsync';
 import { ErrorAlert, Field, PageHeader } from '../../../shared/components/ui';
 import { useAuth } from '../../auth/AuthContext';
@@ -35,10 +37,13 @@ export function NovoLotePage() {
   const [vencimento, setVencimento] = useState(todayLocal(30));
   const [erro, setErro] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
+  const [novoParceiro, setNovoParceiro] = useState(false);
+  const [criados, setCriados] = useState<Parceiro[]>([]);
+  const parceiros = [...criados, ...(ops.data?.[0] ?? []).filter((p) => !criados.some((c) => c.id === p.id))];
 
   const erroArquivo = arquivo && (arquivo.size > MAX_MB * 1024 * 1024 ? `Arquivo maior que ${MAX_MB} MB.` : !TIPOS_ACEITOS.includes(arquivo.type) ? 'Envie PDF, PNG ou JPEG.' : null);
   const valorCents = tryCents(valor);
-  const valido = (parceiroId || campanhaId) && !erroArquivo && (tipo !== 'COMPRA' || (valorCents !== null && valorCents > 0));
+  const valido = parceiroId && !erroArquivo && (tipo !== 'COMPRA' || (valorCents !== null && valorCents > 0));
 
   async function salvar(e: FormEvent) {
     e.preventDefault();
@@ -70,10 +75,15 @@ export function NovoLotePage() {
           </select>
         </Field>
         <div className="grid-2">
-          <Field label="Parceiro"><select value={parceiroId} onChange={(e) => setParceiroId(e.target.value)}><option value="">—</option>{ops.data?.[0].map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}</select></Field>
-          <Field label="Campanha"><select value={campanhaId} onChange={(e) => setCampanhaId(e.target.value)}><option value="">—</option>{ops.data?.[1].map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}</select></Field>
+          <Field label={tipo === 'COMPRA' ? 'Fornecedor (obrigatório)' : 'Parceiro / doador (obrigatório)'}>
+            <select value={parceiroId} onChange={(e) => setParceiroId(e.target.value)} required><option value="">Selecione…</option>{parceiros.map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}</select>
+          </Field>
+          <Field label="Campanha (opcional)"><select value={campanhaId} onChange={(e) => setCampanhaId(e.target.value)}><option value="">—</option>{ops.data?.[1].map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}</select></Field>
         </div>
-        {!parceiroId && !campanhaId && <small className="hint">Informe parceiro e/ou campanha. Sem doador conhecido, use “Doador não identificado”.</small>}
+        <div className="row">
+          {!parceiroId && <small className="hint">Sem doador conhecido, use “Doador não identificado”.</small>}
+          {can('cadastros.gerenciar', 'parceiros.criar') && <button type="button" className="btn btn-sm" onClick={() => setNovoParceiro(true)}>+ Novo parceiro</button>}
+        </div>
         <Field label="Documento de origem (nº do termo, nota…)"><input value={documento} onChange={(e) => setDocumento(e.target.value)} maxLength={80} /></Field>
         <Field label={`Anexo (PDF/PNG/JPEG, até ${MAX_MB} MB)`} erro={erroArquivo}>
           <input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" onChange={(e) => setArquivo(e.target.files?.[0] ?? null)} />
@@ -87,8 +97,35 @@ export function NovoLotePage() {
           </fieldset>
         )}
         <ErrorAlert erro={erro ?? ops.erro} />
-        <div className="row"><button type="button" className="btn" onClick={() => nav(-1)}>Cancelar</button><button className="btn btn-primary" disabled={!valido || enviando}>Criar lote e triar</button></div>
+        <div className="row"><button type="button" className="btn" onClick={() => nav(-1)}>Cancelar</button><button className="btn btn-primary" disabled={!valido || enviando}>Criar lote e cadastrar produtos</button></div>
       </form>
+      {novoParceiro && <NovoParceiroModal onFechar={() => setNovoParceiro(false)} onCriado={(p) => { setCriados((cs) => [p, ...cs]); setParceiroId(p.id); setNovoParceiro(false); toast(`Parceiro “${p.nome}” criado.`); }} />}
     </div>
+  );
+}
+
+/** Cadastro rápido do parceiro (S2-06): nome e tipo; documento e contatos ficam para Cadastros (Admin). */
+function NovoParceiroModal({ onFechar, onCriado }: { onFechar: () => void; onCriado: (p: Parceiro) => void }) {
+  const [nome, setNome] = useState('');
+  const [tipo, setTipo] = useState<TipoParceiro>('PESSOA_FISICA');
+  const [erro, setErro] = useState<string | null>(null);
+  const [enviando, setEnviando] = useState(false);
+  const [id] = useState(uuid); // o mesmo id em cada tentativa: reenvio não duplica
+  async function criar(e: FormEvent) {
+    e.preventDefault();
+    if (nome.trim().length < 2) return;
+    setEnviando(true); setErro(null);
+    try { onCriado(await cadastrosApi.criar('parceiros', { id, nome: nome.trim(), tipo })); }
+    catch (err) { setErro(errorMessage(err)); } finally { setEnviando(false); }
+  }
+  return (
+    <Modal titulo="Novo parceiro" aberto onFechar={onFechar}
+      rodape={<><button type="button" className="btn" onClick={onFechar}>Cancelar</button><button type="submit" form="form-novo-parceiro" className="btn btn-primary" disabled={nome.trim().length < 2 || enviando}>Criar parceiro</button></>}>
+      <form id="form-novo-parceiro" onSubmit={criar}>
+        <Field label="Nome"><input value={nome} onChange={(e) => setNome(e.target.value)} maxLength={120} autoFocus /></Field>
+        <Field label="Tipo"><select value={tipo} onChange={(e) => setTipo(e.target.value as TipoParceiro)}>{TIPOS_PARCEIRO.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select></Field>
+        <ErrorAlert erro={erro} />
+      </form>
+    </Modal>
   );
 }

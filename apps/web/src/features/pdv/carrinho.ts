@@ -15,6 +15,6 @@ export const subtotalCents = (linhas: LinhaCarrinho[]) => linhas.reduce((s, l) =
 
 export function paraItensRequest(linhas: LinhaCarrinho[]): VendaItemRequest[] {
   return linhas.map((l) => (l.tipo === 'codigo'
-    ? { codigo: l.codigo!, quantidade: 1 as const }
+    ? { codigo: l.codigo!, quantidade: l.quantidade }
     : { categoriaId: l.categoriaId!, quantidade: l.quantidade }));
 }

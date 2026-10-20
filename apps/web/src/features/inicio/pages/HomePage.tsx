@@ -1,4 +1,4 @@
-/** Início: atalhos por perfil e alertas (contas vencidas/a vencer, lotes aguardando triagem). */
+/** Início: atalhos por perfil e alertas (contas vencidas/a vencer, lotes recebendo cadastro). */
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
 import { useAsync } from '../../../shared/hooks/useAsync';
@@ -40,7 +40,7 @@ export function HomePage() {
       <section className="alerts-grid" aria-label="Alertas">
         {a && a.vencidas > 0 && <Link to="/financeiro/pagar" className="alert alert-error">{a.vencidas} conta(s) a pagar vencida(s)</Link>}
         {a && a.aVencer > 0 && <Link to="/financeiro/pagar" className="alert alert-warn">{a.aVencer} conta(s) vencem nos próximos 3 dias</Link>}
-        {a && a.lotesAbertos > 0 && <Link to="/entradas" className="alert alert-info">{a.lotesAbertos} lote(s) aguardando triagem</Link>}
+        {a && a.lotesAbertos > 0 && <Link to="/entradas" className="alert alert-info">{a.lotesAbertos} lote(s) recebendo cadastro</Link>}
       </section>
       <section className="shortcut-grid" aria-label="Atalhos">
         {atalhos.map((x) => <Link key={x.to} to={x.to} className="card shortcut" data-cor={x.cor}><strong>{x.titulo}</strong><span>{x.desc}</span></Link>)}

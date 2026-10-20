@@ -156,8 +156,17 @@ export function PdvPage() {
   }
 
   async function lerCodigoAgora(c: string) {
-    if (linhas.some((l) => l.codigo === c)) { feedback('erro', `A peça ${c} já está no carrinho.`); return; }
     let item = catalogo.itensEtiquetados.find((i) => i.codigo === c);
+    const noCarrinho = linhas.find((l) => l.codigo === c);
+    if (noCarrinho) {
+      // produto de várias unidades: cada bip soma uma, até o saldo do Bazar (o servidor confere de novo ao gravar)
+      if (!item || item.pecaUnica !== false) { feedback('erro', `A peça ${c} já está no carrinho.`); return; }
+      if (noCarrinho.quantidade >= (item.saldoBazar ?? 1)) { feedback('erro', `Só há ${item.saldoBazar ?? 1} de ${item.descricao} no Bazar.`); return; }
+      if (!cabeNoSaldoCpf(toCents(item.preco))) return;
+      setLinhas((ls) => ls.map((l) => (l === noCarrinho ? { ...l, quantidade: l.quantidade + 1 } : l)));
+      feedback('ok', `${noCarrinho.quantidade + 1}× ${item.descricao}`);
+      return;
+    }
     let foraDoBazar = false;
     if (!item) {
       // Peça fora do catálogo carregado (cadastrada depois): confirma no servidor.
@@ -212,7 +221,7 @@ export function PdvPage() {
   }
   /** ✕: peça única sai inteira; linha com várias unidades pergunta quantas tirar. */
   function iniciarRemocao(l: LinhaCarrinho) {
-    if (l.tipo === 'codigo' || l.quantidade <= 1) { setLinhas((ls) => ls.filter((x) => x.key !== l.key)); focarCodigo(); }
+    if (l.quantidade <= 1) { setLinhas((ls) => ls.filter((x) => x.key !== l.key)); focarCodigo(); }
     else setRemovendo(l);
   }
   function tirarQuantidade(l: LinhaCarrinho, n: number) {
@@ -245,12 +254,14 @@ export function PdvPage() {
       }
       throw e;
     }
-    // Atualiza o catálogo carregado: tira as peças vendidas (não vender a mesma peça duas vezes) e baixa o saldo das categorias.
-    const vendidos = new Set(linhas.filter((l) => l.codigo).map((l) => l.codigo));
+    // Atualiza o catálogo carregado: baixa o saldo dos produtos vendidos (peça única sai) e o das categorias.
+    const vendidos = new Map(linhas.filter((l) => l.codigo).map((l) => [l.codigo!, l.quantidade]));
     const porCategoria = new Map<string, number>();
     for (const l of linhas) if (l.categoriaId) porCategoria.set(l.categoriaId, (porCategoria.get(l.categoriaId) ?? 0) + l.quantidade);
     sessao.atualizarCatalogo((c) => ({
-      ...c, itensEtiquetados: c.itensEtiquetados.filter((i) => !vendidos.has(i.codigo)),
+      ...c, itensEtiquetados: c.itensEtiquetados
+        .map((i) => (vendidos.has(i.codigo) ? { ...i, saldoBazar: (i.saldoBazar ?? 1) - vendidos.get(i.codigo)! } : i))
+        .filter((i) => (i.saldoBazar ?? 1) > 0 && !(vendidos.has(i.codigo) && i.saldoBazar === undefined)),
       categorias: c.categorias.map((cat) => ({ ...cat, saldoBazar: cat.saldoBazar - (porCategoria.get(cat.id) ?? 0) })),
     }));
     void sessao.recarregarCatalogo().catch(() => {}); // sincroniza com vendas de outros terminais

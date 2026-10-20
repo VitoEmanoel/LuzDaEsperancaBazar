@@ -1,6 +1,6 @@
-/** ENT/TRI — lotes de entrada e triagem. */
+/** ENT/TRI — lotes de entrada, cadastro dos produtos do lote e aprovação. */
 import { http } from '../../shared/api/http';
-import type { Etiqueta, LoteDetalhe, LoteEntrada, NovoLoteRequest, Page, TriagemDescarteRequest, TriagemItemRequest } from '../../shared/api/types';
+import type { CorrecaoItemRequest, Etiqueta, ItemLote, LoteDetalhe, LoteEntrada, NovoLoteRequest, Page, ProdutoBusca, TriagemDescarteRequest, TriagemItemRequest } from '../../shared/api/types';
 
 export const lotesApi = {
   listar: (q: { parceiroId?: string; campanhaId?: string; status?: string; de?: string; ate?: string; page?: number }) =>
@@ -13,7 +13,13 @@ export const lotesApi = {
     return http.upload<void>(`/lotes/${id}/documento`, fd);
   },
   baixarDocumento: (id: string) => http.blob(`/lotes/${id}/documento`),
-  aprovarItem: (loteId: string, item: TriagemItemRequest) => http.post<LoteDetalhe['itens'][number]>(`/lotes/${loteId}/itens`, item),
+  /** Cadastra o item no lote: fica "cadastrado", sem estoque, até o Administrador aprovar (Sprint 2). */
+  cadastrarItem: (loteId: string, item: TriagemItemRequest) => http.post<ItemLote>(`/lotes/${loteId}/itens`, item),
+  corrigirItem: (loteId: string, itemId: string, c: CorrecaoItemRequest) => http.patch<ItemLote>(`/lotes/${loteId}/itens/${itemId}`, c),
+  aprovarItem: (itemId: string) => http.post<ItemLote>(`/itens/${itemId}/aprovar`),
+  devolverItem: (itemId: string, motivo: string) => http.post<ItemLote>(`/itens/${itemId}/devolver`, { motivo }),
+  aprovarLote: (id: string) => http.post<LoteEntrada & { aprovadosAgora: number }>(`/lotes/${id}/aprovar`),
+  buscarProdutos: (busca: string) => http.get<Page<ProdutoBusca>>('/produtos', { query: { busca, pageSize: 10 } }),
   descartar: (loteId: string, d: TriagemDescarteRequest) => http.post<LoteDetalhe['descartes'][number]>(`/lotes/${loteId}/descartes`, d),
   encerrar: (id: string) => http.post<LoteEntrada>(`/lotes/${id}/encerrar`),
   reabrir: (id: string, motivo: string) => http.post<LoteEntrada>(`/lotes/${id}/reabrir`, { motivo }),

@@ -17,7 +17,7 @@ import type {
 import { PERMISSOES } from '../shared/api/types';
 import { fromCents, toCents } from '../shared/lib/money';
 import { cpfValido, soDigitos } from '../shared/lib/cpf';
-import { db, FORMAS, type CaixaDb, type ItemDb, type UsuarioDb, type VendaDb } from './db';
+import { db, FORMAS, type CaixaDb, type ItemDb, type ProdutoDb, type UsuarioDb, type VendaDb } from './db';
 
 // ---------------- infraestrutura ----------------
 type Ctx = { user: UsuarioDb; params: Record<string, string>; query: URLSearchParams; body: any; headers: Record<string, string> };
@@ -190,7 +190,7 @@ for (const [tipo, lista] of Object.entries(cadastros)) {
     const b = (query.get('busca') ?? '').toLowerCase();
     return ok(lista.filter((x) => (!b || x.nome.toLowerCase().includes(b)) && (query.get('ativo') === null || String(x.ativo) === query.get('ativo'))).map((x) => dtoCadastro(tipo, x)));
   });
-  rota('POST', `/${tipo}`, ['cadastros.gerenciar'], ({ user, body }) => {
+  rota('POST', `/${tipo}`, tipo === 'parceiros' ? ['cadastros.gerenciar', 'parceiros.criar'] : ['cadastros.gerenciar'], ({ user, body }) => {
     exigir(body?.nome?.trim(), 'nome');
     if (lista.some((x) => x.nome.toLowerCase() === body.nome.trim().toLowerCase())) return problem(409, 'Já existe um cadastro com este nome', 'NOME_DUPLICADO');
     const invalido = validarCadastro(tipo, body); if (invalido) return invalido;
@@ -230,14 +230,24 @@ rota('PUT', '/instituicao', ['parametros.gerenciar'], ({ user, body }) => { Obje
 const nomeParc = (id?: string) => db.parceiros.find((p) => p.id === id)?.nome;
 const nomeCamp = (id?: string) => db.campanhas.find((p) => p.id === id)?.nome;
 const nomeCat = (id: string) => db.categorias.find((c) => c.id === id)?.nome ?? '—';
+const produtoDto = (p: ProdutoDb) => ({ ...p, preco: fromCents(p.preco) });
+function itemLoteDto(i: ItemDb) {
+  const p = db.produtos.find((x) => x.id === i.produtoId);
+  return {
+    id: i.id, controle: i.controle, codigo: i.codigo, descricao: i.descricao, categoriaId: i.categoriaId, categoriaNome: nomeCat(i.categoriaId),
+    quantidade: i.quantidadeInicial, preco: fromCents(i.preco), valorAtribuido: fromCents(i.valorAtribuido ?? i.preco), localDestino: i.localInicial,
+    status: i.status, motivoDevolucao: i.motivoDevolucao, produto: p ? produtoDto(p) : undefined,
+  };
+}
 function loteDto(l: (typeof db.lotes)[number]) {
   const itens = db.itens.filter((i) => i.loteId === l.id);
   return {
     id: l.id, numero: l.numero, tipo: l.tipo, parceiroId: l.parceiroId, parceiroNome: nomeParc(l.parceiroId), campanhaId: l.campanhaId, campanhaNome: nomeCamp(l.campanhaId),
     documento: l.documento, temAnexo: l.temAnexo, recebidoEm: l.recebidoEm, status: l.status,
-    aprovados: itens.reduce((s, i) => s + i.quantidadeInicial, 0),
+    aprovados: itens.filter((i) => i.status === 'APROVADO').reduce((s, i) => s + i.quantidadeInicial, 0),
+    pendentes: itens.filter((i) => i.status === 'CADASTRADO').length, devolvidos: itens.filter((i) => i.status === 'DEVOLVIDO').length,
     descartados: db.descartes.filter((d) => d.loteId === l.id && !d.revertido).length,
-    valorAtribuido: fromCents(itens.reduce((s, i) => s + i.preco * i.quantidadeInicial, 0)),
+    valorAtribuido: fromCents(itens.filter((i) => i.status === 'APROVADO').reduce((s, i) => s + (i.valorAtribuido ?? i.preco) * i.quantidadeInicial, 0)),
     valorCompra: l.valorCompra !== undefined ? fromCents(l.valorCompra) : undefined, pago: l.pago,
   };
 }
@@ -248,13 +258,13 @@ rota('GET', '/lotes/:id', ['entrada.registrar'], ({ params }) => {
   const l = db.lotes.find((x) => x.id === params.id); if (!l) return problem(404, 'Lote não encontrado');
   return ok({
     ...loteDto(l),
-    itens: db.itens.filter((i) => i.loteId === l.id).map((i) => ({ id: i.id, codigo: i.codigo, descricao: i.descricao, categoriaNome: nomeCat(i.categoriaId), quantidade: i.quantidadeInicial, preco: fromCents(i.preco), localDestino: i.localInicial })),
+    itens: db.itens.filter((i) => i.loteId === l.id).map(itemLoteDto),
     descartes: db.descartes.filter((d) => d.loteId === l.id).map((d) => ({ id: d.id, categoriaNome: nomeCat(d.categoriaId), motivoNome: db.motivosDescarte.find((m) => m.id === d.motivoId)?.nome ?? '—', registradoEm: d.registradoEm, revertido: d.revertido })),
   });
 });
 rota('POST', '/lotes', ['entrada.registrar'], ({ user, body }) => {
   exigir(['DOACAO', 'COMPRA', 'SALDO_INICIAL'].includes(body?.tipo), 'tipo');
-  if (!body.parceiroId && !body.campanhaId) return problem(400, 'Informe parceiro e/ou campanha', 'ORIGEM_OBRIGATORIA'); // RN-04
+  if (!body.parceiroId) return problem(400, 'Informe o parceiro (doador) do lote', 'PARCEIRO_OBRIGATORIO'); // RN-04 (S2-06): campanha opcional
   if (body.tipo === 'COMPRA') {
     if (!perfilDe(user).permissoes.includes('contas_pagar.gerenciar')) return problem(403, 'Registrar compra exige permissão de contas a pagar');
     exigir(body.valorCompra && toCents(body.valorCompra) > 0, 'valorCompra');
@@ -281,24 +291,88 @@ function loteAberto(id: string) {
 }
 let seqCodigo = 100;
 rota('POST', '/lotes/:id/itens', ['entrada.registrar'], ({ user, params, body }) => {
+  const existente = db.itens.find((i) => i.id === body?.id);
+  if (existente) return ok(itemLoteDto(existente)); // reenvio idempotente
   const l = loteAberto(params.id!);
   exigir(db.categorias.some((c) => c.id === body?.categoriaId && c.ativo), 'categoriaId');
   exigir(['ETIQUETADO', 'CATEGORIA'].includes(body.controle), 'controle');
-  exigir(Number.isInteger(body.quantidade) && body.quantidade > 0, 'quantidade');
-  exigir(toCents(body.preco ?? '0') > 0, 'preco'); exigir(['BAZAR', 'DOACOES'].includes(body.localDestino), 'localDestino');
-  if (body.controle === 'ETIQUETADO' && body.quantidade !== 1) return problem(400, 'Peça etiquetada tem quantidade 1', 'ETIQUETADO_QTD');
+  exigir(Number.isInteger(body.quantidade) && body.quantidade > 0, 'quantidade'); exigir(['BAZAR', 'DOACOES'].includes(body.localDestino), 'localDestino');
   if ((l as any).tipo === 'COMPRA' && !body.valorAtribuido) return erroCampo('valorAtribuido', 'obrigatório em lote de compra (custo unitário)');
-  const existente = db.itens.find((i) => i.id === body.id);
-  const it: ItemDb = existente ?? {
-    id: body.id ?? uid(), codigo: body.controle === 'ETIQUETADO' ? `BZ${String(++seqCodigo).padStart(6, '0')}` : undefined,
-    descricao: body.descricao?.trim() || `${nomeCat(body.categoriaId)} (lote ${l.numero})`, categoriaId: body.categoriaId, controle: body.controle,
-    preco: toCents(body.preco), valorAtribuido: body.valorAtribuido ? toCents(body.valorAtribuido) : undefined, loteId: l.id, criadoEm: now(), quantidadeInicial: body.quantidade, localInicial: body.localDestino, saldo: { BAZAR: 0, DOACOES: 0 },
-  };
-  if (!existente) {
-    it.saldo[it.localInicial] = it.quantidadeInicial; db.itens.push(it);
-    db.movs.push({ id: uid(), itemId: it.id, tipo: 'ENTRADA', quantidade: it.quantidadeInicial, local: it.localInicial, ocorridoEm: now(), usuarioNome: user.nome, descricao: `Triagem do lote ${l.numero}` });
+  let produto: ProdutoDb | undefined;
+  if (body.controle === 'CATEGORIA') exigir(toCents(body.preco ?? '0') > 0 || body.valorAtribuido, 'valorAtribuido');
+  else {
+    exigir(body.valorAtribuido, 'valorAtribuido');
+    if (body.produtoId) {
+      produto = db.produtos.find((p) => p.id === body.produtoId); exigir(produto, 'produtoId');
+      if (produto!.categoriaId !== body.categoriaId) return problem(409, 'A entrada tem a categoria do produto', 'CATEGORIA_DO_PRODUTO');
+      if (produto!.pecaUnica) return problem(409, 'Peça única não recebe nova entrada: cadastre um produto novo', 'PECA_UNICA_ENTRADA');
+    } else {
+      const p = body.produto ?? {};
+      exigir(String(p.tituloEtiqueta ?? '').trim(), 'produto.tituloEtiqueta'); exigir(String(p.nome ?? '').trim(), 'produto.nome'); exigir(toCents(p.preco ?? '0') > 0, 'produto.preco');
+      if (p.pecaUnica && body.quantidade !== 1) return problem(400, 'Peça única tem quantidade 1', 'PECA_UNICA_QTD');
+      produto = { ...p, id: uid(), codigo: `BZ${String(++seqCodigo).padStart(6, '0')}`, tituloEtiqueta: p.tituloEtiqueta.trim(), nome: p.nome.trim(), categoriaId: body.categoriaId, preco: toCents(p.preco), pecaUnica: !!p.pecaUnica };
+      db.produtos.push(produto!);
+    }
   }
-  return ok({ id: it.id, codigo: it.codigo, descricao: it.descricao, categoriaNome: nomeCat(it.categoriaId), quantidade: it.quantidadeInicial, preco: fromCents(it.preco), localDestino: it.localInicial }, 201);
+  const it: ItemDb = {
+    id: body.id ?? uid(), codigo: produto?.codigo, descricao: body.descricao?.trim() || produto?.nome || `${nomeCat(body.categoriaId)} (lote ${l.numero})`,
+    categoriaId: body.categoriaId, controle: body.controle, preco: produto ? produto.preco : toCents(body.preco ?? body.valorAtribuido),
+    valorAtribuido: body.valorAtribuido ? toCents(body.valorAtribuido) : undefined, loteId: l.id, criadoEm: now(), quantidadeInicial: body.quantidade,
+    localInicial: body.localDestino, saldo: { BAZAR: 0, DOACOES: 0 }, produtoId: produto?.id, status: 'CADASTRADO', // sem estoque até a aprovação
+  };
+  db.itens.push(it); auditar(user, 'ITEM_CADASTRADO', 'item', it.id);
+  return ok(itemLoteDto(it), 201);
+});
+rota('PATCH', '/lotes/:id/itens/:itemId', ['entrada.registrar'], ({ user, params, body }) => {
+  const it = db.itens.find((i) => i.id === params.itemId && i.loteId === params.id); if (!it) return problem(404, 'Item não encontrado');
+  if (it.status === 'APROVADO') return problem(409, 'Item já aprovado: a correção agora é pelo estoque', 'ITEM_APROVADO');
+  const p = db.produtos.find((x) => x.id === it.produtoId);
+  const q = body?.quantidade ?? it.quantidadeInicial;
+  if (p?.pecaUnica && q !== 1) return problem(400, 'Peça única tem quantidade 1', 'PECA_UNICA_QTD');
+  if (p && body?.produto) {
+    if (db.itens.some((i) => i.produtoId === p.id && i.id !== it.id)) return problem(409, 'Este produto tem outras entradas: corrija o produto na tela do produto', 'PRODUTO_EM_USO');
+    const { preco, ...resto } = body.produto; Object.assign(p, resto); if (preco) { p.preco = toCents(preco); it.preco = p.preco; }
+    if (resto.nome) it.descricao = resto.nome;
+  }
+  it.quantidadeInicial = q;
+  if (body?.valorAtribuido !== undefined) it.valorAtribuido = toCents(body.valorAtribuido);
+  if (body?.localDestino) it.localInicial = body.localDestino;
+  const reenvio = it.status === 'DEVOLVIDO';
+  it.status = 'CADASTRADO'; it.motivoDevolucao = undefined;
+  auditar(user, reenvio ? 'ITEM_REENVIADO' : 'ITEM_CORRIGIDO', 'item', it.id); return ok(itemLoteDto(it));
+});
+function aprovarItem(it: ItemDb, user: UsuarioDb) {
+  it.status = 'APROVADO'; it.saldo[it.localInicial] += it.quantidadeInicial;
+  const l = db.lotes.find((x) => x.id === it.loteId)!;
+  db.movs.push({ id: uid(), itemId: it.id, tipo: 'ENTRADA', quantidade: it.quantidadeInicial, local: it.localInicial, ocorridoEm: now(), usuarioNome: user.nome, descricao: `Aprovação do lote ${l.numero}` });
+  auditar(user, 'ITEM_APROVADO', 'item', it.id);
+}
+rota('POST', '/itens/:id/aprovar', ['produtos.aprovar'], ({ user, params }) => {
+  const it = db.itens.find((i) => i.id === params.id); if (!it) return problem(404, 'Item não encontrado');
+  if (it.status === 'DEVOLVIDO') return problem(409, 'Item devolvido: o estoquista corrige e reenvia antes da aprovação', 'ITEM_DEVOLVIDO');
+  if (it.status === 'CADASTRADO') aprovarItem(it, user);
+  return ok(itemLoteDto(it));
+});
+rota('POST', '/itens/:id/devolver', ['produtos.aprovar'], ({ user, params, body }) => {
+  const it = db.itens.find((i) => i.id === params.id); if (!it) return problem(404, 'Item não encontrado');
+  exigir(String(body?.motivo ?? '').trim().length >= 5, 'motivo');
+  if (it.status === 'APROVADO') return problem(409, 'Item já aprovado não é devolvido', 'ITEM_APROVADO');
+  it.status = 'DEVOLVIDO'; it.motivoDevolucao = body.motivo.trim(); auditar(user, 'ITEM_DEVOLVIDO', 'item', it.id);
+  return ok(itemLoteDto(it));
+});
+rota('POST', '/lotes/:id/aprovar', ['produtos.aprovar'], ({ user, params }) => {
+  const l = db.lotes.find((x) => x.id === params.id); if (!l) return problem(404, 'Lote não encontrado');
+  const pend = db.itens.filter((i) => i.loteId === l.id && i.status === 'CADASTRADO');
+  pend.forEach((i) => aprovarItem(i, user)); auditar(user, 'LOTE_APROVADO', 'lote_entrada', l.id);
+  return ok({ ...loteDto(l), aprovadosAgora: pend.length });
+});
+rota('GET', '/produtos', ['entrada.registrar', 'estoque.consultar', 'produtos.aprovar'], ({ query }) => {
+  const b = (query.get('busca') ?? '').trim().toLowerCase();
+  return ok(paginar(db.produtos.filter((p) => !b || p.codigo.toLowerCase() === b || p.nome.toLowerCase().includes(b) || p.tituloEtiqueta.toLowerCase().includes(b))
+    .map((p) => {
+      const its = db.itens.filter((i) => i.produtoId === p.id);
+      return { ...produtoDto(p), categoriaNome: nomeCat(p.categoriaId), saldoBazar: its.reduce((s, i) => s + i.saldo.BAZAR, 0), saldoDoacoes: its.reduce((s, i) => s + i.saldo.DOACOES, 0) };
+    }), query));
 });
 rota('POST', '/lotes/:id/descartes', ['entrada.registrar'], ({ params, body }) => {
   const l = loteAberto(params.id!);
@@ -322,7 +396,7 @@ rota('POST', '/descartes/:id/reverter', ['triagem.reabrir'], ({ user, params, bo
 });
 rota('GET', '/etiquetas', ['entrada.registrar'], ({ query }) => {
   const ids = (query.get('itens') ?? '').split(',').filter(Boolean);
-  return ok(db.itens.filter((i) => ids.includes(i.id) && i.codigo).map((i) => ({ itemId: i.id, codigo: i.codigo!, descricao: i.descricao, preco: fromCents(i.preco) })));
+  return ok(db.itens.filter((i) => ids.includes(i.id) && i.produtoId).map((i) => { const p = db.produtos.find((x) => x.id === i.produtoId)!; return { itemId: i.id, codigo: p.codigo, descricao: p.tituloEtiqueta, preco: fromCents(p.preco) }; }));
 });
 
 // ---------------- EST ----------------
@@ -345,7 +419,8 @@ rota('GET', '/estoque', ['estoque.consultar'], ({ query }) => {
   }).map(itemDto), query));
 });
 rota('GET', '/itens/codigo/:codigo', ['estoque.consultar', 'caixa.operar'], ({ params }) => {
-  const i = db.itens.find((x) => x.codigo === decodeURIComponent(params.codigo!).toUpperCase());
+  const doCodigo = db.itens.filter((x) => x.status === 'APROVADO' && x.codigo === decodeURIComponent(params.codigo!).toUpperCase());
+  const i = doCodigo.find((x) => x.saldo.BAZAR > 0) ?? doCodigo[0]; // a entrada que será vendida primeiro
   return i ? ok(itemDto(i)) : problem(404, 'Código não encontrado', 'CODIGO_INEXISTENTE');
 });
 rota('GET', '/itens/:id/historico', ['estoque.consultar'], ({ params }) => {
@@ -386,7 +461,10 @@ rota('POST', '/ajustes', ['estoque.ajustar'], ({ user, body }) => {
 });
 rota('PATCH', '/itens/:id/preco', ['estoque.ajustar'], ({ user, params, body }) => {
   const i = db.itens.find((x) => x.id === params.id); if (!i) return problem(404, 'Item não encontrado');
-  i.preco = toCents(body.preco); auditar(user, 'PRECO_ITEM', 'item', i.id); return { status: 204, headers: {}, body: null };
+  const p = db.produtos.find((x) => x.id === i.produtoId); if (!p) return problem(409, 'Item por categoria usa o preço padrão da categoria', 'PRECO_DA_CATEGORIA');
+  // o preço é do produto: vale para todas as entradas
+  p.preco = toCents(body.preco); db.itens.filter((x) => x.produtoId === p.id).forEach((x) => { x.preco = p.preco; });
+  auditar(user, 'PRECO_PRODUTO', 'produto', p.id); return { status: 204, headers: {}, body: null };
 });
 rota('PATCH', '/categorias/:id/preco', ['estoque.ajustar'], ({ user, params, body }) => {
   const c = db.categorias.find((x) => x.id === params.id); if (!c) return problem(404, 'Categoria não encontrada');
@@ -406,7 +484,9 @@ rota('GET', '/pdv/catalogo', ['caixa.operar'], ({ headers }) => {
     categorias: db.categorias.filter((c) => c.ativo && c.vendaPorCategoria).map((c) => ({
       ...c, saldoBazar: db.itens.filter((i) => i.controle === 'CATEGORIA' && i.categoriaId === c.id).reduce((s, i) => s + i.saldo.BAZAR, 0),
     })),
-    itensEtiquetados: db.itens.filter((i) => i.controle === 'ETIQUETADO' && i.saldo.BAZAR > 0).map((i) => ({ itemId: i.id, codigo: i.codigo!, descricao: i.descricao, preco: fromCents(i.preco) })),
+    // um por produto com saldo no Bazar, somando as entradas aprovadas
+    itensEtiquetados: db.produtos.map((p) => ({ p, saldo: db.itens.filter((i) => i.produtoId === p.id).reduce((s, i) => s + i.saldo.BAZAR, 0) }))
+      .filter((x) => x.saldo > 0).map(({ p, saldo }) => ({ itemId: p.id, codigo: p.codigo, descricao: p.nome, preco: fromCents(p.preco), saldoBazar: saldo, pecaUnica: p.pecaUnica })),
     clientesFiado: db.clientes.filter((c) => c.ativo && !c.anonimizado).map((c) => ({ id: c.id, nome: c.nome, telefone: c.telefone })),
     regrasFiscais: db.regrasFiscais.filter((r) => !r.vigenciaFim),
     cpfObrigatorio: cpfConfig().obrigatorio, cpfLimiteMensal: cpfConfig().limiteCents / 100,
@@ -431,15 +511,31 @@ function processarVenda(id: string, req: VendaRequest, user: UsuarioDb): VendaDb
     const alocacoes: VendaDb['alocacoes'] = []; const linhas: Venda['itens'] = [];
     for (const it of req.itens) {
       if ('codigo' in it) {
-        const i = db.itens.find((x) => x.codigo === it.codigo.toUpperCase());
-        if (!i) falha(409, 'Código não encontrado', 'CODIGO_INEXISTENTE', it.codigo);
-        mover(i!, 'BAZAR', -1, 'VENDA', user.nome, `Venda`);
-        alocacoes.push({ itemId: i!.id, quantidade: 1, precoUnit: i!.preco });
-        linhas.push({ descricao: i!.descricao, quantidade: 1, precoUnitario: fromCents(i!.preco), total: fromCents(i!.preco), loteNumero: db.lotes.find((l) => l.id === i!.loteId)!.numero });
+        // produto pelo código: PEPS entre as entradas aprovadas com saldo no Bazar (S2-10)
+        const p = db.produtos.find((x) => x.codigo === it.codigo.toUpperCase());
+        if (!p) falha(409, 'Código não encontrado', 'CODIGO_INEXISTENTE', it.codigo);
+        if (p!.pecaUnica && it.quantidade > 1) falha(409, 'A mesma peça aparece duas vezes na venda', 'CODIGO_DUPLICADO', it.codigo);
+        const doProduto = db.itens.filter((x) => x.produtoId === p!.id && x.status === 'APROVADO');
+        const cand = doProduto.filter((x) => x.saldo.BAZAR > 0).sort((a, b) => {
+          const la = db.lotes.find((l) => l.id === a.loteId)!, lb = db.lotes.find((l) => l.id === b.loteId)!;
+          return la.recebidoEm.localeCompare(lb.recebidoEm) || la.numero - lb.numero || a.criadoEm.localeCompare(b.criadoEm) || a.id.localeCompare(b.id);
+        });
+        if (!cand.length) {
+          if (doProduto.some((x) => x.saldo.DOACOES > 0)) falha(409, 'Peça está no estoque de doações — transfira antes de vender', 'ITEM_EM_DOACOES', it.codigo);
+          falha(409, 'Peça indisponível (já vendida ou baixada)', 'ITEM_INDISPONIVEL', it.codigo);
+        }
+        let resta = it.quantidade;
+        for (const i of cand) {
+          if (!resta) break; const q = Math.min(resta, i.saldo.BAZAR);
+          mover(i, 'BAZAR', -q, 'VENDA', user.nome, 'Venda');
+          alocacoes.push({ itemId: i.id, quantidade: q, precoUnit: p!.preco }); resta -= q;
+          linhas.push({ descricao: p!.nome, quantidade: q, precoUnitario: fromCents(p!.preco), total: fromCents(p!.preco * q), loteNumero: db.lotes.find((l) => l.id === i.loteId)!.numero });
+        }
+        if (resta > 0) falha(409, 'Saldo insuficiente', 'SALDO_INSUFICIENTE', `${p!.nome}: faltam ${resta}`);
       } else {
         let resta = it.quantidade; exigir(resta > 0, 'quantidade');
         // PEPS: lote mais antigo primeiro, desempate fixo (data do lote, número, criação do item, id).
-        const cand = db.itens.filter((i) => i.categoriaId === it.categoriaId && i.controle === 'CATEGORIA' && i.saldo.BAZAR > 0).sort((a, b) => {
+        const cand = db.itens.filter((i) => i.categoriaId === it.categoriaId && i.controle === 'CATEGORIA' && i.status === 'APROVADO' && i.saldo.BAZAR > 0).sort((a, b) => {
           const la = db.lotes.find((l) => l.id === a.loteId)!, lb = db.lotes.find((l) => l.id === b.loteId)!;
           return la.recebidoEm.localeCompare(lb.recebidoEm) || la.numero - lb.numero || a.criadoEm.localeCompare(b.criadoEm) || a.id.localeCompare(b.id);
         });
