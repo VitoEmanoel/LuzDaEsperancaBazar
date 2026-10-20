@@ -25,6 +25,7 @@ API_URL=http://localhost:3000/api/v1 ADMIN_INITIAL_PASSWORD=... npm run test:smo
 API_URL=http://localhost:3000/api/v1 npm run test:concorrencia                            # dois caixas disputando peça, saldo e sangria (espere ~1 minuto depois do smoke: o login aceita 10 por minuto)
 API_URL=http://localhost:3000/api/v1 npm run test:reteste                                 # 36 verificações dos tickets do QA (depois do smoke)
 API_URL=http://localhost:3000/api/v1 npm run test:perfis                                  # 120 verificações de acesso por perfil (depois do smoke)
+API_URL=http://localhost:3000/api/v1 npm run test:cpf                                     # 37 verificações do CPF na venda (depois do smoke)
 npm run typecheck && npm run audit --prefix ../..                                                       # 0 erros, 0 vulnerabilidades
 ```
 
@@ -71,7 +72,7 @@ Scripts SQL do DBA ficam em `/database` na raiz do monorepo.
 | CAD | `POST /clientes/busca` · `GET,POST /clientes` · `PATCH /clientes/:id` · `GET,PUT /instituicao` | clientes.gerenciar, caixa.operar… |
 | ENT/TRI | `GET,POST /lotes` · `GET /lotes/:id` · `POST,GET /lotes/:id/documento` · `POST /lotes/:id/{itens,descartes,encerrar,reabrir}` · `POST /descartes/:id/reverter` · `GET /etiquetas` | entrada.registrar / triagem.reabrir |
 | EST | `GET /estoque` · `GET /itens/codigo/:codigo` · `GET /itens/:id/historico` · `POST /transferencias` · `POST /baixas` · `POST /ajustes` · `PATCH /itens/:id/preco` · `PATCH /categorias/:id/preco` · `POST /carga-inicial` | estoque.* |
-| PDV | `GET /pdv/catalogo` (ETag) · `PUT /vendas/:id` · `GET /vendas` · `GET /vendas/:id/comprovante` · `POST /vendas/:id/cancelar` | caixa.operar / venda.cancelar |
+| PDV | `GET /pdv/catalogo` (ETag) · `POST /pdv/cpf/saldo` (valida o CPF e devolve o saldo do mês; POST para o CPF não ir na URL) · `PUT /vendas/:id` · `GET /vendas` · `GET /vendas/:id/comprovante` · `POST /vendas/:id/cancelar` | caixa.operar / venda.cancelar |
 | CXA | `GET,POST /terminais` · `PATCH /terminais/:id` · `GET /caixas/atual` · `POST /caixas` · `POST /caixas/:id/lancamentos` · `GET /caixas/:id/previa-fechamento` · `GET /caixas/:id/linha-do-tempo` · `GET /caixas/:id/fechamento.pdf` · `POST /caixas/:id/fechar` · `GET /caixas` | terminais.gerenciar / caixa.operar / relatorios.consultar |
 | FIN | `GET,POST /contas-pagar` · `PATCH /contas-pagar/:id` · `POST /contas-pagar/:id/{pagar,cancelar}` · `GET,POST /contas-receber` · `POST /contas-receber/:id/recebimentos` · `POST /recebimentos/:id/estornar` · `GET /clientes/:id/extrato` · `GET /financeiro/resumo` | contas_* / recebimento.estornar / relatorios.consultar |
 | FIS | `GET,POST /regras-fiscais` | fiscal.gerenciar |

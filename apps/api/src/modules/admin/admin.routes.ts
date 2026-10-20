@@ -12,12 +12,14 @@ import { exigirUsuario } from '../../plugins/auth.js';
 import { FINALIDADE_CLIENTE, VERSAO_AVISO } from '../cadastros/clientes.routes.js';
 import { documentoValido } from '../../shared/documento.js';
 
-const TIPOS_PARAM: Record<string, { tipo: 'number' | 'text'; min?: number; max?: number; vazio?: boolean }> = {
+const TIPOS_PARAM: Record<string, { tipo: 'number' | 'text' | 'bool'; min?: number; max?: number; vazio?: boolean }> = {
   'fiado.prazo_dias': { tipo: 'number', min: 1, max: 365, vazio: true },
   'alerta.vencimento_dias': { tipo: 'number', min: 0, max: 60 },
   'sessao.timeout_min': { tipo: 'number', min: 5, max: 480 },
   'senha.tamanho_minimo': { tipo: 'number', min: 8, max: 64 },
   'anexo.tamanho_max_mb': { tipo: 'number', min: 1, max: 10 },
+  'cpf.limite_mensal': { tipo: 'number', min: 0, max: 1_000_000, vazio: true }, // em reais; 0 ou em branco = sem limite
+  'cpf.obrigatorio': { tipo: 'bool' }, // 1 = sim, 0 = não
 };
 
 export async function rotasAdmin(app: FastifyInstance) {
@@ -34,6 +36,7 @@ export async function rotasAdmin(app: FastifyInstance) {
       const def = TIPOS_PARAM[v.chave];
       if (!def) throw new AppError(400, `Parâmetro desconhecido: ${v.chave}`, 'VALIDACAO');
       if (v.valor === '' && def.vazio) continue;
+      if (def.tipo === 'bool' && v.valor !== '0' && v.valor !== '1') throw new AppError(400, `Valor inválido para ${v.chave} (use 0 ou 1)`, 'VALIDACAO');
       const n = Number(v.valor);
       if (def.tipo === 'number' && (!/^\d+$/.test(v.valor) || n < (def.min ?? 0) || n > (def.max ?? Infinity))) {
         throw new AppError(400, `Valor inválido para ${v.chave} (${def.min} a ${def.max})`, 'VALIDACAO');

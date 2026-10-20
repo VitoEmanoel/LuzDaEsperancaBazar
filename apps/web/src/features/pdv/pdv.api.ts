@@ -1,9 +1,11 @@
 /** PDV — catálogo, vendas e cancelamento. */
 import { http } from '../../shared/api/http';
-import type { CatalogoPdv, Page, Venda, VendaRequest } from '../../shared/api/types';
+import type { CatalogoPdv, Page, SaldoCpf, Venda, VendaRequest } from '../../shared/api/types';
 
 export const pdvApi = {
   catalogo: () => http.get<CatalogoPdv>('/pdv/catalogo'),
+  /** Valida o CPF pelos dígitos e devolve o saldo do mês. POST: o CPF nunca vai na URL. */
+  saldoCpf: (cpf: string) => http.post<SaldoCpf>('/pdv/cpf/saldo', { cpf }),
   /** Idempotente: reenviar o mesmo id devolve a venda já gravada. */
   registrarVenda: (id: string, v: VendaRequest) => http.put<Venda>(`/vendas/${id}`, v),
   listarVendas: (q: { de?: string; ate?: string; caixaId?: string; page?: number }) => http.get<Page<Venda>>('/vendas', { query: q }),

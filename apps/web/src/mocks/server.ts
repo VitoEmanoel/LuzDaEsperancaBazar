@@ -16,6 +16,7 @@ import type {
 } from '../shared/api/types';
 import { PERMISSOES } from '../shared/api/types';
 import { fromCents, toCents } from '../shared/lib/money';
+import { cpfValido, soDigitos } from '../shared/lib/cpf';
 import { db, FORMAS, type CaixaDb, type ItemDb, type UsuarioDb, type VendaDb } from './db';
 
 // ---------------- infraestrutura ----------------
@@ -408,6 +409,7 @@ rota('GET', '/pdv/catalogo', ['caixa.operar'], ({ headers }) => {
     itensEtiquetados: db.itens.filter((i) => i.controle === 'ETIQUETADO' && i.saldo.BAZAR > 0).map((i) => ({ itemId: i.id, codigo: i.codigo!, descricao: i.descricao, preco: fromCents(i.preco) })),
     clientesFiado: db.clientes.filter((c) => c.ativo && !c.anonimizado).map((c) => ({ id: c.id, nome: c.nome, telefone: c.telefone })),
     regrasFiscais: db.regrasFiscais.filter((r) => !r.vigenciaFim),
+    cpfObrigatorio: cpfConfig().obrigatorio, cpfLimiteMensal: cpfConfig().limiteCents / 100,
   };
   const etag = `"${hash(JSON.stringify(cat))}"`;
   if (headers['if-none-match'] === etag) return { status: 304, headers: { etag }, body: null };
@@ -456,6 +458,14 @@ function processarVenda(id: string, req: VendaRequest, user: UsuarioDb): VendaDb
     if (desconto < 0 || desconto > subtotal) falha(400, 'Desconto inválido', 'DESCONTO_INVALIDO');
     if (subtotal && (desconto * 10000) / subtotal > limite) falha(409, 'Desconto acima do limite do perfil', 'DESCONTO_ACIMA_LIMITE');
     const total = subtotal - desconto;
+    // CPF da compra: validado pelos dígitos; o Admin decide se é obrigatório e qual o limite mensal em reais
+    const cfgCpf = cpfConfig();
+    let cpf: string | undefined;
+    if (req.cpf) { const d = soDigitos(req.cpf); if (!cpfValido(d)) falha(400, 'CPF inválido', 'CPF_INVALIDO'); cpf = d; }
+    else if (cfgCpf.obrigatorio) falha(400, 'Informe o CPF: o Administrador marcou o CPF como obrigatório na venda', 'CPF_OBRIGATORIO');
+    if (cpf && cfgCpf.limiteCents > 0 && compradoCpf(cpf) + total > cfgCpf.limiteCents) {
+      falha(409, 'Limite de compras por CPF no mês excedido', 'LIMITE_CPF', `Limite de R$ ${fromCents(cfgCpf.limiteCents)} por CPF no mês: já comprou R$ ${fromCents(compradoCpf(cpf))}`);
+    }
     const pagos = req.pagamentos.reduce((s, p) => s + toCents(p.valor), 0);
     if (pagos !== total) falha(409, 'Pagamentos não fecham com o total recalculado', 'PAGAMENTO_DIVERGENTE', `Total ${fromCents(total)}, pago ${fromCents(pagos)}`);
     // Valor recebido obrigatório em dinheiro, PIX e cartão; troco só em dinheiro; fiado não tem valor recebido.
@@ -471,7 +481,7 @@ function processarVenda(id: string, req: VendaRequest, user: UsuarioDb): VendaDb
     const cliente = db.clientes.find((c) => c.id === req.clienteId);
     if (fiado && (!cliente || !req.vencimentoFiado)) falha(400, 'Fiado exige cliente e vencimento', 'FIADO_SEM_CLIENTE');
     const v: VendaDb = {
-      id, numero: ++db.seq.venda, ocorridaEm: now(), status: 'CONCLUIDA',
+      id, numero: ++db.seq.venda, ...(cpf ? { cpf } : {}), ocorridaEm: now(), status: 'CONCLUIDA',
       subtotal: fromCents(subtotal), desconto: fromCents(desconto), total: fromCents(total), troco: fromCents(troco), itens: linhas, pagamentos: req.pagamentos,
       operadorNome: user.nome, clienteNome: cliente?.nome, clienteId: cliente?.id, vencimentoFiado: req.vencimentoFiado,
       caixaId: req.caixaId, terminalId: req.terminalId, operadorId: user.id, alocacoes,
@@ -483,6 +493,15 @@ function processarVenda(id: string, req: VendaRequest, user: UsuarioDb): VendaDb
     snap.forEach(({ i, s }) => { i.saldo = s; }); db.movs.length = movLen; throw e;
   }
 }
+/** Opções do Administrador sobre o CPF (Parâmetros). */
+function cpfConfig() {
+  const num = (k: string) => Number(db.parametros.find((p) => p.chave === k)?.valor ?? 0) || 0;
+  return { limiteCents: Math.round(num('cpf.limite_mensal') * 100), obrigatorio: num('cpf.obrigatorio') === 1 };
+}
+/** O que o CPF já comprou neste mês (venda cancelada devolve o saldo). */
+const compradoCpf = (cpf: string) => db.vendas.filter((v) => v.cpf === cpf && v.status === 'CONCLUIDA' && v.ocorridaEm.slice(0, 7) === now().slice(0, 7)).reduce((s, v) => s + toCents(v.total), 0);
+/** O CPF só sai no comprovante e na resposta da venda, nunca nas listas. */
+const semCpf = ({ cpf: _cpf, ...v }: Venda): Venda => v;
 const vendaDto = ({ caixaId: _c, terminalId: _t, operadorId: _o, alocacoes: _a, clienteId: _cl, ...v }: VendaDb): Venda => v;
 rota('PUT', '/vendas/:id', ['caixa.operar'], ({ user, params, body }) => {
   exigir(body?.caixaId && body?.terminalId, 'caixaId/terminalId');
@@ -490,10 +509,16 @@ rota('PUT', '/vendas/:id', ['caixa.operar'], ({ user, params, body }) => {
   const v = processarVenda(params.id!, body, user);
   return ok(vendaDto(v), ja ? 200 : 201);
 });
+rota('POST', '/pdv/cpf/saldo', ['caixa.operar'], ({ body }) => {
+  const d = soDigitos(String(body?.cpf ?? ''));
+  if (!cpfValido(d)) return problem(400, 'CPF inválido', 'CPF_INVALIDO');
+  const cfg = cpfConfig(); const comprado = compradoCpf(d);
+  return ok({ cpf: d, limite: cfg.limiteCents > 0 ? fromCents(cfg.limiteCents) : null, comprado: fromCents(comprado), saldo: cfg.limiteCents > 0 ? fromCents(Math.max(0, cfg.limiteCents - comprado)) : null, obrigatorio: cfg.obrigatorio });
+});
 rota('GET', '/vendas', ['caixa.operar', 'venda.cancelar'], ({ user, query }) => {
   const admin = perfilDe(user).permissoes.includes('venda.cancelar');
   return ok(paginar(db.vendas.filter((v) => (admin || v.operadorId === user.id) && noPeriodo(v.ocorridaEm, query) && (!query.get('caixaId') || v.caixaId === query.get('caixaId')))
-    .sort((a, b) => b.ocorridaEm.localeCompare(a.ocorridaEm)).map(vendaDto), query));
+    .sort((a, b) => b.ocorridaEm.localeCompare(a.ocorridaEm)).map((v) => semCpf(vendaDto(v))), query));
 });
 rota('GET', '/vendas/:id/comprovante', ['caixa.operar'], ({ params }) => { const v = db.vendas.find((x) => x.id === params.id); return v ? ok(vendaDto(v)) : problem(404, 'Venda não encontrada'); });
 rota('POST', '/vendas/:id/cancelar', ['venda.cancelar'], ({ user, params, body }) => {

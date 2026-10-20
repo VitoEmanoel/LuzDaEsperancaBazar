@@ -605,6 +605,7 @@ model Venda {
   cliente       Cliente?         @relation(fields: [clienteId], references: [id])
   itens         VendaItem[]
   pagamentos    VendaPagamento[]
+  cpf           VendaCpf?
   contaReceber  ContaReceber?
   registradaPor Usuario          @relation("VendaRegistradaPor", fields: [registradaPorId], references: [id], onDelete: Restrict)
   canceladaPor  Usuario?         @relation("VendaCanceladaPor", fields: [canceladaPorId], references: [id], onDelete: Restrict)
@@ -637,6 +638,18 @@ model VendaItem {
   @@index([vendaId])
   @@index([itemId])
   @@map("venda_item")
+}
+
+/// CPF da compra: tabela própria, apagada todo mês (a venda não guarda o CPF).
+model VendaCpf {
+  vendaId  String   @id @map("venda_id") @db.Uuid
+  cpf      String   @db.Char(11)
+  criadoEm DateTime @default(now()) @map("criado_em") @db.Timestamptz(3)
+
+  venda Venda @relation(fields: [vendaId], references: [id])
+
+  @@index([cpf, criadoEm])
+  @@map("venda_cpf")
 }
 
 model VendaPagamento {

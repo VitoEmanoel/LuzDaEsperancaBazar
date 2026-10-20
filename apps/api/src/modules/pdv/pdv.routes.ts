@@ -6,7 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { prisma } from '../../shared/prisma.js';
-import { conflito, naoEncontrado, traduzirErroBanco } from '../../shared/errors.js';
+import { AppError, conflito, naoEncontrado, traduzirErroBanco } from '../../shared/errors.js';
 import { page, parse, skipTake, zIdParam, zMotivo, zPage, zPeriodo, zUuid } from '../../shared/http.js';
 import { auditar } from '../../shared/audit.js';
 import { fromCents, toCents } from '../../shared/money.js';
@@ -14,6 +14,7 @@ import { localDate, periodo } from '../../shared/dates.js';
 import { paramNum } from '../../shared/parametros.js';
 import { exigirUsuario, tem, type UsuarioCtx } from '../../plugins/auth.js';
 import { regraDto, regrasVigentes } from '../fiscal/fiscal.service.js';
+import { configCpf, limparCpfsVencidos, normalizarCpf, saldoDoCpf } from './cpf.service.js';
 import { registrarReembolso } from '../financeiro/reembolso.service.js';
 import { carregarVenda, emTransacao, processarVenda, zVendaRequest, type Operador } from './vendas.service.js';
 
@@ -26,7 +27,7 @@ export async function rotasPdv(app: FastifyInstance) {
   // ---------------- catálogo do terminal (RF-PDV-10, RNF-19: só o necessário) ----------------
   app.get('/pdv/catalogo', { config: { acesso: ['caixa.operar'] } }, async (req, reply) => {
     const DIA = 86_400_000;
-    const [categorias, etiquetadas, clientes, regras, prazo] = await Promise.all([
+    const [categorias, etiquetadas, clientes, regras, prazo, cfgCpf] = await Promise.all([
       // RN-30: categoria inativa continua vendável enquanto tiver saldo por categoria no bazar
       prisma.$queryRaw<{ id: string; nome: string; preco_padrao: string | null; venda_por_categoria: boolean; ativa: boolean; saldo_bazar: number }[]>`
         SELECT c.id::text, c.nome, c.preco_padrao::text, c.venda_por_categoria, c.ativa,
@@ -57,6 +58,7 @@ export async function rotasPdv(app: FastifyInstance) {
       }),
       regrasVigentes(prisma, localDate()),
       paramNum(prisma, 'fiado.prazo_dias', 0),
+      configCpf(prisma),
     ]);
     const corpo = {
       categorias: categorias.map((c) => ({ id: c.id, nome: c.nome, precoPadrao: c.preco_padrao ? Number(c.preco_padrao).toFixed(2) : '0.00', vendaPorCategoria: c.venda_por_categoria, ativo: c.ativa, saldoBazar: c.saldo_bazar })),
@@ -64,11 +66,23 @@ export async function rotasPdv(app: FastifyInstance) {
       clientesFiado: clientes,
       regrasFiscais: regras.map(regraDto),
       fiadoPrazoDias: prazo || undefined,
+      // regras do CPF na venda (o PDV mostra o saldo e esconde o "Não" quando é obrigatório)
+      cpfObrigatorio: cfgCpf.obrigatorio,
+      cpfLimiteMensal: cfgCpf.limiteCents / 100,
     };
     const etag = `"${createHash('sha256').update(JSON.stringify(corpo)).digest('base64url').slice(0, 27)}"`;
     reply.header('ETag', etag).header('Cache-Control', 'private, no-cache');
     if (req.headers['if-none-match'] === etag) return reply.code(304).send();
     return { versao: etag, ...corpo };
+  });
+
+  // ---------------- CPF: valida e devolve o saldo do mês (POST: o CPF nunca vai na URL) ----------------
+  app.post('/pdv/cpf/saldo', { config: { acesso: ['caixa.operar'], rateLimit: { max: 120, timeWindow: '1 minute' } } }, async (req) => {
+    const { cpf: bruto } = parse(z.object({ cpf: z.string().trim().max(20) }), req.body);
+    const cpf = normalizarCpf(bruto);
+    if (!cpf) throw new AppError(400, 'CPF inválido', 'CPF_INVALIDO');
+    await limparCpfsVencidos(prisma); // CPFs de meses anteriores somem no primeiro uso do mês
+    return { cpf, ...(await saldoDoCpf(prisma, cpf)) };
   });
 
   // ---------------- venda online, idempotente (RF-PDV-03, RN-26) ----------------
@@ -86,7 +100,7 @@ export async function rotasPdv(app: FastifyInstance) {
         r = { id, numero: 0, jaExistia: true };
       } else throw e;
     }
-    const v = await carregarVenda(prisma, id);
+    const v = await carregarVenda(prisma, id, true);
     return reply.code(r.jaExistia ? 200 : 201).send(v!.dto);
   });
 
@@ -111,7 +125,7 @@ export async function rotasPdv(app: FastifyInstance) {
   app.get('/vendas/:id/comprovante', { config: { acesso: ['caixa.operar', 'venda.cancelar', 'relatorios.consultar'] } }, async (req) => {
     const u = exigirUsuario(req);
     const { id } = parse(zIdParam, req.params);
-    const v = await carregarVenda(prisma, id);
+    const v = await carregarVenda(prisma, id, true); // o CPF só sai no comprovante
     if (!v || (!podeVerTodas(u) && v.venda.registradaPorId !== u.id)) naoEncontrado('Venda'); // 404 em vez de 403: não revela existência
     return v!.dto;
   });

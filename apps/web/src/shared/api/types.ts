@@ -164,7 +164,12 @@ export interface CatalogoPdv {
   clientesFiado: { id: Uuid; nome: string; telefone: string }[];
   regrasFiscais: RegraFiscal[];
   fiadoPrazoDias?: number;
+  /** O Administrador decide, em Parâmetros, se o CPF é obrigatório na venda e qual o limite mensal por CPF (em reais; 0 = sem limite). */
+  cpfObrigatorio?: boolean;
+  cpfLimiteMensal?: number;
 }
+/** Saldo do CPF no mês: `limite` e `saldo` são nulos quando não há limite. */
+export interface SaldoCpf { cpf: string; limite: Money | null; comprado: Money; saldo: Money | null; obrigatorio: boolean }
 export type VendaItemRequest =
   | { codigo: string; quantidade: 1; desconto?: Money }
   | { categoriaId: Uuid; quantidade: number; desconto?: Money };
@@ -174,6 +179,8 @@ export interface VendaRequest {
   terminalId: Uuid;
   caixaId: Uuid;
   clienteId?: Uuid;
+  /** CPF da compra (só dígitos); o servidor valida e confere o limite do mês */
+  cpf?: string;
   itens: VendaItemRequest[];
   desconto?: Money;
   pagamentos: PagamentoRequest[];
@@ -182,6 +189,8 @@ export interface VendaRequest {
 export interface Venda {
   id: Uuid;
   numero: number;
+  /** CPF inteiro: só vem no comprovante (nunca nas listas) e some no fim do mês */
+  cpf?: string;
   ocorridaEm: IsoDateTime;
   status: 'CONCLUIDA' | 'CANCELADA';
   subtotal: Money;
@@ -262,5 +271,5 @@ export interface RelatorioSecao {
 export interface RelatorioResposta extends RelatorioSecao { blocos?: RelatorioSecao[] }
 
 // ---------- ADM ----------
-export interface Parametro { chave: string; valor: string; descricao: string; tipo: 'number' | 'text' }
+export interface Parametro { chave: string; valor: string; descricao: string; tipo: 'number' | 'text' | 'bool' }
 export interface ImportacaoResultado { gravado: boolean; inseridos: number; duplicados: { linha: number; valor: string }[]; erros: { linha: number; mensagem: string }[] }

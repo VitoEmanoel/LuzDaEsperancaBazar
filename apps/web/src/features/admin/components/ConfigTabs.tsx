@@ -49,9 +49,11 @@ export function ParametrosTab() {
     <section className="narrow card">
       <ErrorAlert erro={erro} />
       {data?.map((p) => (
-        <Field key={p.chave} label={p.descricao} hint={p.chave}>
-          <input inputMode={p.tipo === 'number' ? 'numeric' : undefined} value={vals[p.chave] ?? ''} onChange={(e) => setVals({ ...vals, [p.chave]: p.tipo === 'number' ? e.target.value.replace(/\D/g, '') : e.target.value })} />
-        </Field>
+        p.tipo === 'bool'
+          ? <label key={p.chave} className="check"><input type="checkbox" checked={vals[p.chave] === '1'} onChange={(e) => setVals({ ...vals, [p.chave]: e.target.checked ? '1' : '0' })} /> {p.descricao}</label>
+          : <Field key={p.chave} label={p.descricao} hint={p.chave}>
+            <input inputMode={p.tipo === 'number' ? 'numeric' : undefined} value={vals[p.chave] ?? ''} onChange={(e) => setVals({ ...vals, [p.chave]: p.tipo === 'number' ? e.target.value.replace(/\D/g, '') : e.target.value })} />
+          </Field>
       ))}
       <button className="btn btn-primary" onClick={salvar}>Salvar</button>
     </section>

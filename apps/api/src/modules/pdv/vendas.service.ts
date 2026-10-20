@@ -7,6 +7,7 @@
  *  - regra fiscal vigente copiada em cada item (RN-17); fiado gera conta a receber (RN-03);
  *  - no COMMIT o banco confere a venda inteira (tg_valida_venda_completa).
  */
+import { configCpf, compradoNoMes, limparCpfsVencidos, normalizarCpf } from './cpf.service.js';
 import { z } from 'zod';
 import { Prisma } from '../../generated/prisma/client.js';
 import { prisma, type Db, type Tx } from '../../shared/prisma.js';
@@ -28,6 +29,8 @@ export const zVendaRequest = z.object({
   terminalId: zUuid,
   caixaId: zUuid,
   clienteId: zUuid.optional(),
+  /** CPF da compra (opcional, salvo se o Administrador marcar como obrigatório); validado pelos dígitos no servidor */
+  cpf: z.string().trim().max(20).nullish(),
   itens: z.array(zItemVenda).min(1, 'venda sem itens').max(200),
   desconto: zMoney.optional(),
   pagamentos: z.array(z.object({
@@ -45,13 +48,16 @@ const vendaInclude = {
   itens: { include: { item: { select: { descricao: true, tipoControle: true, categoria: { select: { nome: true } }, lote: { select: { numero: true } } } } }, orderBy: { id: 'asc' as const } },
   pagamentos: true,
   cliente: { select: { nome: true } },
+  cpf: true,
   contaReceber: { select: { vencimento: true } },
 } satisfies Prisma.VendaInclude;
 type VendaFull = Prisma.VendaGetPayload<{ include: typeof vendaInclude }>;
 
-export function vendaDto(v: VendaFull, operadorNome: string) {
+/** `comCpf`: o CPF só sai no comprovante e na resposta da venda — nunca nas listas. */
+export function vendaDto(v: VendaFull, operadorNome: string, comCpf = false) {
   return {
     id: v.id, numero: v.numero,
+    ...(comCpf && v.cpf ? { cpf: v.cpf.cpf } : {}),
     ocorridaEm: v.ocorridaEm.toISOString(),
     status: v.status === 'FINALIZADA' ? 'CONCLUIDA' : 'CANCELADA',
     subtotal: money(v.subtotal), desconto: money(v.desconto), total: money(v.total),
@@ -67,11 +73,11 @@ export function vendaDto(v: VendaFull, operadorNome: string) {
   };
 }
 
-export async function carregarVenda(db: Db, id: string) {
+export async function carregarVenda(db: Db, id: string, comCpf = false) {
   const v = await db.venda.findUnique({ where: { id }, include: vendaInclude });
   if (!v) return null;
   const op = await db.usuario.findUnique({ where: { id: v.registradaPorId }, select: { nome: true } });
-  return { venda: v, dto: vendaDto(v, op?.nome ?? '—') };
+  return { venda: v, dto: vendaDto(v, op?.nome ?? '—', comCpf) };
 }
 
 // ---------------- alocação ----------------
@@ -209,6 +215,29 @@ export async function processarVenda(tx: Tx, id: string, req: VendaRequest, op: 
   const total = subtotal - descVenda;
   if (total <= 0) throw new AppError(400, 'Venda sem valor a pagar', 'VENDA_SEM_VALOR');
 
+  // ----- CPF da compra: validado pelos dígitos; o limite mensal (em reais) é conferido DENTRO da transação, com trava por CPF -----
+  const cfgCpf = await configCpf(tx);
+  let cpf: string | null = null;
+  if (req.cpf) {
+    cpf = normalizarCpf(req.cpf);
+    if (!cpf) throw new AppError(400, 'CPF inválido', 'CPF_INVALIDO');
+  } else if (cfgCpf.obrigatorio) {
+    throw new AppError(400, 'Informe o CPF: o Administrador marcou o CPF como obrigatório na venda', 'CPF_OBRIGATORIO');
+  }
+  if (cpf) {
+    await limparCpfsVencidos(tx);
+    // duas vendas do mesmo CPF ao mesmo tempo não podem passar juntas do limite
+    // (a função devolve void, que o Prisma não lê: por isso o SELECT 1 em volta)
+    await tx.$queryRaw`SELECT 1 AS travado FROM (SELECT pg_advisory_xact_lock(hashtext(${`cpf:${cpf}`}))) t`;
+    if (cfgCpf.limiteCents > 0) {
+      const comprado = await compradoNoMes(tx, cpf);
+      if (comprado + total > cfgCpf.limiteCents) {
+        throw new AppError(409, 'Limite de compras por CPF no mês excedido', 'LIMITE_CPF',
+          `Limite de R$ ${fromCents(cfgCpf.limiteCents)} por CPF no mês: já comprou R$ ${fromCents(comprado)}, saldo de R$ ${fromCents(Math.max(0, cfgCpf.limiteCents - comprado))}`);
+      }
+    }
+  }
+
   // ----- pagamentos (RN-15) -----
   const pags = req.pagamentos.map((p) => ({ forma: p.forma, valor: toCents(p.valor), recebido: p.valorRecebido ? toCents(p.valorRecebido) : null }));
   if (pags.some((p) => p.valor <= 0)) throw new AppError(400, 'Pagamento com valor zero', 'VALIDACAO');
@@ -259,6 +288,7 @@ export async function processarVenda(tx: Tx, id: string, req: VendaRequest, op: 
     },
     select: { id: true, numero: true },
   });
+  if (cpf) await tx.vendaCpf.create({ data: { vendaId: venda.id, cpf } });
   // baixas em ordem de item_id (evita deadlock entre caixas)
   for (const l of [...linhas].sort((a, b) => a.itemId.localeCompare(b.itemId))) {
     const fiscal = resolverRegra(regras, l.itemId, l.categoriaId);

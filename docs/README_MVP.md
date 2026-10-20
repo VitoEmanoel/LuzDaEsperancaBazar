@@ -131,6 +131,7 @@ Tela cheia, pensada para leitor de código e tablet de 10".
 - **Venda por categoria:** botões com preço para itens comuns, com quantidade (F2).
 - **Atalhos:** F2 quantidade · F4 pagamento · Esc remove o último · F6 sangria/suprimento.
 - **Pagamento** (F4): o operador **digita quanto recebeu em cada forma** (dinheiro, PIX, débito, crédito) e o sistema faz a conta: mostra o que falta e, em dinheiro, o **troco** (conta de R$ 20 paga com nota de R$ 100: troco de R$ 80). A venda só finaliza quando a soma cobre o total. PIX e cartão não aceitam receber mais do que falta. No fiado o valor digitado é o que fica na conta do cliente (RN-15). Desconto só até o limite do perfil (o Vendedor padrão não dá desconto).
+- **CPF na compra (S1B-17 a S1B-21):** no **primeiro bip** de cada venda o PDV pergunta "A compra é com CPF?" (**S**im / **N**ão). Em Sim, o vendedor digita o CPF (com máscara; o sistema confere os dígitos e não segue com CPF inválido) e vê o **saldo do CPF no mês**; o PDV bloqueia o que passar do saldo. O CPF aparece **inteiro** só no comprovante (nunca nas listas nem na auditoria), fica guardado na tabela `venda_cpf` até o fim do mês e **depois é apagado** (e o saldo zera). O CPF não fica guardado no aparelho. O **Administrador decide**, em Parâmetros, o **limite de compras por CPF no mês em reais** (0 = sem limite) e se o **CPF é obrigatório** (com ele obrigatório o "Não" não aparece e o servidor recusa venda sem CPF válido). Venda cancelada devolve o saldo. Duas vendas ao mesmo tempo do mesmo CPF não passam juntas do limite.
 - **Estoque no PDV:** o catálogo traz o saldo do Bazar por categoria; o botão mostra "N em estoque" e o sistema **bloqueia e avisa a quantidade** ao passar do que há (o servidor confere de novo ao gravar). Peça que está no estoque de Doações avisa que não pode ser vendida.
 - **Tirar do carrinho por quantidade:** o ✕ pergunta quantas unidades tirar (peça única sai inteira). Esc tira uma unidade da última linha, e só se o campo estiver vazio (com texto digitado, Esc só limpa o campo).
 - **Fiado:** exige cliente e vencimento; **cadastro rápido de cliente** com ciência do aviso de privacidade (LGPD); se o telefone já existe, pergunta "É a mesma pessoa?".
@@ -281,9 +282,11 @@ Segue o brandbook da instituição (`docs/marca/`):
 
 | Bateria | Resultado atual |
 |---|---|
-| `tests/smoke.ts` (fluxos críticos e segurança) | 109 ok |
+| `tests/smoke.ts` (fluxos críticos e segurança) | 151 ok |
 | `tests/concorrencia.ts` (disputa da última peça, IDOR) | OK |
 | `tests/reteste-qa.ts` (regressão dos 12 tickets) | 36 ok |
+| `tests/perfis.ts` (acesso de cada perfil, perfil personalizado, proteção dos perfis padrão) | 120 ok |
+| `tests/cpf.ts` (CPF: dígitos, limite em reais, obrigatório, só no comprovante, trava entre vendas, limpeza do mês) | 37 ok |
 | `database/04_testes_0003.sql` (tentativas de violar regras do banco) | 0 falha |
 | `database/07_manutencao_rotina.sql` (conferência de saldo e prestação de contas) | 0 divergência |
 | E2E no navegador (comprovante, cadastros, relatórios) | a refazer após a Sprint 1 |
@@ -309,7 +312,7 @@ psql -d bazar -v senha_api="..." -f database/03_seguranca_papeis.sql
 npm run dev:api                              # http://localhost:3000/api/v1
 
 # Testes, em banco de TESTE, nesta ordem:
-npm run test:smoke && npm run test:concorrencia && npm run test:reteste
+npm run test:smoke && npm run test:concorrencia && npm run test:reteste && npm run test:perfis && npm run test:cpf   # espere ~1 minuto entre as baterias: o login aceita 10 por minuto
 ```
 
 **Produção:** atrás de proxy com TLS (`TRUST_PROXY=true`), segredos vindos do cofre, pasta de uploads em volume com backup, `03_seguranca_papeis.sql` após cada deploy e `07_manutencao_rotina.sql` diariamente.

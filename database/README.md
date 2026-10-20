@@ -4,7 +4,7 @@ PostgreSQL 16 (compatível com 11+). Fonte da verdade do esquema: `apps/api/pris
 
 | Arquivo | O que faz | Quem roda / onde |
 |---|---|---|
-| `01_ddl_completo.sql` | 0001 a 0007 concatenadas: instalação do zero sem Prisma | dono, banco **vazio** |
+| `01_ddl_completo.sql` | 0001 a 0008 concatenadas: instalação do zero sem Prisma | dono, banco **vazio** |
 | `02_dml_dados_iniciais.sql` | Dados de referência idempotentes (locais, permissões, perfis, motivos, parâmetros, regra fiscal GERAL) | dono |
 | `03_seguranca_papeis.sql` | Papéis `bazar_api` (sem DELETE, sem escrita no saldo, timeouts) e `bazar_relatorio` (somente leitura, sem PII). Senhas por `-v`, vindas do cofre | superusuário, **após cada deploy** |
 | `04_testes_0003.sql` | 28 tentativas de violar as regras da 0003 (tudo em ROLLBACK) | superusuário, banco de teste |

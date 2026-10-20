@@ -40,7 +40,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       redact: {
         paths: [
           'req.headers.authorization', 'req.headers.cookie', 'res.headers["set-cookie"]',
-          '*.senha', '*.senhaAtual', '*.novaSenha', '*.telefone', '*.nome', '*.accessToken',
+          '*.senha', '*.senhaAtual', '*.novaSenha', '*.telefone', '*.nome', '*.accessToken', '*.cpf', '*.*.cpf', 'req.body.cpf',
         ],
         censor: '[omitido]',
       },

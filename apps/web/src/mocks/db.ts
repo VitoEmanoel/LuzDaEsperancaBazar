@@ -125,6 +125,8 @@ export const db = {
     { chave: 'sessao.timeout_min', valor: '30', descricao: 'Tempo de inatividade da sessão (min)', tipo: 'number' },
     { chave: 'senha.tamanho_minimo', valor: '8', descricao: 'Tamanho mínimo da senha', tipo: 'number' },
     { chave: 'anexo.tamanho_max_mb', valor: '5', descricao: 'Tamanho máximo do anexo do lote (MB)', tipo: 'number' },
+    { chave: 'cpf.limite_mensal', valor: '0', descricao: 'Limite de compras por CPF no mês, em reais (0 = sem limite)', tipo: 'number' },
+    { chave: 'cpf.obrigatorio', valor: '0', descricao: 'CPF obrigatório na venda', tipo: 'bool' },
   ] as Parametro[],
   auditoria: [] as AuditoriaRegistro[],
 };

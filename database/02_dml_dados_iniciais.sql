@@ -73,7 +73,9 @@ INSERT INTO parametro (chave, valor, descricao) VALUES
   ('alerta.vencimento_dias', '3', 'Avisar contas a pagar com vencimento em até N dias'),
   ('sessao.timeout_min', '30', 'Tempo de inatividade da sessão em minutos (PA-17)'),
   ('senha.tamanho_minimo', '8', 'Tamanho mínimo da senha (PA-17)'),
-  ('anexo.tamanho_max_mb', '5', 'Tamanho máximo do anexo do lote em MB (RNF-18)')
+  ('anexo.tamanho_max_mb', '5', 'Tamanho máximo do anexo do lote em MB (RNF-18)'),
+  ('cpf.limite_mensal', '0', 'Limite de compras por CPF no mês, em reais (0 = sem limite)'),
+  ('cpf.obrigatorio', '0', 'CPF obrigatório na venda (1 = sim, 0 = não)')
 ON CONFLICT (chave) DO NOTHING;
 
 INSERT INTO instituicao (id, nome, uf, atualizado_em) VALUES (1, 'Associação Luz da Esperança', 'PI', now())

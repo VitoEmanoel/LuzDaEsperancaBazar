@@ -25,6 +25,7 @@ export function ComprovanteModal({ venda, instituicao, onFechar }: { venda: Vend
           Venda nº <strong>{venda.numero}</strong>
           <br />{formatDateTime(venda.ocorridaEm)} · {venda.operadorNome}
         </p>
+        {venda.cpf && <p>CPF: <strong>{formatDocumento(venda.cpf)}</strong></p>}
         <table>
           <tbody>
             {venda.itens.map((i, k) => <tr key={k}><td>{i.quantidade}× {i.descricao}</td><td className="num">{formatMoney(i.total)}</td></tr>)}

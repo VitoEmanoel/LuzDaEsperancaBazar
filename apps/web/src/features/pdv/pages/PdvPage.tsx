@@ -10,6 +10,7 @@ import { usePdvSessao } from '../hooks/usePdvSessao';
 import { paraItensRequest, subtotalCents, type LinhaCarrinho } from '../carrinho';
 import { PagamentoModal, type ResultadoPagamento } from '../components/PagamentoModal';
 import { RemoverQuantidadeModal } from '../components/RemoverQuantidadeModal';
+import { CpfModal, type DecisaoCpf } from '../components/CpfModal';
 import { ResumoCaixaModal } from '../../caixa/components/ResumoCaixaModal';
 import { ComprovanteModal } from '../components/ComprovanteModal';
 import { LancamentoModal } from '../../caixa/components/LancamentoModal';
@@ -18,6 +19,7 @@ import { estoqueApi } from '../../estoque/estoque.api';
 import { pdvApi } from '../pdv.api';
 import type { Venda, VendaRequest } from '../../../shared/api/types';
 import { formatMoney, fromCents, toCents } from '../../../shared/lib/money';
+import { cpfOculto } from '../../../shared/lib/cpf';
 import { uuid } from '../../../shared/lib/uuid';
 import { beep } from '../../../shared/lib/feedback';
 import { armazenamento, CHAVES } from '../../../shared/lib/armazenamento';
@@ -51,6 +53,13 @@ export function PdvPage() {
   const [qtd, setQtd] = useState('1');
   const [msgLeitura, setMsgLeitura] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null);
   const [pagando, setPagando] = useState(false);
+  // CPF da compra: null = ainda não perguntado; false = sem CPF; objeto = com CPF. Fica SÓ na memória (nunca vai para o aparelho).
+  const [cpfSel, setCpfSel] = useState<null | false | { cpf: string; saldoCents: number | null }>(null);
+  const cpfAtual = useRef<null | false | { cpf: string; saldoCents: number | null }>(null);
+  const [cpfAberto, setCpfAberto] = useState(false);
+  const acaoPendente = useRef<(() => void) | null>(null);
+  /** Código bipado que está esperando a resposta do CPF: se a pergunta for cancelada, volta para a caixa de leitura. */
+  const codigoPendente = useRef<string | null>(null);
   const [lancando, setLancando] = useState(false);
   const [resumindo, setResumindo] = useState(false);
   const [removendo, setRemovendo] = useState<LinhaCarrinho | null>(null);
@@ -61,7 +70,11 @@ export function PdvPage() {
   const vendaId = useRef<string | null>(restaurado.current.vendaId ?? null);
   const linhasGravadas = useRef(restaurado.current.linhas);
 
-  const modalAberto = pagando || lancando || resumindo || !!removendo || !!comprovante;
+  // Carrinho vazio = venda nova: pergunta o CPF de novo no próximo bip. Carrinho restaurado depois do F5 (o CPF não fica no aparelho): pergunta já.
+  useEffect(() => { if (linhas.length === 0) { cpfAtual.current = null; setCpfSel(null); } }, [linhas.length]);
+  useEffect(() => { if ((restaurado.current?.linhas.length ?? 0) > 0) setCpfAberto(true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const modalAberto = pagando || lancando || resumindo || !!removendo || !!comprovante || cpfAberto;
   const focarCodigo = useCallback(() => { setTimeout(() => codigoRef.current?.focus(), 0); }, []);
 
   useEffect(() => {
@@ -76,7 +89,7 @@ export function PdvPage() {
     const onKey = (e: KeyboardEvent) => {
       if (modalAberto) return;
       if (e.key === 'F2') { e.preventDefault(); qtdRef.current?.focus(); qtdRef.current?.select(); }
-      else if (e.key === 'F4') { e.preventDefault(); if (linhas.length) setPagando(true); }
+      else if (e.key === 'F4') { e.preventDefault(); if (linhas.length) exigirCpf(() => setPagando(true)); }
       else if (e.key === 'F6') { e.preventDefault(); setLancando(true); }
       else if (e.key === 'Escape') {
         // Quem está digitando só quer limpar o campo: nunca apaga item do carrinho por engano.
@@ -110,11 +123,39 @@ export function PdvPage() {
 
   function feedback(tipo: 'ok' | 'erro', texto: string) { beep(tipo); setMsgLeitura({ tipo, texto }); }
 
-  async function lerCodigo(e: FormEvent) {
+  /** Pergunta o CPF antes de seguir quando ainda não foi decidido nesta venda (primeiro bip, primeira categoria ou pagamento). */
+  function exigirCpf(acao: () => void, codigoLido?: string) {
+    if (cpfAtual.current !== null) { acao(); return; }
+    acaoPendente.current = acao; codigoPendente.current = codigoLido ?? null; setCpfAberto(true);
+  }
+  function aoDecidirCpf(d: DecisaoCpf) {
+    const novo = d.tipo === 'sem' ? false : { cpf: d.cpf, saldoCents: d.saldoCents };
+    cpfAtual.current = novo; setCpfSel(novo); setCpfAberto(false);
+    const acao = acaoPendente.current; acaoPendente.current = null; codigoPendente.current = null;
+    if (acao) setTimeout(acao, 0); else focarCodigo();
+  }
+  function cancelarCpf() {
+    if (codigoPendente.current) setCodigo(codigoPendente.current); // o item bipado não se perde
+    acaoPendente.current = null; codigoPendente.current = null; setCpfAberto(false); focarCodigo();
+  }
+  /** O CPF só pode comprar até o saldo do mês: bloqueia o que passar (o servidor confere de novo ao gravar). */
+  function cabeNoSaldoCpf(valorNovoCents: number): boolean {
+    const c = cpfAtual.current;
+    if (!c || c.saldoCents === null) return true;
+    if (subtotal + valorNovoCents <= c.saldoCents) return true;
+    feedback('erro', `Este CPF só pode comprar mais ${formatMoney(Math.max(0, c.saldoCents - subtotal))} neste mês (saldo de ${formatMoney(c.saldoCents)}).`);
+    return false;
+  }
+
+  function lerCodigo(e: FormEvent) {
     e.preventDefault();
     const c = codigo.trim().toUpperCase();
     setCodigo('');
     if (!c) return;
+    exigirCpf(() => void lerCodigoAgora(c), c); // o primeiro bip da venda pergunta o CPF; o item lido espera a resposta
+  }
+
+  async function lerCodigoAgora(c: string) {
     if (linhas.some((l) => l.codigo === c)) { feedback('erro', `A peça ${c} já está no carrinho.`); return; }
     let item = catalogo.itensEtiquetados.find((i) => i.codigo === c);
     let foraDoBazar = false;
@@ -128,11 +169,14 @@ export function PdvPage() {
     }
     if (!item) { feedback('erro', foraDoBazar ? `A peça ${c} está no estoque de Doações e não pode ser vendida.` : `Código ${c} não encontrado ou sem saldo no Bazar.`); return; }
     const it = item;
+    if (!cabeNoSaldoCpf(toCents(it.preco))) return;
     setLinhas((ls) => [...ls, { key: uuid(), tipo: 'codigo', codigo: it.codigo, descricao: it.descricao, precoCents: toCents(it.preco), quantidade: 1 }]);
     feedback('ok', `${it.descricao} — ${formatMoney(it.preco)}`);
   }
 
-  function adicionarCategoria(categoriaId: string) {
+  function adicionarCategoria(categoriaId: string) { exigirCpf(() => adicionarCategoriaAgora(categoriaId)); }
+
+  function adicionarCategoriaAgora(categoriaId: string) {
     const cat = catalogo.categorias.find((c) => c.id === categoriaId)!;
     const q = Math.max(1, Math.min(999, Number.parseInt(qtd, 10) || 1));
     // O PDV não deixa vender mais do que há no estoque do Bazar: avisa a quantidade e bloqueia (o servidor confere de novo ao gravar).
@@ -146,6 +190,7 @@ export function PdvPage() {
       focarCodigo();
       return;
     }
+    if (!cabeNoSaldoCpf(toCents(cat.precoPadrao) * q)) { focarCodigo(); return; }
     setLinhas((ls) => {
       const existente = ls.find((l) => l.categoriaId === categoriaId);
       if (existente) return ls.map((l) => (l === existente ? { ...l, quantidade: l.quantidade + q } : l));
@@ -186,6 +231,7 @@ export function PdvPage() {
       venda = await pdvApi.registrarVenda(vendaId.current, {
         terminalId: caixa.terminalId, caixaId: caixa.id,
         itens: paraItensRequest(linhas), pagamentos: pg.pagamentos,
+        ...(cpfAtual.current ? { cpf: cpfAtual.current.cpf } : {}),
         ...(pg.descontoCents ? { desconto: fromCents(pg.descontoCents) } : {}),
         ...(pg.clienteId ? { clienteId: pg.clienteId, vencimentoFiado: pg.vencimentoFiado } : {}),
       } satisfies VendaRequest);
@@ -209,6 +255,7 @@ export function PdvPage() {
     }));
     void sessao.recarregarCatalogo().catch(() => {}); // sincroniza com vendas de outros terminais
     setLinhas([]);
+    cpfAtual.current = null; setCpfSel(null); // a próxima venda pergunta o CPF de novo
     setPagando(false);
     setComprovante(venda);
     setMsgLeitura(null);
@@ -219,6 +266,12 @@ export function PdvPage() {
       <header className="pdv-header">
         <BrandMark subtitulo="PDV · Bazar" tamanho={34} />
         <span className="terminal"><strong>{caixa.terminalNome}</strong><small>{me?.nome}</small></span>
+        {cpfSel && (
+          <span className="badge badge-ok" title="CPF desta compra">
+            CPF {cpfOculto(cpfSel.cpf)}{cpfSel.saldoCents !== null && ` · saldo ${formatMoney(Math.max(0, cpfSel.saldoCents - subtotal))}`}
+          </span>
+        )}
+        {(cpfSel !== null || linhas.length > 0) && <button className="btn btn-ghost" onClick={() => { acaoPendente.current = null; codigoPendente.current = null; setCpfAberto(true); }}>{cpfSel ? 'Trocar CPF' : 'Informar CPF'}</button>}
         <div className="spacer" />
         <button className="btn" onClick={() => setResumindo(true)}>Total do caixa</button>
         <button className="btn" onClick={() => setLancando(true)}>Sangria/Suprimento (F6)</button>
@@ -273,7 +326,7 @@ export function PdvPage() {
           <small className="hint">Valores conferidos pelo servidor ao gravar.</small>
           <div className="row">
             <button className="btn" onClick={removerUltimo} disabled={!linhas.length}>Remover último (Esc)</button>
-            <button className="btn btn-primary btn-lg grow" onClick={() => setPagando(true)} disabled={!linhas.length}>Pagamento (F4)</button>
+            <button className="btn btn-primary btn-lg grow" onClick={() => exigirCpf(() => setPagando(true))} disabled={!linhas.length}>Pagamento (F4)</button>
           </div>
         </section>
       </div>
@@ -285,6 +338,7 @@ export function PdvPage() {
         onConfirmar={finalizar}
         onFechar={() => setPagando(false)}
       />
+      <CpfModal aberto={cpfAberto} obrigatorio={catalogo.cpfObrigatorio ?? false} carrinhoCents={subtotal} onDecidir={aoDecidirCpf} onCancelar={cancelarCpf} />
       <RemoverQuantidadeModal linha={removendo} onConfirmar={(n) => tirarQuantidade(removendo!, n)} onFechar={() => { setRemovendo(null); focarCodigo(); }} />
       <ResumoCaixaModal aberto={resumindo} caixaId={caixa.id} onFechar={() => setResumindo(false)} />
       <LancamentoModal aberto={lancando} caixaId={caixa.id} onFechar={() => setLancando(false)} onOk={(m) => toast(m)} />

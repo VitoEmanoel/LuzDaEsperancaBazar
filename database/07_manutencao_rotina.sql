@@ -12,6 +12,9 @@ DELETE FROM sessao_usuario
 -- 2. Chaves de idempotência com mais de 30 dias (o trigger recusa apagar as recentes)
 DELETE FROM idempotencia WHERE criado_em < now() - interval '30 days';
 
+-- 2b. CPF das compras: só vale até o fim do mês (a API também apaga no primeiro uso do mês)
+DELETE FROM venda_cpf WHERE criado_em < (date_trunc('month', timezone('America/Fortaleza', now())) AT TIME ZONE 'America/Fortaleza');
+
 -- 3. Saldo materializado × histórico (deve voltar 0 linhas). Se voltar algo: NÃO corrigir
 --    à mão — investigar e, como DBA, rodar SELECT fn_recalcula_saldo(); em janela sem vendas.
 SELECT 'divergencias_saldo' AS conferencia, count(*) AS qtd FROM fn_confere_saldo()
