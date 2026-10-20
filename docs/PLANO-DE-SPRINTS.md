@@ -192,6 +192,12 @@ Perfis e visibilidade
 - [ ] S3-11 Relatórios mostram o desconto concedido
 - [ ] S3-12 Financeiro: consulta de lotes e produtos em modo leitura
 - [ ] S3-15 Lista de Estoque com colunas claras: "Quantidade no Bazar" e "Quantidade em Doações" (hoje só "Bazar" e "Doações", o que confundiu) e uma coluna **Total** por produto *(proposta; o humano confirma)*
+- [ ] S3-16 Auditoria da alteração de parceiro (`PATCH /parceiros`) sem dado pessoal: hoje grava o nome e o CPF mascarado no antes/depois; passar a registrar só os campos alterados, sem o valor dos dados pessoais *(decisão do humano, 20/10/2026: entra na Sprint 3)*
+- [ ] S3-17 Botão **Imprimir** do caixa fechado (`FecharCaixaPage`) imprime página em branco: a impressão só mostra `.print-area` e essa tela não tem; marcar o resumo do fechamento como área de impressão e esconder os botões no papel *(proposta; o humano confirma)*
+- [ ] S3-18 **Perfis e permissões** (Admin): mostrar cada permissão pela descrição em português (a API já tem em `DESCRICOES`), agrupada por área (Vendas e caixa, Entradas e estoque, Financeiro, Relatórios, Administração), com "marcar todas" por grupo; a demonstração com as mesmas descrições *(pedido do humano, 20/10/2026)*
+- [ ] S3-19 **Copiar perfil**: criar um perfil novo a partir de outro (ex.: copiar o Administrador para fazer outro perfil de administração, ou o Estoquista e acrescentar o PDV) *(pedido do humano, 20/10/2026)*
+- [ ] S3-20 **Desativar perfil** criado por engano: só se nenhum usuário ativo usar o perfil; perfis padrão não se desativam; nada se apaga. Rota nova na API com `perfis.gerenciar`, auditoria e teste de 403 *(pedido do humano, 20/10/2026)*
+- [ ] S3-21 Conferir no navegador que o Admin cria perfil com permissões personalizadas, cria outro usuário Administrador e que o perfil novo vê só o que é dele (menu e 403 da API) *(pedido do humano, 20/10/2026; hoje já é possível, falta provar na tela)*
 - [ ] S3-13 Testes por perfil para as telas e ações novas
 - [ ] S3-14 Rodar a definição de pronto; revisão pelo agy; atualizar a documentação
 
@@ -285,6 +291,7 @@ Ficha de cada tela (objetivo, quem usa, esboço, ações, requisitos funcionais 
 Fechamento
 - [ ] S7-16 Revisão de cada lote de fichas pelo agy, com os achados conferidos
 - [ ] S7-17 Product backlog formal e sprints seguintes
+- [ ] S7-18 Atualizar os três documentos de planejamento da faculdade (WBS/EAP, Product Backlog e Sprint Planning, em `/home/VT/Documentos/referencia/docBazar/`, fonte em `docBazar/fonte/`) com o que o protótipo validou, incluindo os pedidos novos (perfis e permissões, celular, impressão do fechamento) *(decisão do humano, 20/10/2026: depois de finalizar o protótipo)*
 
 ---
 
