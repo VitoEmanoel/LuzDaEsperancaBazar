@@ -1,6 +1,6 @@
 -- =====================================================================================
 -- Sistema de Bazar — Luz da Esperança · DDL COMPLETA (instalação do zero, PostgreSQL 11+; testado no 16)
--- Gerado pela concatenação das migrações oficiais (0001 a 0010) — a fonte da verdade continua sendo
+-- Gerado pela concatenação das migrações oficiais (0001 a 0011) — a fonte da verdade continua sendo
 -- prisma/migrations/* aplicadas com `prisma migrate deploy`. Use este arquivo para revisão,
 -- ambientes sem Node/Prisma ou para recriar um banco de teste:
 --   createdb -O bazar_owner bazar_teste
@@ -2309,3 +2309,25 @@ CREATE TRIGGER tg_usuario_perfil_ativo BEFORE INSERT OR UPDATE OF perfil_id, ati
 -- O nome do perfil desativado fica livre para um perfil novo (o criado por engano não prende o nome certo).
 DROP INDEX "perfil_nome_key";
 CREATE UNIQUE INDEX "perfil_nome_ativo_key" ON "perfil" (lower("nome")) WHERE "ativo";
+
+-- #####################################################################################
+-- ## 0011_etiquetas — permissão de imprimir etiquetas e tamanho do rolo nos parâmetros
+-- #####################################################################################
+-- Sprint 4: etiquetas (S4-01 a S4-05). Decisões do humano (20/10/2026): P-01, P-02 e P-18.
+-- Permissão própria para imprimir (a S1-11 previa) e o tamanho do rolo nos parâmetros do Admin.
+
+-- ------------------------------------------------------------------ permissão (Admin e Estoquista)
+INSERT INTO "permissao" ("codigo", "modulo", "descricao") VALUES
+  ('etiquetas.imprimir', 'EST', 'Imprimir etiquetas dos produtos (título, preço e código de barras)')
+ON CONFLICT ("codigo") DO NOTHING;
+INSERT INTO "perfil_permissao" ("perfil_id", "permissao_codigo") VALUES
+  ('00000000-0000-4000-8000-0000000000a1', 'etiquetas.imprimir'),
+  ('00000000-0000-4000-8000-0000000000a3', 'etiquetas.imprimir')
+ON CONFLICT DO NOTHING;
+
+-- ------------------------------------------------------------------ tamanho do rolo (S4-01)
+-- Ainda não há impressora (P-02): 50 x 30 mm até a compra; o Admin muda em Parâmetros.
+INSERT INTO "parametro" ("chave", "valor", "descricao") VALUES
+  ('etiqueta.largura_mm', '50', 'Largura da etiqueta do rolo, em milímetros'),
+  ('etiqueta.altura_mm', '30', 'Altura da etiqueta do rolo, em milímetros')
+ON CONFLICT ("chave") DO NOTHING;
