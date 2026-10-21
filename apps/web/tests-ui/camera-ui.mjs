@@ -77,6 +77,17 @@ async function entrar(page, usuario, senha) {
 }
 /** Navega sem recarregar (recarregar desloga na demonstração). */
 const ir = (page, rota) => page.evaluate((r) => { history.pushState({}, '', r); dispatchEvent(new PopStateEvent('popstate')); }, rota);
+async function abrirPdv(page) {
+  await entrar(page, 'vendedor', 'Vendedor@123');
+  await Promise.race([page.locator('.cat-btn').first().waitFor({ timeout: 15000 }), page.getByRole('heading', { name: 'Abrir caixa' }).waitFor({ timeout: 15000 })]);
+  if (page.url().includes('/pdv/abrir')) {
+    await page.locator('select').selectOption({ index: 1 });
+    await page.getByLabel(/Saldo inicial/).fill('50');
+    await page.getByRole('button', { name: 'Abrir caixa' }).click();
+    await page.waitForURL(/\/pdv$/, { timeout: 15000 });
+  }
+  await page.locator('.cat-btn').first().waitFor({ timeout: 15000 });
+}
 const camera = (video) => chromium.launch({ executablePath: CHROME, headless: true,
   args: ['--no-sandbox', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-video-capture=${video}`] });
 
@@ -91,15 +102,7 @@ try {
   let ctx = await nav.newContext({ viewport: { width: 1280, height: 800 }, permissions: ['camera'] });
   await ctx.addInitScript(espiao);
   let page = await ctx.newPage();
-  await entrar(page, 'vendedor', 'Vendedor@123');
-  await Promise.race([page.locator('.cat-btn').first().waitFor({ timeout: 15000 }), page.getByRole('heading', { name: 'Abrir caixa' }).waitFor({ timeout: 15000 })]);
-  if (page.url().includes('/pdv/abrir')) {
-    await page.locator('select').selectOption({ index: 1 });
-    await page.getByLabel(/Saldo inicial/).fill('50');
-    await page.getByRole('button', { name: 'Abrir caixa' }).click();
-    await page.waitForURL(/\/pdv$/, { timeout: 15000 });
-  }
-  await page.locator('.cat-btn').first().waitFor({ timeout: 15000 });
+  await abrirPdv(page);
   await page.getByRole('button', { name: 'Ler pela câmera' }).click();
   await page.getByRole('dialog', { name: /Ler pela câmera/ }).waitFor({ timeout: 5000 });
   check(true, 'PDV: a janela da câmera abre');
@@ -117,17 +120,6 @@ try {
   check(await page.evaluate(() => document.activeElement?.getAttribute('aria-describedby') === 'msg-leitura'), 'PDV: o foco volta ao campo do código (o leitor USB continua funcionando)');
   await page.keyboard.press('F2');
   check(await page.evaluate(() => document.activeElement?.classList.contains('qtd')), 'PDV: os atalhos voltam a valer depois da câmera (F2)');
-  // cancelar com a câmera abrindo: ela desliga
-  await page.evaluate(() => { window.__trilhas = []; });
-  await page.getByRole('button', { name: 'Ler pela câmera' }).click();
-  await page.getByRole('dialog').getByText(/Aponte a câmera|Abrindo a câmera/).waitFor({ timeout: 5000 });
-  await page.keyboard.press('F4');
-  check(await page.getByRole('dialog', { name: /Pagamento/ }).count() === 0, 'PDV: com a câmera aberta, F4 não abre o pagamento');
-  await page.getByRole('dialog').getByRole('button', { name: /Cancelar/ }).click();
-  await page.getByRole('dialog').waitFor({ state: 'detached', timeout: 5000 });
-  await page.waitForTimeout(1500);
-  check(await page.evaluate(() => window.__trilhas.every((t) => t.readyState === 'ended')), 'PDV: cancelar desliga a câmera');
-  check((await page.locator('ul.carrinho li').count()) === 1, 'PDV: cancelar não lança nada');
   await ctx.close();
 
   // ---------- Estoque (Code 128) ----------
@@ -159,6 +151,27 @@ try {
   await page.getByRole('button', { name: 'Ler pela câmera' }).click();
   await page.getByRole('dialog').waitFor({ state: 'detached', timeout: 20000 }).catch(() => {});
   check((await page.getByLabel('Buscar (descrição ou código)').inputValue()) === CODIGO, 'Estoque: a etiqueta antiga (Code 39) também é lida', await page.getByLabel('Buscar (descrição ou código)').inputValue());
+  await ctx.close();
+
+  // ---------- câmera sem etiqueta (nunca lê): cancelar e atalhos, sem corrida com a leitura ----------
+  await nav.close();
+  nav = await chromium.launch({ executablePath: CHROME, headless: true, args: ['--no-sandbox', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
+  ctx = await nav.newContext({ viewport: { width: 1280, height: 800 }, permissions: ['camera'] });
+  await ctx.addInitScript(espiao);
+  page = await ctx.newPage();
+  await abrirPdv(page);
+  await page.locator('.cat-btn:not([disabled])').first().click();
+  await page.getByRole('button', { name: /Não/ }).click();
+  await page.locator('ul.carrinho li').first().waitFor({ timeout: 5000 });
+  await page.getByRole('button', { name: 'Ler pela câmera' }).click();
+  await page.getByRole('dialog').getByText('Aponte a câmera', { exact: false }).waitFor({ timeout: 10000 });
+  await page.keyboard.press('F4');
+  check(await page.getByRole('dialog', { name: /Pagamento/ }).count() === 0, 'PDV: com a câmera aberta, F4 não abre o pagamento');
+  await page.getByRole('dialog').getByRole('button', { name: /Cancelar/ }).click();
+  await page.getByRole('dialog').waitFor({ state: 'detached', timeout: 5000 });
+  await page.waitForTimeout(500);
+  check(await desligadas(page), 'PDV: cancelar desliga a câmera');
+  check((await page.locator('ul.carrinho li').count()) === 1, 'PDV: cancelar não lança nada');
   await ctx.close();
 
   // ---------- permissão negada e aparelho sem câmera ----------
