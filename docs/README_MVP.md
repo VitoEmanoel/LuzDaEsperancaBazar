@@ -140,6 +140,7 @@ Cada domínio tem **o mesmo nome no front e no back** (ex.: `features/financeiro
 Tela cheia, pensada para leitor de código e tablet de 10".
 
 - **Leitura de código:** campo sempre focado; leitor USB funciona como teclado (Enter); feedback sonoro e visual. Ao ler, mostra o produto, o preço de agora (com o desconto, se houver) e **quantas restam no Bazar** (ou "peça única"). Bipar de novo um produto de várias unidades soma uma unidade na mesma linha (até o saldo do Bazar); peça única não entra duas vezes.
+- **Leitura pela câmera** (S5-12): o botão "Ler pela câmera" (PDV e busca do Estoque) abre a câmera de trás do celular ou a webcam e lê o código da etiqueta (Code 128 e as antigas em Code 39). O código lido segue o mesmo caminho do leitor, com uma unidade por leitura (para `n*código`, use o campo). A câmera desliga ao ler ou ao cancelar. O navegador só libera a câmera em página segura (HTTPS ou `localhost`); sem isso, ou sem câmera, o botão não aparece. Permissão negada ou câmera ocupada mostram como resolver.
 - **Várias unidades de uma vez (`n*código`):** digitar `3*` antes de bipar (ou `3*BZ000123` + Enter) lança 3 unidades, de 1 a 999. Pedido acima do saldo do Bazar é **recusado inteiro**, com o aviso de quanto cabe; peça única só aceita 1.
 - **Venda por categoria:** botões com preço para itens comuns, com quantidade (F2).
 - **Atalhos:** F2 quantidade · F4 pagamento · Esc tira 1 do último item (pergunta antes) · F6 sangria/suprimento.

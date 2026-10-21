@@ -1,7 +1,7 @@
 /**
  * PDV — tela cheia, operável só com teclado e leitor (RNF-01/02).
  * Atalhos: F2 categoria · F4 pagamento · Esc tira 1 do último item (pergunta antes) · F6 sangria/suprimento.
- * No campo do código, `3*BZ000123` lança 3 unidades de uma vez (S4-09).
+ * No campo do código, `3*BZ000123` lança 3 unidades de uma vez (S4-09). A câmera lê um código por vez, como o leitor (S5-12).
  * A venda é gravada direto no servidor (idempotente pelo id: reenviar não duplica).
  */
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
@@ -27,6 +27,7 @@ import { beep } from '../../../shared/lib/feedback';
 import { armazenamento, CHAVES } from '../../../shared/lib/armazenamento';
 import { BrandMark } from '../../../shared/components/BrandMark';
 import { useToast } from '../../../shared/components/Toast';
+import { cameraDisponivel, LeitorCameraModal } from '../../../shared/components/LeitorCamera';
 
 /** O que fica guardado no aparelho: o carrinho, de quem o montou, e o id da venda em andamento. */
 interface CarrinhoSalvo { usuarioId: string; vendaId?: string; linhas: LinhaCarrinho[] }
@@ -67,6 +68,7 @@ export function PdvPage() {
   const [removendo, setRemovendo] = useState<LinhaCarrinho | null>(null);
   const [confirmandoUltimo, setConfirmandoUltimo] = useState(false);
   const [comprovante, setComprovante] = useState<Venda | null>(null);
+  const [lendoCamera, setLendoCamera] = useState(false);
   const codigoRef = useRef<HTMLInputElement>(null);
   const qtdRef = useRef<HTMLInputElement>(null);
   /** Id da venda em andamento: mantido entre tentativas para o reenvio não duplicar a venda. */
@@ -77,7 +79,7 @@ export function PdvPage() {
   useEffect(() => { if (linhas.length === 0) { cpfAtual.current = null; setCpfSel(null); } }, [linhas.length]);
   useEffect(() => { if ((restaurado.current?.linhas.length ?? 0) > 0) setCpfAberto(true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const modalAberto = pagando || lancando || resumindo || !!removendo || !!comprovante || cpfAberto || (confirmandoUltimo && linhas.length > 0);
+  const modalAberto = pagando || lancando || resumindo || !!removendo || !!comprovante || cpfAberto || lendoCamera || (confirmandoUltimo && linhas.length > 0);
   const focarCodigo = useCallback(() => { setTimeout(() => codigoRef.current?.focus(), 0); }, []);
 
   useEffect(() => {
@@ -154,6 +156,11 @@ export function PdvPage() {
     e.preventDefault();
     const bruto = codigo.trim().toUpperCase();
     setCodigo('');
+    lerTexto(bruto);
+  }
+
+  /** O que veio do leitor, do teclado ou da câmera segue o mesmo caminho (inclusive a pergunta do CPF no primeiro bip). */
+  function lerTexto(bruto: string) {
     if (!bruto) return;
     const lido = lerEntrada(bruto); // `código` ou `n*código` (S4-09)
     if ('erro' in lido) { feedback('erro', lido.erro); setCodigo(bruto); return; }
@@ -330,6 +337,7 @@ export function PdvPage() {
               <input ref={codigoRef} value={codigo} onChange={(e) => setCodigo(e.target.value)} autoFocus autoComplete="off" inputMode="text" aria-describedby="msg-leitura" placeholder="Passe o leitor ou digite e tecle Enter" maxLength={40} />
             </label>
           </form>
+          {cameraDisponivel() && <button type="button" className="btn" onClick={() => setLendoCamera(true)}>Ler pela câmera</button>}
           <div id="msg-leitura" className={`leitura ${msgLeitura?.tipo ?? ''}`} aria-live="assertive">{msgLeitura?.texto ?? ' '}</div>
 
           <div className="cat-header">
@@ -387,6 +395,7 @@ export function PdvPage() {
       <RemoverQuantidadeModal linha={removendo} onConfirmar={(n) => tirarQuantidade(removendo!, n)} onFechar={() => { setRemovendo(null); focarCodigo(); }} />
       <ResumoCaixaModal aberto={resumindo} caixaId={caixa.id} onFechar={() => setResumindo(false)} />
       <LancamentoModal aberto={lancando} caixaId={caixa.id} onFechar={() => setLancando(false)} onOk={(m) => toast(m)} />
+      <LeitorCameraModal aberto={lendoCamera} onLer={(c) => lerTexto(c)} onFechar={() => setLendoCamera(false)} />
       <ComprovanteModal venda={comprovante} instituicao={sessao.instituicao} onFechar={() => setComprovante(null)} />
     </div>
   );

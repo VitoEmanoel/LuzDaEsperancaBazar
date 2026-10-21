@@ -127,7 +127,7 @@ async function main() {
   const v = await caixa.put(`/vendas/${uuid()}`, { ...base, itens: [{ codigo: a.codigo, quantidade: 2 }], pagamentos: [{ forma: 'PIX', valor: '33.00', valorRecebido: '33.00' }] });
   check(v.status === 201 && v.data.total === '33.00', 'venda pelo preço com desconto, sem esbarrar no limite do Vendedor', v.data);
   check((await caixa.put(`/vendas/${uuid()}`, { ...base, itens: [{ codigo: a.codigo, quantidade: 1 }], pagamentos: [{ forma: 'PIX', valor: '22.00', valorRecebido: '22.00' }] })).data?.code === 'PAGAMENTO_DIVERGENTE', 'o servidor cobra o preço com desconto (não o cheio)');
-  const hoje = new Date().toISOString().slice(0, 10);
+  const hoje = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Fortaleza' }).format(new Date()); // o dia da venda é o de Fortaleza, não o UTC
   const rv = (await admin.get(`/relatorios/vendas?de=${hoje}&ate=${hoje}`)).data;
   const linha = rv.linhas.find((l: any) => l.numero === v.data.numero);
   check(rv.colunas.some((x: any) => x.chave === 'descontoProduto') && linha?.descontoProduto === '11.00' && linha?.descontoPdv === '0.00', 'o relatório de vendas mostra o desconto do produto à parte do desconto do PDV (S3-11)', linha);

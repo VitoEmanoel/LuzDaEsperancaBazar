@@ -245,3 +245,6 @@ a.indicador:hover { border-left-color: var(--primary); }
 .importacao-bloco[data-tipo="aceitas"] h3 { color: var(--ok); }
 .importacao-bloco[data-tipo="recusadas"] { border-left-color: var(--danger); background: var(--err-bg); }
 .importacao-bloco[data-tipo="recusadas"] h3 { color: var(--danger); }
+
+/* ---------- leitura pela câmera (S5-12) ---------- */
+.camera-video { display: block; width: 100%; max-height: 60vh; background: #000; border-radius: var(--radius-sm); object-fit: cover; }

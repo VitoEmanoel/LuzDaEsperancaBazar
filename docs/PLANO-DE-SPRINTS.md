@@ -252,9 +252,9 @@ Admin e Financeiro
 - [x] S5-11 Tela **Nova compra** (Financeiro e Admin) gerando a conta a pagar
 
 Câmera
-- [ ] S5-12 Leitura por câmera no PDV e no Estoque (testar com a webcam em `localhost`) **(corte possível)**
-- [ ] S5-13 Definir onde hospedar com HTTPS e testar a câmera no celular **(corte possível)**
-- [ ] S5-14 Testes e rodar a definição de pronto; revisão pelo QA (agente escolhido pelo humano); atualizar a documentação
+- [ ] S5-12 Leitura por câmera no PDV e no Estoque (testar com a webcam em `localhost`) **(corte possível)** *(21/10/2026: implementada com `@zxing/browser`, autorizada pelo humano; Code 128 e Code 39; verificada no navegador com câmera simulada do Chromium, `tests-ui/camera-ui.mjs` 18/18; falta o humano conferir com uma webcam de verdade)*
+- [ ] S5-13 Definir onde hospedar com HTTPS e testar a câmera no celular **(corte possível)** *(21/10/2026, decisão do humano: por ora só um HTTPS de teste no servidor de desenvolvimento, `VITE_HTTPS_CERT` e `VITE_HTTPS_KEY`, como explica o README do apps/web; provado pelo IP da rede: em http o botão some, em https a câmera lê, também com a API real; falta o humano testar num celular de verdade; a hospedagem é a P-03)*
+- [x] S5-14 Testes e rodar a definição de pronto; revisão pelo QA (agente escolhido pelo humano); atualizar a documentação *(21/10/2026: todas as baterias da API, SQL e telas verdes; corrigido o `test:sprint3`, que usava a data UTC e falhava entre 21h e meia-noite; QA do Sonnet antes e depois, achados conferidos)*
 
 ### Sprint 6 — Validação do protótipo (07/12 a 13/12)
 **Objetivo:** provar que o protótipo funciona inteiro e colher os ajustes.
