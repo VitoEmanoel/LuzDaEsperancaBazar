@@ -4,17 +4,8 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
 import { ApiError, errorMessage } from '../../../shared/api/http';
 import { CampoSenha, ErrorAlert, Field } from '../../../shared/components/ui';
-import type { Me } from '../../../shared/api/types';
 import { FlorMarca, PontosMarca } from '../../../shared/components/BrandMark';
-
-/** Destino pós-login: troca de senha > rota pedida > PDV (perfil só de caixa) > início. */
-function destino(u: Me, from?: string) {
-  if (u.trocarSenha) return '/trocar-senha';
-  const soCaixa = u.permissoes.includes('caixa.operar') && !u.permissoes.some((p) => ['estoque.ajustar', 'entrada.registrar', 'relatorios.consultar'].includes(p));
-  // Perfil só de caixa nunca cai no Início: vai direto ao PDV, mesmo que a rota pedida tenha sido a raiz.
-  if (from && from !== '/login' && !(soCaixa && from === '/')) return from;
-  return soCaixa ? '/pdv' : '/';
-}
+import { destino } from '../destino';
 
 export function LoginPage() {
   const { me, login, sessaoExpirada } = useAuth();

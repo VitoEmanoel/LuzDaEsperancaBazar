@@ -42,7 +42,7 @@ const RE_REGRA_BANCO = /([A-Z][A-Z_]{3,})\|([^"\\\n]{1,300})/;
 
 /** Índices únicos -> código de negócio amigável. */
 const UNICOS: Record<string, [string, string]> = {
-  ux_caixa_aberto_por_terminal: ['CAIXA_JA_ABERTO', 'Já existe caixa aberto neste terminal'],
+  ux_caixa_aberto_por_terminal: ['TERMINAL_OCUPADO', 'Este terminal já está aberto com outra pessoa'],
   ux_caixa_aberto_por_operador: ['CAIXA_JA_ABERTO', 'Você já tem um caixa aberto'],
   ux_categoria_nome: ['NOME_DUPLICADO', 'Já existe um cadastro com este nome'],
   ux_campanha_nome: ['NOME_DUPLICADO', 'Já existe um cadastro com este nome'],

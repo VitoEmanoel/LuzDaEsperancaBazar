@@ -17,8 +17,8 @@ export const authApi = {
 
 export const usuariosApi = {
   listar: (q: { busca?: string; ativo?: boolean; page?: number; pageSize?: number }) => http.get<Page<Usuario>>('/usuarios', { query: q }),
-  criar: (u: { id: string; nome: string; login: string; perfilId: string }) => http.post<Usuario & { senhaProvisoria: string }>('/usuarios', u),
-  atualizar: (id: string, patch: Partial<Pick<Usuario, 'nome' | 'perfilId' | 'ativo'>>) => http.patch<Usuario>(`/usuarios/${id}`, patch),
+  criar: (u: { id: string; nome: string; login: string; perfilId: string; terminalId?: string | null }) => http.post<Usuario & { senhaProvisoria: string }>('/usuarios', u),
+  atualizar: (id: string, patch: Partial<Pick<Usuario, 'nome' | 'perfilId' | 'ativo' | 'terminalId'>>) => http.patch<Usuario>(`/usuarios/${id}`, patch),
   redefinirSenha: (id: string) => http.post<{ senhaProvisoria: string }>(`/usuarios/${id}/redefinir-senha`),
 };
 

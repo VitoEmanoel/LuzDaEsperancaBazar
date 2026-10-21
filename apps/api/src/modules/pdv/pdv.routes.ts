@@ -6,7 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { prisma } from '../../shared/prisma.js';
-import { AppError, conflito, naoEncontrado, traduzirErroBanco } from '../../shared/errors.js';
+import { AppError, conflito, naoEncontrado } from '../../shared/errors.js';
 import { page, parse, skipTake, zIdParam, zMotivo, zPage, zPeriodo, zUuid } from '../../shared/http.js';
 import { auditar } from '../../shared/audit.js';
 import { fromCents, toCents } from '../../shared/money.js';
@@ -99,16 +99,9 @@ export async function rotasPdv(app: FastifyInstance) {
     const u = exigirUsuario(req);
     const { id } = parse(zIdParam, req.params);
     const body = parse(zVendaRequest, req.body);
-    let r;
-    try {
-      r = await emTransacao((tx) => processarVenda(tx, id, body, opDe(u)));
-    } catch (e) {
-      // corrida: o mesmo id gravado por outra requisição simultânea => devolve a venda já gravada
-      const t = traduzirErroBanco(e);
-      if (t?.code === 'DUPLICADO' && (await prisma.venda.findUnique({ where: { id }, select: { registradaPorId: true } }))?.registradaPorId === u.id) {
-        r = { id, numero: 0, jaExistia: true };
-      } else throw e;
-    }
+    // corrida (o mesmo id em duas requisições ao mesmo tempo): a chave de idempotência faz a segunda esperar a primeira e
+    // cair no reenvio, dentro de processarVenda (S6-14)
+    const r = await emTransacao((tx) => processarVenda(tx, id, body, opDe(u)));
     const v = await carregarVenda(prisma, id, true);
     return reply.code(r.jaExistia ? 200 : 201).send(v!.dto);
   });

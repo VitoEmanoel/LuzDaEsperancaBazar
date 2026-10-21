@@ -102,7 +102,9 @@ function emitirTokens(userId: string, familia = uid()) {
 }
 function meDe(u: UsuarioDb): Me {
   const p = perfilDe(u);
-  return { id: u.id, nome: u.nome, login: u.login, perfil: { id: p.id, nome: p.nome }, permissoes: p.permissoes, limiteDesconto: p.limiteDesconto, trocarSenha: u.trocarSenha };
+  const t = u.terminalId ? db.terminais.find((x) => x.id === u.terminalId) : undefined;
+  return { id: u.id, nome: u.nome, login: u.login, perfil: { id: p.id, nome: p.nome }, permissoes: p.permissoes, limiteDesconto: p.limiteDesconto, trocarSenha: u.trocarSenha,
+    terminal: t ? { id: t.id, nome: t.nome, ativo: t.ativo } : null };
 }
 
 rota('POST', '/auth/login', 'publica', ({ body }) => {
@@ -147,7 +149,10 @@ rota('PUT', '/auth/senha', 'autenticado', ({ user, body }) => {
 rota('GET', '/me', 'autenticado', ({ user }) => ok(meDe(user)));
 
 // ---------------- ACS: usuários, perfis, auditoria ----------------
-const usuarioDto = (u: UsuarioDb) => ({ id: u.id, nome: u.nome, login: u.login, perfilId: u.perfilId, perfilNome: perfilDe(u).nome, ativo: u.ativo });
+const usuarioDto = (u: UsuarioDb) => ({ id: u.id, nome: u.nome, login: u.login, perfilId: u.perfilId, perfilNome: perfilDe(u).nome, ativo: u.ativo,
+  terminalId: u.terminalId ?? null, terminalNome: (u.terminalId && db.terminais.find((t) => t.id === u.terminalId)?.nome) || null });
+/** Terminal fixo do usuário (S6-21): só terminal ativo, como a API. */
+const terminalValido = (id: unknown) => id === undefined || id === null || db.terminais.some((t) => t.id === id && t.ativo);
 const senhaProvisoria = () => 'Tmp-' + uid().slice(0, 8);
 rota('GET', '/usuarios', ['usuarios.gerenciar'], ({ query }) => {
   const b = (query.get('busca') ?? '').toLowerCase();
@@ -156,15 +161,17 @@ rota('GET', '/usuarios', ['usuarios.gerenciar'], ({ query }) => {
 rota('POST', '/usuarios', ['usuarios.gerenciar'], ({ user, body }) => {
   exigir(body?.nome, 'nome'); exigir(body?.login, 'login'); exigir(db.perfis.some((p) => p.id === body?.perfilId), 'perfilId');
   if (db.usuarios.some((u) => u.login === body.login)) return problem(409, 'Login já existe', 'LOGIN_DUPLICADO');
+  exigir(terminalValido(body?.terminalId), 'terminalId');
   const senha = senhaProvisoria();
-  const u: UsuarioDb = { id: body.id ?? uid(), nome: body.nome, login: String(body.login).toLowerCase(), senha, perfilId: body.perfilId, ativo: true, trocarSenha: true };
+  const u: UsuarioDb = { id: body.id ?? uid(), nome: body.nome, login: String(body.login).toLowerCase(), senha, perfilId: body.perfilId, ativo: true, trocarSenha: true, terminalId: body.terminalId ?? null };
   db.usuarios.push(u); auditar(user, 'USUARIO_CRIADO', 'usuario', u.id);
   return ok({ ...usuarioDto(u), senhaProvisoria: senha }, 201);
 });
 rota('PATCH', '/usuarios/:id', ['usuarios.gerenciar'], ({ user, params, body }) => {
   const u = db.usuarios.find((x) => x.id === params.id); if (!u) return problem(404, 'Usuário não encontrado');
   if (u.id === user.id && body?.ativo === false) return problem(409, 'Você não pode desativar o próprio usuário', 'AUTO_DESATIVACAO');
-  Object.assign(u, pick(body, ['nome', 'perfilId', 'ativo'])); auditar(user, 'USUARIO_ALTERADO', 'usuario', u.id);
+  exigir(terminalValido(body?.terminalId), 'terminalId');
+  Object.assign(u, pick(body, ['nome', 'perfilId', 'ativo', 'terminalId'])); auditar(user, 'USUARIO_ALTERADO', 'usuario', u.id);
   return ok(usuarioDto(u));
 });
 rota('POST', '/usuarios/:id/redefinir-senha', ['usuarios.gerenciar'], ({ user, params }) => {
@@ -250,8 +257,10 @@ for (const [tipo, lista] of Object.entries(cadastros)) {
     Object.assign(x, resto); auditar(user, 'CADASTRO_ALTERADO', tipo, x.id); return ok(dtoCadastro(tipo, x));
   });
 }
-rota('POST', '/clientes/busca', ['clientes.gerenciar', 'caixa.operar', 'contas_receber.receber', 'privacidade.gerenciar'], ({ body }) => {
+rota('POST', '/clientes/busca', ['clientes.gerenciar', 'caixa.operar', 'contas_receber.receber', 'privacidade.gerenciar'], ({ user, body }) => {
   const t = String(body?.termo ?? '').toLowerCase().trim();
+  // S6-15: só pelo PDV, termo com 3 ou mais (como a API)
+  if (!['clientes.gerenciar', 'contas_receber.receber', 'privacidade.gerenciar'].some((p) => perfilDe(user).permissoes.includes(p as never)) && t.length < 3) return problem(400, 'Digite pelo menos 3 letras ou números do nome ou do telefone', 'TERMO_CURTO');
   const r = db.clientes.filter((c) => !c.anonimizado && (body?.ativo === undefined || c.ativo === body.ativo) && (!t || c.nome.toLowerCase().includes(t) || c.telefone.replace(/\D/g, '').includes(t.replace(/\D/g, '') || '§')));
   return ok(r.slice(0, 50));
 });
@@ -804,10 +813,20 @@ const compradoCpf = (cpf: string) => db.vendas.filter((v) => v.cpf === cpf && v.
 /** O CPF só sai no comprovante e na resposta da venda, nunca nas listas. */
 const semCpf = ({ cpf: _cpf, ...v }: Venda): Venda => v;
 const vendaDto = ({ caixaId: _c, terminalId: _t, operadorId: _o, alocacoes: _a, clienteId: _cl, ...v }: VendaDb): Venda => v;
+/** Impressão do pedido da venda (S6-14, como a API): itens somados e ordenados, pagamentos por forma, CPF só os dígitos. */
+const pedidosVenda = new Map<string, string>();
+function impressaoVenda(body: any): string {
+  const itens = new Map<string, number>();
+  for (const i of body?.itens ?? []) { const k = i.codigo ? `p:${String(i.codigo).toUpperCase()}` : `c:${i.categoriaId}`; itens.set(k, (itens.get(k) ?? 0) + Number(i.quantidade)); }
+  return JSON.stringify([body?.caixaId, body?.clienteId ?? null, soDigitos(String(body?.cpf ?? '')), body?.desconto ?? null, body?.vencimentoFiado ?? null,
+    [...itens].sort(), [...(body?.pagamentos ?? [])].map((p: any) => [p.forma, p.valor, p.valorRecebido ?? null]).sort()]);
+}
 rota('PUT', '/vendas/:id', ['caixa.operar'], ({ user, params, body }) => {
   exigir(body?.caixaId && body?.terminalId, 'caixaId/terminalId');
   const ja = db.vendas.some((v) => v.id === params.id);
+  if (ja && pedidosVenda.has(params.id!) && pedidosVenda.get(params.id!) !== impressaoVenda(body)) return problem(409, 'Identificador de venda já usado', 'ID_EM_USO');
   const v = processarVenda(params.id!, body, user);
+  if (!ja) pedidosVenda.set(params.id!, impressaoVenda(body));
   return ok(vendaDto(v), ja ? 200 : 201);
 });
 rota('POST', '/pdv/cpf/saldo', ['caixa.operar'], ({ body }) => {
@@ -839,14 +858,29 @@ rota('POST', '/vendas/:id/cancelar', ['venda.cancelar'], ({ user, params, body }
 });
 // ---------------- CXA ----------------
 // GET /terminais também liberado para caixa.operar (escolha na abertura) — DIVERGÊNCIA a validar com o back-end.
-rota('GET', '/terminais', ['terminais.gerenciar', 'caixa.operar'], ({ query }) => ok(db.terminais.filter((t) => query.get('ativo') === null || String(t.ativo) === query.get('ativo'))));
+const primeiroNome = (nome: string) => nome.trim().split(/\s+/)[0] ?? '';
+rota('GET', '/terminais', ['terminais.gerenciar', 'caixa.operar'], ({ user, query }) => ok(db.terminais.filter((t) => query.get('ativo') === null || String(t.ativo) === query.get('ativo')).map((t) => {
+  // S6-18: quem está com o terminal aberto (só o primeiro nome, só de outra pessoa), como a API
+  const c = db.caixas.find((x) => x.status === 'ABERTO' && x.terminalId === t.id && x.operadorId !== user.id);
+  return { id: t.id, nome: t.nome, ativo: t.ativo, ...(c ? { ocupadoPor: primeiroNome(c.operadorNome) } : {}) };
+})));
 rota('POST', '/terminais', ['terminais.gerenciar'], ({ user, body }) => { exigir(body?.nome, 'nome'); const t = { id: body.id ?? uid(), nome: body.nome, ativo: true }; db.terminais.push(t); auditar(user, 'TERMINAL_CRIADO', 'terminal', t.id); return ok(t, 201); });
 rota('PATCH', '/terminais/:id', ['terminais.gerenciar'], ({ user, params, body }) => { const t = db.terminais.find((x) => x.id === params.id); if (!t) return problem(404, 'Terminal não encontrado'); Object.assign(t, pick(body, ['nome', 'ativo'])); auditar(user, 'TERMINAL_ALTERADO', 'terminal', t.id); return ok(t); });
 const caixaDto = ({ lancamentos: _l, ...c }: CaixaDb) => c;
 rota('GET', '/caixas/atual', ['caixa.operar'], ({ user }) => { const c = db.caixas.find((x) => x.operadorId === user.id && x.status === 'ABERTO'); return c ? ok(caixaDto(c)) : problem(404, 'Nenhum caixa aberto', 'SEM_CAIXA_ABERTO'); });
 rota('POST', '/caixas', ['caixa.operar'], ({ user, body }) => {
+  const ja = db.caixas.find((c) => c.id === body?.id);
+  if (ja) return ja.operadorId === user.id && ja.terminalId === body?.terminalId ? ok(caixaDto(ja)) : problem(409, 'Identificador já usado', 'ID_EM_USO');
+  // S6-21: quem tem terminal definido só abre nele
+  const fixo = user.terminalId ? db.terminais.find((x) => x.id === user.terminalId) : undefined;
+  if (fixo && fixo.id !== body?.terminalId) return problem(403, `Você só abre caixa no ${fixo.nome}. Para trocar, fale com o Administrador.`, 'TERMINAL_DO_USUARIO');
   const t = db.terminais.find((x) => x.id === body?.terminalId && x.ativo); exigir(t, 'terminalId'); exigir(toCents(body.fundoTroco ?? '-1') >= 0, 'fundoTroco');
-  if (db.caixas.some((c) => c.status === 'ABERTO' && (c.terminalId === t!.id || c.operadorId === user.id))) return problem(409, 'Já existe caixa aberto neste terminal ou para este operador', 'CAIXA_JA_ABERTO');
+  if (db.caixas.some((c) => c.status === 'ABERTO' && c.operadorId === user.id)) return problem(409, 'Você já tem um caixa aberto', 'CAIXA_JA_ABERTO');
+  const ocupado = db.caixas.find((c) => c.status === 'ABERTO' && c.terminalId === t!.id);
+  if (ocupado) {
+    const n = primeiroNome(ocupado.operadorNome);
+    return problem(409, fixo ? `O ${t!.nome} já está aberto com ${n}. Peça para ${n} fechar o caixa ou fale com o Administrador.` : `O ${t!.nome} já está aberto com ${n}. Escolha outro terminal.`, 'TERMINAL_OCUPADO');
+  }
   const c: CaixaDb = { id: body.id ?? uid(), terminalId: t!.id, terminalNome: t!.nome, operadorNome: user.nome, operadorId: user.id, abertoEm: now(), fundoTroco: fromCents(toCents(body.fundoTroco)), status: 'ABERTO', lancamentos: [] };
   db.caixas.push(c); auditar(user, 'CAIXA_ABERTO', 'caixa_sessao', c.id); return ok(caixaDto(c), 201);
 });

@@ -20,7 +20,7 @@ export async function montarMe(usuarioId: string) {
   const u = await prisma.usuario.findUniqueOrThrow({
     where: { id: usuarioId },
     select: {
-      id: true, nome: true, login: true, trocarSenha: true,
+      id: true, nome: true, login: true, trocarSenha: true, terminal: { select: { id: true, nome: true, ativo: true } },
       perfil: { select: { id: true, nome: true, ativo: true, limiteDescontoPct: true, permissoes: { select: { permissaoCodigo: true } } } },
     },
   });
@@ -30,6 +30,8 @@ export async function montarMe(usuarioId: string) {
     permissoes: u.perfil.ativo ? u.perfil.permissoes.map((p) => p.permissaoCodigo).sort() : [],
     limiteDesconto: money(u.perfil.limiteDescontoPct),
     trocarSenha: u.trocarSenha,
+    // terminal fixo (S6-21): a tela de abrir caixa vai direto nele; desativado, avisa para falar com o Administrador
+    terminal: u.terminal ? { id: u.terminal.id, nome: u.terminal.nome, ativo: u.terminal.ativo } : null,
   };
 }
 

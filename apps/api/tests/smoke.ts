@@ -169,8 +169,9 @@ async function main() {
   const cxId = uuid();
   const cx = (await caixa.post('/caixas', { id: cxId, terminalId: term1.id, fundoTroco: '50.00' })).data;
   check(cx.status === 'ABERTO', 'caixa aberto', cx);
-  check((await vend.post('/caixas', { id: uuid(), terminalId: term1.id, fundoTroco: '0.00' })).data?.code === 'CAIXA_JA_ABERTO', 'um caixa por terminal (RN-13)');
-  check((await admin.post('/caixas', { id: uuid(), terminalId: term1.id, fundoTroco: '0.00' })).data?.code === 'CAIXA_JA_ABERTO', 'Administrador pode abrir caixa (a permissão passa; o terminal está ocupado)');
+  // terminal aberto com outra pessoa: TERMINAL_OCUPADO, com o primeiro nome de quem está nele (S6-18)
+  check((await vend.post('/caixas', { id: uuid(), terminalId: term1.id, fundoTroco: '0.00' })).data?.code === 'TERMINAL_OCUPADO', 'um caixa por terminal (RN-13)');
+  check((await admin.post('/caixas', { id: uuid(), terminalId: term1.id, fundoTroco: '0.00' })).data?.code === 'TERMINAL_OCUPADO', 'Administrador pode abrir caixa (a permissão passa; o terminal está ocupado)');
   check((await caixa.get('/caixas/atual')).data.id === cxId, 'caixa atual');
   const cat = await caixa.req('GET', '/pdv/catalogo');
   check(cat.status === 200 && cat.data.itensEtiquetados.length === 2 && cat.data.clientesFiado.length === 1, 'catálogo do PDV', cat.data);

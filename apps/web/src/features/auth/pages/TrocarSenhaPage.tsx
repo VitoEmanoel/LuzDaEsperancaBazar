@@ -7,6 +7,7 @@ import { useAuth } from '../AuthContext';
 import { CampoSenha, ErrorAlert } from '../../../shared/components/ui';
 import { useToast } from '../../../shared/components/Toast';
 import { BrandMark } from '../../../shared/components/BrandMark';
+import { destino } from '../destino';
 
 export function TrocarSenhaPage() {
   const { me, recarregar } = useAuth();
@@ -31,9 +32,9 @@ export function TrocarSenhaPage() {
     try {
       await authApi.trocarSenha(atual, nova);
       setAtual(''); setNova(''); setConf('');
-      await recarregar();
+      const novo = await recarregar();
       toast('Senha alterada. As outras sessões foram encerradas.');
-      nav('/', { replace: true });
+      nav(destino(novo), { replace: true }); // o Vendedor vai ao PDV também no primeiro acesso (S6-21)
     } catch (err) { setErro(errorMessage(err)); }
     finally { setEnviando(false); }
   }

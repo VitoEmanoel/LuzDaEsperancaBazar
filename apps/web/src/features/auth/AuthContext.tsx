@@ -18,7 +18,7 @@ interface AuthState {
   saiu: boolean;
   login: (login: string, senha: string) => Promise<Me>;
   logout: () => Promise<void>;
-  recarregar: () => Promise<void>;
+  recarregar: () => Promise<Me>;
   can: (...perms: Permissao[]) => boolean;
 }
 const Ctx = createContext<AuthState | null>(null);
@@ -59,7 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setMe(null);
   }, []);
 
-  const recarregar = useCallback(async () => { setMe(await authApi.me()); }, []);
+  const recarregar = useCallback(async () => { const m = await authApi.me(); setMe(m); return m; }, []);
 
   const can = useCallback((...perms: Permissao[]) => !!me && perms.some((p) => me.permissoes.includes(p)), [me]);
 

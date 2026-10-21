@@ -68,9 +68,11 @@ export interface Me {
   /** Limite de desconto do perfil em % (PA-08 pendente: confirmar se é % ou R$). */
   limiteDesconto: Money;
   trocarSenha: boolean;
+  /** Terminal fixo do usuário (S6-21): abrir caixa vai direto nele. */
+  terminal?: { id: Uuid; nome: string; ativo: boolean } | null;
 }
 export interface LoginResponse { accessToken: string; expiresIn: number; usuario: Me }
-export interface Usuario { id: Uuid; nome: string; login: string; perfilId: Uuid; perfilNome: string; ativo: boolean }
+export interface Usuario { id: Uuid; nome: string; login: string; perfilId: Uuid; perfilNome: string; ativo: boolean; terminalId?: Uuid | null; terminalNome?: string | null }
 export interface Perfil { id: Uuid; nome: string; padrao: boolean; ativo?: boolean; permissoes: Permissao[]; limiteDesconto: Money }
 /** Permissão com a descrição em português e a área (para a tela de perfis agrupar: S3-18). */
 export interface PermissaoInfo { codigo: Permissao; descricao: string; grupo: string }
@@ -277,7 +279,7 @@ export interface Venda {
 }
 
 // ---------- CXA ----------
-export interface Terminal { id: Uuid; nome: string; ativo: boolean }
+export interface Terminal { id: Uuid; nome: string; ativo: boolean; /** primeiro nome de quem está com ele aberto (S6-18) */ ocupadoPor?: string }
 export interface CaixaSessao {
   id: Uuid; terminalId: Uuid; terminalNome: string; operadorId?: Uuid; operadorNome: string;
   abertoEm: IsoDateTime; fundoTroco: Money; status: 'ABERTO' | 'FECHADO';

@@ -20,6 +20,7 @@ import { obterClienteAtivo } from '../cadastros/clientes.routes.js';
 import { regrasVigentes, resolverRegra } from '../fiscal/fiscal.service.js';
 import type { Permissao } from '../../shared/permissoes.js';
 import { travarItens } from '../entradas/lotes.routes.js';
+import { reservarChave } from '../../shared/idempotencia.js';
 
 // ---------------- contrato ----------------
 const zItemVenda = z.union([
@@ -206,14 +207,40 @@ function assinaturaItens(itens: { chave: string; quantidade: number }[]): string
  * Grava a venda dentro de `tx`. Lança AppError (regra de negócio) ou erro do banco.
  * A hora da venda é sempre a do servidor.
  */
+/**
+ * O pedido da venda como conteúdo (S6-14): a ordem das linhas e o mesmo código em linhas separadas não mudam a venda
+ * (somados e ordenados, como no carrinho); os pagamentos em ordem de forma; o CPF só pelos dígitos.
+ */
+function conteudoDaVenda(id: string, req: VendaRequest) {
+  const itens = new Map<string, { quantidade: number; desconto: number }>();
+  for (const i of req.itens) {
+    const k = 'codigo' in i ? `p:${i.codigo.toUpperCase()}` : `c:${i.categoriaId}`;
+    const a = itens.get(k) ?? { quantidade: 0, desconto: 0 };
+    itens.set(k, { quantidade: a.quantidade + i.quantidade, desconto: a.desconto + (i.desconto ? toCents(i.desconto) : 0) });
+  }
+  return {
+    id, terminalId: req.terminalId, caixaId: req.caixaId, clienteId: req.clienteId ?? null, cpf: req.cpf ? req.cpf.replace(/\D/g, '') : null,
+    itens: [...itens].sort(([a], [b]) => a.localeCompare(b)),
+    desconto: req.desconto ? toCents(req.desconto) : 0, vencimentoFiado: req.vencimentoFiado ?? null,
+    pagamentos: req.pagamentos.map((p) => [p.forma, toCents(p.valor), p.valorRecebido ? toCents(p.valorRecebido) : null]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+  };
+}
+
 export async function processarVenda(tx: Tx, id: string, req: VendaRequest, op: Operador): Promise<ResultadoVenda> {
+  // a chave é reservada antes de tudo, na mesma transação da venda: o reenvio igual devolve a gravada; o mesmo id com
+  // outro carrinho, pagamento, cliente, CPF ou desconto é recusado (409 ID_EM_USO). Duas requisições ao mesmo tempo:
+  // a segunda espera a primeira terminar e cai no reenvio.
+  const nova = await reservarChave(tx, id, 'venda', op.id, conteudoDaVenda(id, req));
   const existente = await tx.venda.findUnique({ where: { id }, select: {
     numero: true, registradaPorId: true, sessaoId: true,
     itens: { select: { quantidade: true, formaSelecao: true, item: { select: { categoriaId: true, produto: { select: { codigo: true } } } } } },
   } });
+  if (!nova) {
+    if (!existente) throw new AppError(409, 'Identificador de venda já usado', 'ID_EM_USO');
+    return { id, numero: existente.numero, jaExistia: true };
+  }
   if (existente) {
-    // reenvio da MESMA venda (resposta perdida): devolve a gravada. O mesmo id com outro carrinho, outro caixa ou outro
-    // operador é outra venda: 409 (S6-14), senão o operador receberia o comprovante de uma venda que não é a dele
+    // a chave já tinha sido limpa (mais de 30 dias): fica a conferência antiga, pelo carrinho, pelo caixa e pelo operador
     const gravada = assinaturaItens(existente.itens.map((i) => ({ chave: i.formaSelecao === 'CODIGO' ? `p:${i.item.produto?.codigo ?? ''}` : `c:${i.item.categoriaId}`, quantidade: i.quantidade })));
     const pedida = assinaturaItens(req.itens.map((i) => ({ chave: 'codigo' in i ? `p:${i.codigo.toUpperCase()}` : `c:${i.categoriaId}`, quantidade: i.quantidade })));
     if (existente.registradaPorId !== op.id || existente.sessaoId !== req.caixaId || gravada !== pedida) throw new AppError(409, 'Identificador de venda já usado', 'ID_EM_USO');

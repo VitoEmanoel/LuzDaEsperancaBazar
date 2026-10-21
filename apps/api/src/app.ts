@@ -32,12 +32,14 @@ import { rotasAdmin } from './modules/admin/admin.routes.js';
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // teto técnico; o limite de negócio vem do parâmetro anexo.tamanho_max_mb
 
 /**
- * Log do erro sem dado pessoal (S6-14): a mensagem do Prisma repete os valores da consulta (CPF, nome, telefone), então
- * vão só o código, o tipo e a pilha SEM a primeira linha (que é a mensagem). O redact cobre só caminhos fixos.
+ * Log do erro sem dado pessoal (S6-14): a mensagem do Prisma repete os valores da consulta (CPF, nome, telefone) e ocupa
+ * várias linhas (com o trecho da chamada e os dados), então vão só o código, o tipo e as linhas da pilha que começam com
+ * "at " (os arquivos e as linhas do código). O redact cobre só caminhos fixos.
  */
-function semDadoPessoal(err: unknown) {
+export function semDadoPessoal(err: unknown) {
   const e = err as { code?: string; name?: string; stack?: string };
-  return { erro: { codigo: e.code ?? 'sem código', tipo: e.name ?? 'Error', pilha: (e.stack ?? '').split('\n').slice(1).join('\n') } };
+  const pilha = (e.stack ?? '').split('\n').filter((l) => /^\s*at /.test(l)).join('\n');
+  return { erro: { codigo: e.code ?? 'sem código', tipo: e.name ?? 'Error', pilha } };
 }
 
 export async function buildApp(): Promise<FastifyInstance> {
