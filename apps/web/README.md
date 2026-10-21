@@ -26,6 +26,20 @@ Usuários da API simulada (**somente dev**; o build de produção não inclui `s
 Códigos de peças etiquetadas no seed: `BZ000001` a `BZ000005`. 
 A API simulada vive na memória da aba: recarregar a página (F5) zera os dados.
 
+### Câmera no celular (HTTPS só de teste, S5-13)
+
+O navegador só libera a câmera em página segura: `localhost` ou HTTPS. Pelo IP do Wi-Fi em `http://` o botão "Ler pela câmera"
+nem aparece. Para testar no celular, gere um certificado autoassinado **fora do repositório** e suba o servidor de desenvolvimento em HTTPS:
+
+```bash
+openssl req -x509 -newkey rsa:2048 -nodes -days 30 -subj "/CN=bazar-teste" -keyout ~/bazar-key.pem -out ~/bazar-cert.pem
+VITE_HTTPS_CERT=~/bazar-cert.pem VITE_HTTPS_KEY=~/bazar-key.pem npx vite --host 0.0.0.0   # dentro de apps/web
+```
+
+No celular (mesmo Wi-Fi), abra `https://<IP do computador>:5173`, aceite o aviso do certificado (é autoassinado) e libere a câmera.
+Com a API real, acrescente `VITE_USE_MOCK=false VITE_API_PROXY=http://127.0.0.1:3100`. Isso é só para teste: a hospedagem
+do sistema com HTTPS de verdade é a pendência P-03. Depois do teste, volte a subir sem `--host`.
+
 ## Estrutura (por domínio — espelha `apps/api/src/modules`)
 
 ```
@@ -74,6 +88,7 @@ Todas as cores ficam em `src/styles/tokens.css`; telas não usam cor fixa.
 ## PDV
 
 - Campo de código sempre focado; leitor USB em modo teclado (Enter). Feedback sonoro e visual.
+- **Ler pela câmera** (S5-12): lê Code 128 e as etiquetas antigas em Code 39 e segue o mesmo caminho do leitor (pergunta do CPF no primeiro bip, "restam N"); uma unidade por leitura. A busca do Estoque também tem o botão. A biblioteca (`@zxing/browser`) só carrega quando a câmera abre.
 - Atalhos: **F2** quantidade/categoria · **F4** pagamento · **Esc** remove último · **F6** sangria/suprimento.
 - Pagamento: o operador digita quanto recebeu em cada forma; o sistema mostra o que falta e o troco (só em dinheiro) e só finaliza quando a conta fecha. Fiado (cliente + vencimento), cadastro rápido de cliente com ciência LGPD, desconto limitado pelo perfil.
 - **CPF:** no primeiro bip da venda o PDV pergunta Sim/Não; em Sim valida os dígitos e mostra o saldo do mês; o CPF fica só na memória da tela e sai inteiro só no comprovante. O Admin define em Parâmetros o limite por CPF (em reais) e se o CPF é obrigatório.
