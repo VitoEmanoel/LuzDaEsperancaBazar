@@ -21,21 +21,21 @@ try {
   await page.getByLabel('Usuário').fill('vendedor'); await page.getByLabel('Senha', { exact: true }).fill('Vendedor@123');
   await page.getByRole('button', { name: 'Entrar' }).click();
   await page.waitForURL(/\/pdv/, { timeout: 15000 });
-  await Promise.race([page.locator('.cat-btn').first().waitFor({ timeout: 15000 }), page.getByRole('heading', { name: 'Abrir caixa' }).waitFor({ timeout: 15000 })]);
+  await Promise.race([page.getByPlaceholder(/Passe o leitor/).waitFor({ timeout: 15000 }), page.getByRole('heading', { name: 'Abrir caixa' }).waitFor({ timeout: 15000 })]);
   if (page.url().includes('/pdv/abrir')) {
     await page.locator('select').selectOption({ index: 1 });
     await page.getByLabel(/Saldo inicial/).fill('50');
     await page.getByRole('button', { name: 'Abrir caixa' }).click();
     await page.waitForURL(/\/pdv$/, { timeout: 15000 });
   }
-  await page.locator('.cat-btn').first().waitFor({ timeout: 15000 });
+  await page.getByPlaceholder(/Passe o leitor/).waitFor({ timeout: 15000 });
 
   // primeiro item: responde "Não" ao CPF (atalho do botão)
-  await page.locator('.cat-btn').first().click();
+  await page.getByPlaceholder(/Passe o leitor/).fill('BZ000006'); await page.keyboard.press('Enter');
   await page.getByRole('dialog').getByRole('button', { name: /^Não/ }).click();
   await page.locator('.carrinho li').first().waitFor({ timeout: 5000 });
   check(true, 'CPF: botão "Não" segue a venda sem CPF e o item entra no carrinho');
-  await page.locator('.cat-btn').first().click(); // 2º item da mesma categoria: não pergunta de novo
+  await page.getByPlaceholder(/Passe o leitor/).fill('BZ000006'); await page.keyboard.press('Enter'); // 2º bip do mesmo produto: não pergunta de novo (linha com 2 unidades)
   check((await page.getByRole('dialog').count()) === 0, 'o segundo item da mesma venda não pergunta o CPF de novo');
 
   // tirar por quantidade: ✕ da linha com 2 unidades abre a janela com o foco no campo

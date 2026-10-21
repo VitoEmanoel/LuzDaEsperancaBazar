@@ -1,14 +1,16 @@
 /**
  * PDV — tela cheia, operável só com teclado e leitor (RNF-01/02).
- * Atalhos: F2 categoria · F4 pagamento · Esc tira 1 do último item (pergunta antes) · F6 sangria/suprimento.
- * No campo do código, `3*BZ000123` lança 3 unidades de uma vez (S4-09). A câmera lê um código por vez, como o leitor (S5-12).
+ * Atalhos: F2 quantidade · F4 pagamento · Esc tira 1 do último item (pergunta antes) · F6 sangria/suprimento.
+ * Quantidade: o campo Qtd. ao lado do código vale para o próximo bip e volta a 1 depois dele (S6-10); `3*BZ000123` no campo
+ * do código também lança 3 de uma vez e manda mais que o Qtd. (S4-09). A câmera lê um código por vez, como o leitor (S5-12).
+ * A venda por categoria saiu da tela (S6-09); a API continua aceitando a linha, e um carrinho restaurado ainda pode trazê-la.
  * A venda é gravada direto no servidor (idempotente pelo id: reenviar não duplica).
  */
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
 import { usePdvSessao } from '../hooks/usePdvSessao';
-import { lerEntrada, paraItensRequest, subtotalCents, type LinhaCarrinho } from '../carrinho';
+import { ajustarAoEstoque, lerEntrada, paraItensRequest, quantidadeDoCampo, subtotalCents, type LinhaCarrinho } from '../carrinho';
 import { PagamentoModal, type ResultadoPagamento } from '../components/PagamentoModal';
 import { RemoverQuantidadeModal } from '../components/RemoverQuantidadeModal';
 import { ConfirmarRemoverUltimoModal } from '../components/ConfirmarRemoverUltimoModal';
@@ -28,6 +30,7 @@ import { armazenamento, CHAVES } from '../../../shared/lib/armazenamento';
 import { BrandMark } from '../../../shared/components/BrandMark';
 import { useToast } from '../../../shared/components/Toast';
 import { cameraDisponivel, LeitorCameraModal } from '../../../shared/components/LeitorCamera';
+import { useMidia } from '../../../shared/hooks/useMidia';
 
 /** O que fica guardado no aparelho: o carrinho, de quem o montou, e o id da venda em andamento. */
 interface CarrinhoSalvo { usuarioId: string; vendaId?: string; linhas: LinhaCarrinho[] }
@@ -45,6 +48,7 @@ export function PdvPage() {
   const sessao = usePdvSessao();
   const toast = useToast();
   const nav = useNavigate();
+  const celular = useMidia('(max-width: 600px)'); // só o texto de ajuda do código muda (S6-12)
 
   // Carrinho preservado no aparelho (sessão expirada / recarga da página), de QUEM o montou: outro operador não herda o carrinho.
   // O id da venda em andamento também fica guardado: se a resposta se perder e a página recarregar, o reenvio não duplica a venda.
@@ -54,7 +58,10 @@ export function PdvPage() {
   const [linhas, setLinhas] = useState<LinhaCarrinho[]>(restaurado.current.linhas);
   const [codigo, setCodigo] = useState('');
   const [qtd, setQtd] = useState('1');
-  const [msgLeitura, setMsgLeitura] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null);
+  /** O Qtd. de agora, para quem termina depois (a leitura que espera o servidor não zera o que o operador já digitou). */
+  const qtdAtual = useRef(qtd);
+  qtdAtual.current = qtd;
+  const [msgLeitura, setMsgLeitura] = useState<{ tipo: 'ok' | 'erro' | 'aviso'; texto: string } | null>(null);
   const [pagando, setPagando] = useState(false);
   // CPF da compra: null = ainda não perguntado; false = sem CPF; objeto = com CPF. Fica SÓ na memória (nunca vai para o aparelho).
   const [cpfSel, setCpfSel] = useState<null | false | { cpf: string; saldoCents: number | null }>(null);
@@ -99,9 +106,11 @@ export function PdvPage() {
       else if (e.key === 'Escape') {
         // Quem está digitando só quer limpar o campo: nunca apaga item do carrinho por engano.
         const el = document.activeElement;
-        if (el instanceof HTMLInputElement && el.value !== '') {
+        // No Qtd., Esc sempre volta a 1 e leva ao código, mesmo com o campo vazio (não tira item).
+        if (el === qtdRef.current) { e.preventDefault(); setQtd('1'); focarCodigo(); }
+        else if (el instanceof HTMLInputElement && el.value !== '') {
           e.preventDefault();
-          if (el === codigoRef.current) setCodigo(''); else if (el === qtdRef.current) { setQtd('1'); focarCodigo(); } else el.blur();
+          if (el === codigoRef.current) setCodigo(''); else el.blur();
         } else { e.preventDefault(); pedirRemoverUltimo(); }
       }
     };
@@ -123,12 +132,11 @@ export function PdvPage() {
   const catalogo = sessao.catalogo;
   const limiteDescontoPct = me ? toCents(me.limiteDesconto) / 100 : 0;
   const subtotal = subtotalCents(linhas);
-  /** Quanto da categoria já está no carrinho (linhas da mesma categoria somadas). */
-  const emCarrinho = (categoriaId: string) => linhas.filter((l) => l.categoriaId === categoriaId).reduce((s, l) => s + l.quantidade, 0);
 
-  function feedback(tipo: 'ok' | 'erro', texto: string) { beep(tipo); setMsgLeitura({ tipo, texto }); }
+  /** 'aviso' = lançou, mas não o que foi pedido (S6-11): bipe de erro para chamar a atenção, e o texto começa com "Atenção:" (não só a cor). */
+  function feedback(tipo: 'ok' | 'erro' | 'aviso', texto: string) { beep(tipo === 'ok' ? 'ok' : 'erro'); setMsgLeitura({ tipo, texto }); }
 
-  /** Pergunta o CPF antes de seguir quando ainda não foi decidido nesta venda (primeiro bip, primeira categoria ou pagamento). */
+  /** Pergunta o CPF antes de seguir quando ainda não foi decidido nesta venda (primeiro bip ou pagamento). */
   function exigirCpf(acao: () => void, codigoLido?: string) {
     if (cpfAtual.current !== null) { acao(); return; }
     acaoPendente.current = acao; codigoPendente.current = codigoLido ?? null; setCpfAberto(true);
@@ -164,11 +172,15 @@ export function PdvPage() {
     if (!bruto) return;
     const lido = lerEntrada(bruto); // `código` ou `n*código` (S4-09)
     if ('erro' in lido) { feedback('erro', lido.erro); setCodigo(bruto); return; }
-    // o primeiro bip da venda pergunta o CPF; o que foi lido (com o n*) espera a resposta
-    exigirCpf(() => void lerCodigoAgora(lido.codigo, lido.quantidade), bruto);
+    // `n*código` manda; sem ele vale o Qtd. (S6-10). A quantidade é fixada aqui, porque a pergunta do CPF adia a leitura.
+    const doCampo = qtd;
+    const n = bruto.includes('*') ? lido.quantidade : quantidadeDoCampo(doCampo);
+    // o primeiro bip da venda pergunta o CPF; o que foi lido espera a resposta. Lançou: o Qtd. volta a 1 (se ninguém mexeu nele no meio)
+    exigirCpf(() => void lerCodigoAgora(lido.codigo, n).then((ok) => { if (ok && qtdAtual.current === doCampo) setQtd('1'); }), bruto);
   }
 
-  async function lerCodigoAgora(c: string, n = 1) {
+  /** Lança o código no carrinho; devolve se lançou (erro: avisa e devolve false). */
+  async function lerCodigoAgora(c: string, n = 1): Promise<boolean> {
     let item = catalogo.itensEtiquetados.find((i) => i.codigo === c);
     const noCarrinho = linhas.find((l) => l.codigo === c);
     let foraDoBazar = false;
@@ -181,58 +193,43 @@ export function PdvPage() {
             ...(r.precoSemDesconto ? { precoSemDesconto: r.precoSemDesconto } : {}) };
           void sessao.recarregarCatalogo().catch(() => {}); // traz o produto novo (com o saldo e a peça única) para o próximo bip
         }
-        else if (r.saldoDoacoes > 0) foraDoBazar = true;
+        else if ((r.saldoDoacoes ?? 0) > 0 || r.estaEmDoacoes) foraDoBazar = true; // o Vendedor recebe só o aviso, não o saldo de Doações (S6-16)
       } catch { /* trata abaixo como não encontrado */ }
     }
     if (!item) {
       feedback('erro', noCarrinho ? `A peça ${c} já está no carrinho.` : foraDoBazar ? `A peça ${c} está no estoque de Doações e não pode ser vendida.` : `Código ${c} não encontrado ou sem saldo no Bazar.`);
-      return;
+      return false;
     }
     const it = item;
     const unica = it.pecaUnica !== false;
-    if (unica && noCarrinho) { feedback('erro', `A peça ${c} já está no carrinho (peça única).`); return; }
-    if (unica && n > 1) { feedback('erro', `${it.descricao} é peça única: só 1 por venda.`); return; }
-    // nunca mais do que há no Bazar; o pedido acima do saldo é recusado inteiro (P-18; o servidor confere de novo ao gravar)
+    if (unica && noCarrinho) { feedback('erro', `A peça ${c} já está no carrinho (peça única).`); return false; }
+    // nunca mais do que há no Bazar: pedido acima do saldo lança o que há e avisa (S6-11, muda a P-18); peça única lança 1.
+    // O saldo é o do catálogo carregado: o servidor confere de novo ao gravar.
     const saldo = it.saldoBazar ?? 1;
     const ja = noCarrinho?.quantidade ?? 0;
-    if (ja + n > saldo) {
-      feedback('erro', `Só há ${saldo} de ${it.descricao} no Bazar${ja ? ` (${ja} já no carrinho)` : ''}: dá para lançar no máximo ${Math.max(0, saldo - ja)}.`);
-      return;
+    const pedido = n;
+    if (ja >= saldo) {
+      feedback('erro', `Não resta ${it.descricao} no Bazar: ${ja ? `os ${ja} que havia já estão no carrinho` : 'o saldo acabou'}.`);
+      return false;
     }
-    if (!cabeNoSaldoCpf(toCents(it.preco) * n)) return;
+    n = unica ? 1 : Math.min(n, saldo - ja);
+    // o saldo do mês do CPF é limite de dinheiro: continua recusando (com a quantidade já ajustada)
+    if (!cabeNoSaldoCpf(toCents(it.preco) * n)) return false;
     if (noCarrinho) setLinhas((ls) => ls.map((l) => (l.key === noCarrinho.key ? { ...l, quantidade: l.quantidade + n } : l)));
     else setLinhas((ls) => [...ls, { key: uuid(), tipo: 'codigo', codigo: it.codigo, descricao: it.descricao, precoCents: toCents(it.preco), quantidade: n }]);
+    if (n < pedido) {
+      feedback('aviso', unica
+        ? `Atenção: ${it.descricao} é peça única. Lancei 1 de ${pedido} — ${formatMoney(it.preco)}.`
+        : ja
+          ? `Atenção: só restavam ${n} de ${it.descricao} no Bazar (há ${saldo}, ${ja} já no carrinho). Lancei ${n} de ${pedido} — ${formatMoney(it.preco)} cada.`
+          : `Atenção: só havia ${n} de ${it.descricao} no Bazar. Lancei ${n} de ${pedido}, e o Bazar ficou sem — ${formatMoney(it.preco)} cada.`);
+      return true;
+    }
     // S4-08: produto, preço de agora (com desconto, S3-10) e quanto sobra no Bazar depois deste carrinho
     const restam = saldo - ja - n;
     feedback('ok', `${ja + n > 1 ? `${ja + n}× ` : ''}${it.descricao} — ${it.precoSemDesconto ? `de ${formatMoney(it.precoSemDesconto)} por ` : ''}${formatMoney(it.preco)}`
       + ` · ${unica ? 'peça única' : restam === 0 ? 'última unidade do Bazar' : `restam ${restam} no Bazar`}`);
-  }
-
-  function adicionarCategoria(categoriaId: string) { exigirCpf(() => adicionarCategoriaAgora(categoriaId)); }
-
-  function adicionarCategoriaAgora(categoriaId: string) {
-    const cat = catalogo.categorias.find((c) => c.id === categoriaId)!;
-    const q = Math.max(1, Math.min(999, Number.parseInt(qtd, 10) || 1));
-    // O PDV não deixa vender mais do que há no estoque do Bazar: avisa a quantidade e bloqueia (o servidor confere de novo ao gravar).
-    const jaNoCarrinho = emCarrinho(categoriaId);
-    const restam = cat.saldoBazar - jaNoCarrinho;
-    if (q > restam) {
-      feedback('erro', restam <= 0
-        ? `Sem estoque de ${cat.nome} no Bazar: há ${cat.saldoBazar}${jaNoCarrinho ? ` e ${jaNoCarrinho} já estão no carrinho` : ''}.`
-        : `Só há ${cat.saldoBazar} de ${cat.nome} no Bazar${jaNoCarrinho ? ` (${jaNoCarrinho} já no carrinho)` : ''}: dá para adicionar no máximo ${restam}.`);
-      void sessao.recarregarCatalogo().catch(() => {}); // o estoque pode ter mudado desde que o PDV abriu
-      focarCodigo();
-      return;
-    }
-    if (!cabeNoSaldoCpf(toCents(cat.precoPadrao) * q)) { focarCodigo(); return; }
-    setLinhas((ls) => {
-      const existente = ls.find((l) => l.categoriaId === categoriaId);
-      if (existente) return ls.map((l) => (l === existente ? { ...l, quantidade: l.quantidade + q } : l));
-      return [...ls, { key: uuid(), tipo: 'categoria', categoriaId, descricao: cat.nome, precoCents: toCents(cat.precoPadrao), quantidade: q }];
-    });
-    feedback('ok', `${q}× ${cat.nome}`);
-    setQtd('1');
-    focarCodigo();
+    return true;
   }
 
   /** Esc com o campo vazio e o botão "Remover último" perguntam antes (S4-19). */
@@ -273,11 +270,22 @@ export function PdvPage() {
         ...(pg.clienteId ? { clienteId: pg.clienteId, vencimentoFiado: pg.vencimentoFiado } : {}),
       } satisfies VendaRequest);
     } catch (e) {
-      // Outro caixa vendeu antes: o estoque mudou. Atualiza o catálogo, fecha o pagamento e deixa o operador ajustar o carrinho.
+      // Outro caixa vendeu antes: o estoque mudou e nada foi gravado. O carrinho vai sozinho ao que há agora e o operador
+      // confere o total e recebe de novo (S6-13). Sem reenvio automático: cada tentativa é do operador. Nada mudou no
+      // catálogo (corrida entre a consulta e a venda) ou o catálogo não veio: a mensagem de antes, para ajustar no ✕.
       if (e instanceof ApiError && ['SALDO_INSUFICIENTE', 'ITEM_INDISPONIVEL', 'ITEM_EM_DOACOES'].includes(e.code ?? '')) {
-        void sessao.recarregarCatalogo().catch(() => {});
+        const c = await sessao.recarregarCatalogo().catch(() => null);
         setPagando(false);
-        feedback('erro', `O estoque mudou e a venda não foi gravada: ${e.message}. Ajuste o carrinho (use o ✕) e tente de novo.`);
+        const aj = c ? ajustarAoEstoque(linhas, c) : null;
+        if (!aj || (!aj.mudancas.length && !aj.precoMudou)) {
+          feedback('erro', `O estoque mudou e a venda não foi gravada: ${e.message}. Ajuste o carrinho (use o ✕) e tente de novo.`);
+          return;
+        }
+        setLinhas(aj.linhas); // linhas novas = venda nova: o id da venda recusada (não gravada) é trocado
+        const lista = aj.mudancas.slice(0, 3).join('; ') + (aj.mudancas.length > 3 ? `; e mais ${aj.mudancas.length - 3}` : '');
+        feedback('aviso', !aj.linhas.length
+          ? `Atenção: o estoque mudou e a venda não foi gravada. Nada do carrinho resta no Bazar (${lista}).`
+          : `Atenção: o estoque mudou e a venda não foi gravada. Ajustei o carrinho ao que há agora${lista ? `: ${lista}` : ''}${aj.precoMudou ? '; o preço de algum produto também mudou' : ''}. Confira o total e receba de novo (F4).`);
         return;
       }
       // O preço ou o desconto de um produto mudou com a venda aberta (S3-08, S3-09): o carrinho passa ao preço atual.
@@ -323,45 +331,40 @@ export function PdvPage() {
         )}
         {(cpfSel !== null || linhas.length > 0) && <button className="btn btn-ghost" onClick={() => { acaoPendente.current = null; codigoPendente.current = null; setCpfAberto(true); }}>{cpfSel ? 'Trocar CPF' : 'Informar CPF'}</button>}
         <div className="spacer" />
-        <button className="btn" onClick={() => setResumindo(true)}>Total do caixa</button>
-        <button className="btn" onClick={() => setLancando(true)}>Sangria/Suprimento (F6)</button>
-        <button className="btn" onClick={() => nav('/pdv/fechar')}>Fechar caixa</button>
-        {can('estoque.consultar', 'relatorios.consultar', 'entrada.registrar', 'contas_receber.receber') && <Link className="btn btn-ghost" to="/">Backoffice</Link>}
+        {/* no celular e no tablet os botões ganham uma linha só deles, todos da mesma largura (S6-12) */}
+        <div className="pdv-acoes">
+          <button className="btn" onClick={() => setResumindo(true)}>Total do caixa</button>
+          <button className="btn" onClick={() => setLancando(true)} aria-label="Sangria/Suprimento" aria-keyshortcuts="F6">Sangria/<wbr />Suprimento<span className="atalho"> (F6)</span></button>
+          <button className="btn" onClick={() => nav('/pdv/fechar')}>Fechar caixa</button>
+          {can('estoque.consultar', 'relatorios.consultar', 'entrada.registrar', 'contas_receber.receber') && <Link className="btn btn-ghost" to="/">Backoffice</Link>}
+        </div>
       </header>
 
       <div className="pdv-body">
         <section className="pdv-entrada" aria-label="Entrada de itens">
-          <form onSubmit={lerCodigo}>
-            <label className="field field-lg">
-              <span>Código de barras</span>
-              <input ref={codigoRef} value={codigo} onChange={(e) => setCodigo(e.target.value)} autoFocus autoComplete="off" inputMode="text" aria-describedby="msg-leitura" placeholder="Passe o leitor ou digite e tecle Enter" maxLength={40} />
+          <div className="leitura-linha">
+            {/* Qtd. fora do form: Enter nele só leva ao código, não lê um código vazio (S6-10) */}
+            <label className="field field-lg campo-qtd">
+              <span>Qtd. (F2)</span>
+              <input ref={qtdRef} value={qtd} onChange={(e) => setQtd(e.target.value.replace(/\D/g, '').slice(0, 3))}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); focarCodigo(); } }}
+                onFocus={(e) => e.target.select()} inputMode="numeric" autoComplete="off" className="qtd" aria-describedby="dica-qtd" />
             </label>
-          </form>
+            <form onSubmit={lerCodigo}>
+              <label className="field field-lg">
+                <span>Código de barras</span>
+                <input ref={codigoRef} value={codigo} onChange={(e) => setCodigo(e.target.value)} autoFocus autoComplete="off" inputMode="text" aria-describedby="msg-leitura" placeholder={celular ? 'Bipe ou digite o código' : 'Passe o leitor ou digite e tecle Enter'} maxLength={40} />
+              </label>
+            </form>
+          </div>
+          <small id="dica-qtd" className="hint">Mais de uma unidade: escreva a quantidade em Qtd. e bipe. Depois do bip, volta a 1.</small>
           {cameraDisponivel() && <button type="button" className="btn" onClick={() => setLendoCamera(true)}>Ler pela câmera</button>}
           <div id="msg-leitura" className={`leitura ${msgLeitura?.tipo ?? ''}`} aria-live="assertive">{msgLeitura?.texto ?? ' '}</div>
-
-          <div className="cat-header">
-            <h2>Venda por categoria (F2)</h2>
-            <label className="field field-inline"><span>Qtd.</span>
-              <input ref={qtdRef} value={qtd} onChange={(e) => setQtd(e.target.value.replace(/\D/g, '').slice(0, 3))} inputMode="numeric" className="qtd" />
-            </label>
-          </div>
-          <div className="cat-grid">
-            {catalogo.categorias.map((c) => {
-              const restam = c.saldoBazar - emCarrinho(c.id);
-              return (
-                <button key={c.id} className="btn cat-btn" onClick={() => adicionarCategoria(c.id)} disabled={restam <= 0} title={restam <= 0 ? 'Sem estoque no Bazar' : undefined}>
-                  <span>{c.nome}</span><strong>{formatMoney(c.precoPadrao)}</strong>
-                  <small>{restam <= 0 ? 'sem estoque' : `${restam} em estoque`}</small>
-                </button>
-              );
-            })}
-          </div>
         </section>
 
         <section className="pdv-carrinho" aria-label="Carrinho">
           <h2>Carrinho</h2>
-          {linhas.length === 0 ? <p className="empty">Nenhum item. Leia um código ou escolha uma categoria.</p> : (
+          {linhas.length === 0 ? <p className="empty">Nenhum item. Leia o código da etiqueta.</p> : (
             <ul className="carrinho">
               {linhas.map((l) => (
                 <li key={l.key}>

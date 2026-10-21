@@ -43,7 +43,7 @@ async function ir(caminho) { await page.evaluate((c) => { history.pushState({}, 
 try {
   // ---------------- PDV ----------------
   await entrar('vendedor', 'Vendedor@123');
-  await Promise.race([page.locator('.cat-btn').first().waitFor({ timeout: 15000 }), page.getByRole('heading', { name: 'Abrir caixa' }).waitFor({ timeout: 15000 })]);
+  await Promise.race([page.getByPlaceholder(/Passe o leitor/).waitFor({ timeout: 15000 }), page.getByRole('heading', { name: 'Abrir caixa' }).waitFor({ timeout: 15000 })]);
   if (page.url().includes('/pdv/abrir')) {
     await page.locator('select').selectOption({ index: 1 });
     await page.getByLabel(/Saldo inicial/).fill('50');
@@ -61,15 +61,18 @@ try {
   l = await linhas();
   check(l[0].startsWith('3×') && /3× Caneca.*R\$\s?7,00.*restam 3 no Bazar/.test(await msg()), 'bipar de novo soma 1 e mostra produto, preço e "restam 3"', { l, msg: await msg() });
   await ler('5*BZ000006');
-  check((await linhas())[0].startsWith('3×') && /Só há 6 .*3 já no carrinho.*no máximo 3/.test(await msg()), 'acima do saldo é recusado inteiro, com aviso', await msg());
+  check((await linhas())[0].startsWith('6×') && /Atenção: só restavam 3 de Caneca.*\(há 6, 3 já no carrinho\)\. Lancei 3 de 5/.test(await msg()) && (await page.locator('#msg-leitura.aviso').count()) === 1,
+    'acima do saldo lança o que há e avisa (S6-11)', { l: await linhas(), msg: await msg() });
+  await ler('BZ000006');
+  check((await linhas())[0].startsWith('6×') && /Não resta Caneca.*6 que havia já estão no carrinho/.test(await msg()), 'sem nada no Bazar: avisa e não lança', await msg());
   await ler('0*BZ000006');
   check(/quantidade vai de 1 a 999/.test(await msg()) && (await campo().inputValue()) === '0*BZ000006', 'quantidade zero avisa e o texto volta ao campo para corrigir', await msg());
   await page.keyboard.press('Escape');
   check((await campo().inputValue()) === '' && (await page.getByRole('dialog').count()) === 0, 'Esc com texto só limpa o campo (não pergunta nem tira item)');
   await ler('2*BZ000001');
-  check(/peça única: só 1 por venda/.test(await msg()) && (await linhas()).length === 1, '2*código de peça única é recusado', await msg());
+  check((await linhas()).length === 2 && /Atenção: Jaqueta jeans é peça única\. Lancei 1 de 2/.test(await msg()), '2*código de peça única lança 1 e avisa (S6-11)', await msg());
   await ler('BZ000001');
-  check((await linhas()).length === 2 && /Jaqueta jeans.*peça única/.test(await msg()), 'peça única entra com 1 e o aviso diz "peça única"', await msg());
+  check((await linhas()).length === 2 && /já está no carrinho \(peça única\)/.test(await msg()), 'a mesma peça única de novo é recusada', await msg());
 
   // Esc com o campo vazio pergunta; o foco nasce em Cancelar, então o Enter do leitor não tira nada
   await page.keyboard.press('Escape');
@@ -98,18 +101,18 @@ try {
   await page.keyboard.press('s');
   await page.waitForTimeout(300);
   l = await linhas();
-  check(l.length === 1 && l[0].startsWith('3×'), 'o botão "Remover último" também pergunta; S tira a peça', l);
+  check(l.length === 1 && l[0].startsWith('6×'), 'o botão "Remover último" também pergunta; S tira a peça', l);
   await page.keyboard.press('Escape');
-  await page.getByRole('dialog').getByText('Ficam 2 no carrinho').waitFor({ timeout: 5000 });
+  await page.getByRole('dialog').getByText('Ficam 5 no carrinho').waitFor({ timeout: 5000 });
   await page.getByRole('dialog').getByRole('button', { name: /Sim, tirar 1/ }).click();
   await page.waitForTimeout(300);
-  check((await linhas())[0]?.startsWith('2×'), 'linha com 3: tira só 1 (clique em "Sim, tirar 1")', await linhas());
+  check((await linhas())[0]?.startsWith('5×'), 'linha com 6: tira só 1 (clique em "Sim, tirar 1")', await linhas());
   await page.keyboard.press('Escape');
-  await page.getByRole('dialog').getByText('Ficam 1 no carrinho').waitFor({ timeout: 5000 });
+  await page.getByRole('dialog').getByText('Ficam 4 no carrinho').waitFor({ timeout: 5000 });
   await page.waitForTimeout(150);
   await page.keyboard.press('Shift+S');
   await page.waitForTimeout(300);
-  check((await page.getByRole('dialog').count()) === 0 && !(await linhas())[0]?.startsWith('2×'), 'S maiúsculo (Shift + S) também tira', await linhas());
+  check((await page.getByRole('dialog').count()) === 0 && !(await linhas())[0]?.startsWith('5×'), 'S maiúsculo (Shift + S) também tira', await linhas());
   await page.keyboard.press('F2');
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
