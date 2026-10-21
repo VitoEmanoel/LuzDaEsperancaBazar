@@ -5,6 +5,8 @@
  * NFC-e, de entrada própria e de outro destinatário.
  * Segurança: arquivo com DTD ou entidade é recusado antes de ler (XXE, "billion laughs"); valores lidos como texto
  * (a chave e o CNPJ não perdem zeros); a mensagem do leitor nunca volta ao cliente nem vai ao log (pode citar o XML).
+ * Limitação do protótipo: a assinatura digital (XML-DSig) não é conferida nem a SEFAZ é consultada; o protocolo e a chave
+ * vêm do próprio XML. Registrado no docs/README_MVP.md para a versão oficial.
  */
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import { AppError } from '../../shared/errors.js';

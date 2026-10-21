@@ -251,6 +251,17 @@ async function main() {
   ws.addRow(['nome']); ws.addRow([{ richText: [{ text: 'Rica ' }, { font: { bold: true }, text: sufixo }] }]);
   r = await admin.arquivo('/importacoes/categorias', 'rica.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', Buffer.from(await wb.xlsx.writeBuffer()));
   check(r.status === 200 && r.data.aceitas[0]?.nome === `Rica ${sufixo}`, 'XLSX com texto formatado é lido como texto (não "[object Object]")', r.data);
+  // zip-bomba (na importação do lote, que lê a planilha do mesmo jeito; a de cadastros já gastou o limite de 5 por minuto): poucos KB compactados que viram mais de 50 MB na memória são recusados antes de o ExcelJS carregar
+  const wbB = new ExcelJS.Workbook(); const wsB = wbB.addWorksheet('categorias');
+  wsB.addRow(['nome']); for (let i = 0; i < 55; i++) wsB.addRow([`${i}`.padEnd(1024 * 1024, 'x')]);
+  const bomba = Buffer.from(await wbB.xlsx.writeBuffer());
+  r = await est.arquivo(`/lotes/${loteImp.id}/importacao`, 'bomba.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', bomba);
+  check(bomba.length < 2 * 1024 * 1024 && r.status === 413 && r.data?.code === 'PLANILHA_GRANDE', 'XLSX que passa de 50 MB descompactado é recusado (zip-bomba)', { kb: Math.round(bomba.length / 1024), status: r.status, code: r.data?.code });
+  // a mesma bomba dizendo no fim do zip que tem 1 arquivo só: o ExcelJS lê todos assim mesmo, então a conferência também
+  const forjada = Buffer.from(bomba); const fimZip = forjada.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  forjada.writeUInt16LE(1, fimZip + 8); forjada.writeUInt16LE(1, fimZip + 10);
+  r = await est.arquivo(`/lotes/${loteImp.id}/importacao`, 'forjada.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', forjada);
+  check(r.status === 413 && r.data?.code === 'PLANILHA_GRANDE', 'zip-bomba com a contagem de arquivos adulterada também é recusada', { status: r.status, code: r.data?.code });
 
   console.log('Importação de NF-e (S5-04, P-20)');
   const XML = 'application/xml';

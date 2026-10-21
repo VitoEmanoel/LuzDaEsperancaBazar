@@ -2,11 +2,14 @@
  * Leitura de planilha modelo (CSV ou XLSX) para importações e carga inicial,
  * e escrita de CSV/XLSX nos relatórios (com proteção contra injeção de fórmula).
  */
+import { inflateRawSync } from 'node:zlib';
 import ExcelJS from 'exceljs';
 import { fileTypeFromBuffer } from 'file-type';
 import { AppError } from './errors.js';
 
 export const MAX_LINHAS = 5000;
+/** Teto do XLSX descompactado: uma planilha modelo de 5.000 linhas tem poucos MB. */
+export const MAX_XLSX_DESCOMPACTADO = 50 * 1024 * 1024;
 
 export interface Planilha { cabecalho: string[]; linhas: { numero: number; valores: Record<string, string> }[] }
 
@@ -34,7 +37,41 @@ function parseCsv(texto: string): string[][] {
   return linhas.filter((l) => l.some((v) => v.trim() !== ''));
 }
 
+/**
+ * Zip-bomba: um XLSX de poucos KB pode virar GBs na memória. Antes de o ExcelJS carregar tudo, cada arquivo do zip é
+ * descompactado com teto (o tamanho declarado no zip pode mentir); passou do teto somando todos, a planilha é recusada.
+ */
+function conferirTamanhoXlsx(buf: Buffer, teto = MAX_XLSX_DESCOMPACTADO): void {
+  const grande = () => new AppError(413, 'Planilha grande demais depois de descompactada', 'PLANILHA_GRANDE');
+  const invalida = () => new AppError(415, 'Envie a planilha modelo em CSV ou XLSX', 'TIPO_INVALIDO');
+  // fim do diretório central (assinatura 0x06054b50) nos últimos 22 bytes + o comentário do zip (até 64 KB)
+  let fim = -1;
+  for (let i = buf.length - 22; i >= Math.max(0, buf.length - 22 - 0xffff); i--) if (buf.readUInt32LE(i) === 0x06054b50) { fim = i; break; }
+  if (fim < 0) throw invalida();
+  // percorre o diretório central enquanto houver registro, como o JSZip do ExcelJS (ele ignora a contagem do fim do zip:
+  // um zip que declara 1 arquivo e traz 2 teria o segundo descompactado sem conferir)
+  let p = buf.readUInt32LE(fim + 16);
+  let resta = teto;
+  while (p + 4 <= buf.length && buf.readUInt32LE(p) === 0x02014b50) {
+    if (p + 46 > buf.length) throw invalida();
+    const metodo = buf.readUInt16LE(p + 10), compactado = buf.readUInt32LE(p + 20), declarado = buf.readUInt32LE(p + 24), local = buf.readUInt32LE(p + 42);
+    if (declarado === 0xffffffff || compactado === 0xffffffff || declarado > resta) throw grande(); // zip64 não cabe numa planilha modelo
+    if (local + 30 > buf.length || buf.readUInt32LE(local) !== 0x04034b50) throw invalida();
+    const ini = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
+    const dados = buf.subarray(ini, ini + compactado);
+    let real: number;
+    if (metodo === 0) real = dados.length;
+    else if (metodo === 8) {
+      try { real = inflateRawSync(dados, { maxOutputLength: Math.max(1, resta) }).length; }
+      catch (e) { throw (e as { code?: string }).code === 'ERR_BUFFER_TOO_LARGE' ? grande() : invalida(); }
+    } else throw invalida();
+    resta -= real;
+    p += 46 + buf.readUInt16LE(p + 28) + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32);
+  }
+}
+
 async function parseXlsx(buf: Buffer): Promise<string[][]> {
+  conferirTamanhoXlsx(buf);
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buf as unknown as ArrayBuffer);
   const ws = wb.worksheets[0];
