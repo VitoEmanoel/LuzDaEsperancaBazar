@@ -187,8 +187,11 @@ async function main() {
   check(lotes === `${lote1.numero}:4,${lote2.numero}:2`, `PEPS: lote mais antigo primeiro (${lotes})`);
   const catDepois = (await caixa.req('GET', '/pdv/catalogo')).data;
   check(catDepois.categorias.find((c: any) => c.id === catRoupa.id)?.saldoBazar === saldoRoupaEstoque - 6, 'catálogo baixa o saldo da categoria depois da venda', catDepois.categorias.find((c: any) => c.id === catRoupa.id));
-  const r1b = await caixa.put(`/vendas/${v1}`, { ...base, itens: [{ codigo: pec1.codigo, quantidade: 1 }], pagamentos: [{ forma: 'DINHEIRO', valor: '35.00', valorRecebido: '35.00' }] });
-  check(r1b.status === 200 && r1b.data.numero === r1.data.numero, 'PUT idempotente (mesmo id devolve a venda gravada)');
+  const r1b = await caixa.put(`/vendas/${v1}`, { ...base, itens: [{ codigo: pec1.codigo, quantidade: 1 }, { categoriaId: catRoupa.id, quantidade: 6 }], pagamentos: [{ forma: 'DINHEIRO', valor: '95.00', valorRecebido: '100.00' }] });
+  check(r1b.status === 200 && r1b.data.numero === r1.data.numero, 'PUT idempotente (mesmo id e mesmo carrinho devolvem a venda gravada)');
+  // S6-14: o mesmo id com OUTRO carrinho não é reenvio, é outra venda: 409 (antes devolvia a venda antiga como se fosse a nova)
+  const r1c = await caixa.put(`/vendas/${v1}`, { ...base, itens: [{ codigo: pec1.codigo, quantidade: 1 }], pagamentos: [{ forma: 'DINHEIRO', valor: '35.00', valorRecebido: '35.00' }] });
+  check(r1c.status === 409 && r1c.data?.code === 'ID_EM_USO', 'o mesmo id com outro carrinho é recusado (409 ID_EM_USO)', r1c.data);
   check((await caixa.put(`/vendas/${uuid()}`, { ...base, itens: [{ codigo: pec1.codigo, quantidade: 1 }], pagamentos: [{ forma: 'PIX', valor: '35.00', valorRecebido: '35.00' }] })).data?.code === 'ITEM_INDISPONIVEL', 'peça já vendida => 409');
   check((await caixa.put(`/vendas/${uuid()}`, { ...base, itens: [{ codigo: pec3.codigo, quantidade: 1 }], pagamentos: [{ forma: 'PIX', valor: '45.00', valorRecebido: '45.00' }] })).data?.code === 'ITEM_EM_DOACOES', 'peça no estoque de doações não vende (RN-07)');
   check((await caixa.put(`/vendas/${uuid()}`, { ...base, itens: [{ codigo: pec2.codigo, quantidade: 1 }], pagamentos: [{ forma: 'PIX', valor: '1.00', valorRecebido: '1.00' }] })).data?.code === 'PAGAMENTO_DIVERGENTE', 'servidor recalcula o total');
@@ -333,7 +336,7 @@ async function main() {
   check(aud.total > 20 && !JSON.stringify(aud).includes('Maria'), 'auditoria sem PII', aud.total);
   check((await admin.get('/rota-que-nao-existe')).status === 404, '404 em RFC 9457');
 
-  console.log('Vendedor padrão — fluxo do PDV só com as permissões mínimas (caixa.operar e clientes.gerenciar)');
+  console.log('Vendedor padrão — fluxo do PDV só com as permissões mínimas (caixa.operar; clientes.gerenciar saiu na 0014)');
   const cxV = uuid();
   check((await vend.post('/caixas', { id: cxV, terminalId: term2.id, fundoTroco: '20.00' })).status === 201, 'Vendedor padrão abre o caixa');
   check((await vend.get('/pdv/catalogo')).status === 200, 'Vendedor padrão carrega o catálogo do PDV');

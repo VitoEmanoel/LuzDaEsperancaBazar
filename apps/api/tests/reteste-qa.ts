@@ -115,7 +115,8 @@ async function main() {
   await mista.post(`/contas-receber/${conta.id}/recebimentos`, { id: uuid(), valor: '5.00', caixaId, forma: 'DINHEIRO' });
   const depoisDin = (await mista.get(`/caixas/${caixaId}/previa-fechamento`)).data;
   check(cents(depoisDin.esperadoDinheiro) - cents(antes.esperadoDinheiro) === 500, 'dinheiro entra no esperado (+5,00)', depoisDin);
-  const catDesp = (await mista.get('/categorias-despesa')).data[0] ?? (await admin.post('/categorias-despesa', { id: uuid(), nome: 'Despesas gerais (reteste)' })).data;
+  const catDesp = ((await mista.get('/categorias-despesa')).data as any[]).find((c) => c.id !== '00000000-0000-4000-8000-0000000000c1') ?? // "Reembolso de venda" é reservada (S6-14)
+    (await admin.post('/categorias-despesa', { id: uuid(), nome: 'Despesas gerais (reteste)' })).data;
   const cp = (await mista.post('/contas-pagar', { id: uuid(), descricao: 'Conta reteste', categoriaDespesaId: catDesp.id, valor: '12.00', vencimento: hoje })).data;
   r = await mista.post(`/contas-pagar/${cp.id}/pagar`, { saiuDoCaixa: false, formaPagamento: 'CARTAO_DEBITO' });
   check(r.data?.formaPagamento === 'CARTAO_DEBITO', 'conta paga fora do caixa grava a forma escolhida', r.data);

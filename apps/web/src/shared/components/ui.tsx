@@ -1,5 +1,5 @@
 /** Peças pequenas de UI reutilizadas em todas as telas. */
-import { useId, useLayoutEffect, useRef, useState, type InputHTMLAttributes, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type InputHTMLAttributes, type ReactNode } from 'react';
 import { formatMoney, type Money } from '../lib/money';
 
 export function Field({ label, children, hint, erro }: { label: string; children: ReactNode; hint?: string; erro?: string | null }) {
@@ -45,14 +45,32 @@ export function PageHeader({ titulo, children }: { titulo: string; children?: Re
   return <div className="page-header"><h1>{titulo}</h1><div className="actions">{children}</div></div>;
 }
 
+type ModoTabela = 'tabela' | 'sem-sec' | 'cartoes';
+const CLASSE_MODO: Record<ModoTabela, string> = { tabela: 'tabela-rolavel', 'sem-sec': 'tabela-rolavel tabela-sem-sec', cartoes: 'tabela-rolavel tabela-cartoes' };
+
 /**
- * Tabela larga rola para o lado dentro desta caixa, sem empurrar a página para além do cabeçalho.
- * No celular, a tabela de 5 colunas ou mais vira cartões: cada célula leva o título da sua coluna (data-rotulo),
- * e os papéis (role) mantêm a tabela para o leitor de tela quando o CSS a desmonta.
+ * Tabela larga, sem empurrar a página para além do cabeçalho. A caixa escolhe o formato pelo espaço que tem (S6-12):
+ * cabe inteira → tabela; não cabe → some as colunas secundárias (`col-sec` no th e no td); ainda não cabe e a tela
+ * tem até 1100 px → fichas; acima disso, rola para o lado. No celular, a de 5 colunas ou mais é sempre ficha.
+ * Na ficha, cada célula leva o título da sua coluna (data-rotulo), e os papéis (role) mantêm a tabela para o leitor de tela.
  */
 export function TabelaRolavel({ children }: { children: ReactNode }) {
   const caixa = useRef<HTMLDivElement>(null);
-  const [cartoes, setCartoes] = useState(false);
+  const colunas = useRef(0);
+  const [modo, setModo] = useState<ModoTabela>('tabela');
+  /** Mede do zero (cada formato é testado na própria caixa, antes da pintura), então o resultado não depende do formato atual. */
+  const medir = () => {
+    const box = caixa.current, tabela = box?.querySelector('table');
+    if (!box || !tabela) return;
+    const cabe = (m: ModoTabela) => { box.className = CLASSE_MODO[m]; return tabela.offsetWidth <= box.clientWidth + 1; };
+    const muitas = colunas.current >= 5;
+    const novo: ModoTabela = muitas && window.matchMedia('(max-width: 600px)').matches ? 'cartoes'
+      : cabe('tabela') ? 'tabela'
+      : cabe('sem-sec') || !muitas || !window.matchMedia('(max-width: 1100px)').matches ? 'sem-sec'
+      : 'cartoes';
+    box.className = CLASSE_MODO[novo];
+    setModo(novo);
+  };
   useLayoutEffect(() => {
     // roda a cada render: linhas novas também recebem os rótulos
     const tabela = caixa.current?.querySelector('table');
@@ -76,9 +94,19 @@ export function TabelaRolavel({ children }: { children: ReactNode }) {
         col += (cel as HTMLTableCellElement).colSpan;
       }
     }
-    setCartoes(rotulos.length >= 5);
+    colunas.current = rotulos.length;
+    medir();
   });
-  return <div ref={caixa} className={cartoes ? 'tabela-rolavel tabela-cartoes' : 'tabela-rolavel'}>{children}</div>;
+  // a largura da caixa muda com a janela, o menu lateral e o giro do celular
+  useEffect(() => {
+    const box = caixa.current;
+    if (!box || typeof ResizeObserver === 'undefined') return;
+    let largura = box.clientWidth;
+    const ro = new ResizeObserver(() => { if (box.clientWidth !== largura) { largura = box.clientWidth; medir(); } });
+    ro.observe(box);
+    return () => ro.disconnect();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  return <div ref={caixa} className={CLASSE_MODO[modo]}>{children}</div>;
 }
 
 export function MoneyText({ value }: { value: Money | number | undefined | null }) {
@@ -105,17 +133,29 @@ export function Pagination({ page, pageSize, total, onChange }: { page: number; 
   return (
     <nav className="pagination" aria-label="Paginação">
       <button className="btn" disabled={page <= 1} onClick={() => onChange(page - 1)}>Anterior</button>
-      <span>Página {page} de {pages}</span>
+      <span aria-live="polite">Página {page} de {pages}</span>
       <button className="btn" disabled={page >= pages} onClick={() => onChange(page + 1)}>Próxima</button>
     </nav>
   );
 }
 
+/** Abas no padrão do leitor de tela (S6-05): só a aba ativa entra no Tab; setas, Home e End trocam de aba. */
 export function Tabs<T extends string>({ abas, atual, onChange }: { abas: { id: T; rotulo: string }[]; atual: T; onChange: (t: T) => void }) {
+  const lista = useRef<HTMLDivElement>(null);
+  const mover = (e: React.KeyboardEvent, i: number) => {
+    const n = abas.length;
+    const alvo = e.key === 'ArrowRight' ? (i + 1) % n : e.key === 'ArrowLeft' ? (i - 1 + n) % n : e.key === 'Home' ? 0 : e.key === 'End' ? n - 1 : -1;
+    if (alvo < 0) return;
+    e.preventDefault();
+    onChange(abas[alvo]!.id);
+    lista.current?.querySelectorAll<HTMLElement>('[role=tab]')[alvo]?.focus();
+  };
   return (
-    <div className="tabs" role="tablist">
-      {abas.map((a) => (
-        <button key={a.id} role="tab" aria-selected={a.id === atual} className={`tab ${a.id === atual ? 'active' : ''}`} onClick={() => onChange(a.id)}>{a.rotulo}</button>
+    <div className="tabs" role="tablist" ref={lista}>
+      {abas.map((a, i) => (
+        // nenhuma aba casa com a atual (rota inválida): a primeira fica no Tab, para o grupo não sumir do teclado
+        <button key={a.id} type="button" role="tab" aria-selected={a.id === atual} tabIndex={a.id === atual || (i === 0 && !abas.some((x) => x.id === atual)) ? 0 : -1}
+          className={`tab ${a.id === atual ? 'active' : ''}`} onClick={() => onChange(a.id)} onKeyDown={(e) => mover(e, i)}>{a.rotulo}</button>
       ))}
     </div>
   );

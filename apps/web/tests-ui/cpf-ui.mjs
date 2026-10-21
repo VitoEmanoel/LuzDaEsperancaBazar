@@ -22,18 +22,18 @@ try {
   await page.getByRole('button', { name: 'Entrar' }).click();
   await page.waitForURL(/\/pdv/, { timeout: 15000 });
   // abrir caixa (a demonstração começa sem caixa aberto)
-  await Promise.race([page.locator('.cat-btn').first().waitFor({ timeout: 15000 }), page.getByRole('heading', { name: 'Abrir caixa' }).waitFor({ timeout: 15000 })]);
+  await Promise.race([page.getByPlaceholder(/Passe o leitor/).waitFor({ timeout: 15000 }), page.getByRole('heading', { name: 'Abrir caixa' }).waitFor({ timeout: 15000 })]);
   if (page.url().includes('/pdv/abrir')) {
     await page.locator('select').selectOption({ index: 1 });
     await page.getByLabel(/Saldo inicial/).fill('50');
     await page.getByRole('button', { name: 'Abrir caixa' }).click();
     await page.waitForURL(/\/pdv$/, { timeout: 15000 });
   }
-  await page.locator('.cat-btn').first().waitFor({ timeout: 15000 });
+  await page.getByPlaceholder(/Passe o leitor/).waitFor({ timeout: 15000 });
   check(true, 'PDV aberto como Vendedor');
 
   // primeiro item da venda -> pergunta o CPF
-  await page.locator('.cat-btn').first().click();
+  await page.getByPlaceholder(/Passe o leitor/).fill('BZ000006'); await page.keyboard.press('Enter');
   const modal = page.getByRole('dialog');
   await modal.getByText('A compra é', { exact: false }).waitFor({ timeout: 5000 });
   check(true, 'a pergunta do CPF apareceu no primeiro item');

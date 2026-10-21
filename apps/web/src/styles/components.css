@@ -47,6 +47,11 @@ legend { font-family: var(--fonte-titulo); font-weight: 600; color: var(--headin
 .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
 .filters { display: flex; gap: .75rem; flex-wrap: wrap; align-items: flex-end; margin-bottom: 1rem; }
 .filters .btn { margin-bottom: .85rem; }
+/* busca larga com o botão da câmera ao lado (S6-12) */
+.busca-camera { display: flex; gap: .5rem; align-items: flex-end; flex: 2 1 320px; min-width: 0; }
+.busca-camera .field { min-width: 0; }
+/* coluna secundária (S6-12): some quando a tabela não cabe (TabelaRolavel marca .tabela-sem-sec) e na ficha; o detalhe fica na página do produto ou do lote */
+@media screen { .tabela-sem-sec > .table .col-sec { display: none; } } /* no papel a tabela sai inteira */
 
 /* --- Superfícies --- */
 .card {
@@ -152,29 +157,51 @@ a.alert:hover { filter: brightness(.98); color: var(--text); }
 .flor .petala-5 { fill: var(--acento-roxo); }
 .flor .miolo { fill: var(--flor-miolo, var(--bg)); }
 
-/* --- Celular (até 600 px) --- */
-@media (max-width: 600px) {
+/* --- Fichas (S6-12): a TabelaRolavel marca .tabela-cartoes no celular (5 colunas ou mais) e, até 1100 px, quando a tabela não cabe nem sem as colunas secundárias --- */
+@media screen { /* só na tela: o papel recebe a tabela (print.css) */
   /* Tabela de 5 colunas ou mais (TabelaRolavel marca .tabela-cartoes): cada linha vira um cartão, cada célula traz o título da coluna */
   .tabela-cartoes { overflow-x: visible; border-radius: 0; }
   .tabela-cartoes > .table, .tabela-cartoes > .table tbody, .tabela-cartoes > .table tfoot, .tabela-cartoes > .table tr { display: block; }
   .tabela-cartoes > .table { border: 0; background: transparent; overflow: visible; }
   .tabela-cartoes > .table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); } /* some da tela, não do leitor */
-  .tabela-cartoes > .table tr { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: .75rem; padding: .25rem .9rem; }
-  .tabela-cartoes > .table td { display: block; text-align: right; padding: .5rem 0; border-bottom: 0; overflow-wrap: anywhere; }
+  /* S6-12: ficha compacta em 2 colunas, com o rótulo pequeno em cima do valor; o fundo fica no cartão, não em cada célula */
+  .tabela-cartoes > .table tr { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: .1rem .9rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: .75rem; padding: .6rem .9rem; }
+  .tabela-cartoes > .table td { display: block; text-align: left; padding: .3rem 0; border-bottom: 0; overflow-wrap: anywhere; background: transparent; min-width: 0; }
   .tabela-cartoes > .table caption { display: block; }
-  .tabela-cartoes > .table td::after { content: ""; display: block; clear: both; }
-  .tabela-cartoes > .table td + td { border-top: 1px solid var(--border); }
   .tabela-cartoes > .table td::before {
-    content: attr(data-rotulo); float: left; max-width: 48%; margin-right: 1rem; text-align: left;
-    font-size: .78rem; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); line-height: 1.9; white-space: normal;
+    content: attr(data-rotulo); display: block; margin-bottom: .05rem;
+    font-size: .7rem; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); line-height: 1.35;
   }
   .tabela-cartoes > .table td[data-rotulo=""]::before { content: none; }
-  .tabela-cartoes > .table td.row, .tabela-cartoes > .table .actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: .4rem; margin: 0; }
+  .tabela-cartoes > .table td, .tabela-cartoes > .table td::before { white-space: normal; } /* td.num não quebra na tabela; na ficha, o rótulo longo quebra */
+  .tabela-cartoes > .table .col-sec { display: none; }
+  /* ocupam a ficha toda: ações, controles (select/campo), o "Total" do rodapé */
+  .tabela-cartoes > .table td.row, .tabela-cartoes > .table td:has(> .actions), .tabela-cartoes > .table td:has(select, input, textarea),
+  .tabela-cartoes > .table td[data-rotulo=""] { grid-column: 1 / -1; }
+  .tabela-cartoes > .table td select, .tabela-cartoes > .table td input:not([type=checkbox]):not([type=radio]) { width: 100%; }
+  .tabela-cartoes > .table td.row, .tabela-cartoes > .table td:has(> .actions) { border-top: 1px solid var(--border); margin-top: .35rem; padding-top: .6rem; }
+  .tabela-cartoes > .table td.row, .tabela-cartoes > .table .actions { display: flex; flex-wrap: wrap; gap: .4rem; margin: 0; }
+  .tabela-cartoes > .table td.row > .btn, .tabela-cartoes > .table .actions > .btn { flex: 1 1 0; justify-content: center; }
   .tabela-cartoes > .table td:empty { display: none; } /* depois do td.row: célula de ações vazia some */
-  .tabela-cartoes > .table td.row::after { content: none; }
-  .tabela-cartoes > .table tbody tr:hover td { background: transparent; }
+  .tabela-cartoes > .table tbody tr:hover td, .tabela-cartoes > .table tr.destaque td, .tabela-cartoes > .table tr.linha-vencida td { background: transparent; }
   .tabela-cartoes > .table tr.destaque { background: var(--surface-2); }
   .tabela-cartoes > .table tr.linha-vencida { border-color: var(--danger); background: var(--err-bg); }
+}
+
+/* --- Celular (até 600 px) --- */
+@media (max-width: 600px) {
+  .tabela-cartoes > .table tr { grid-template-columns: repeat(2, minmax(0, 1fr)); } /* no celular, 2 campos por linha */
+
+  /* Filtros em grade: um campo sozinho ocupa a linha; o botão Filtrar e a busca com câmera, a linha toda (S6-12) */
+  .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0 .75rem; }
+  .filters > .field { min-width: 0; }
+  .filters > .btn, .filters > .busca-camera { grid-column: 1 / -1; }
+  .filters > .btn { justify-content: center; }
+
+  /* Painéis: 2 indicadores por linha; o último ímpar ocupa a linha toda */
+  .indicadores { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; }
+  .indicador:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .indicador-valor { font-size: 1.3rem; overflow-wrap: anywhere; }
 
   /* Abas: quebram linha como pílulas, nenhuma fica cortada */
   .tabs { flex-wrap: wrap; overflow-x: visible; border-bottom: 0; gap: .4rem; }

@@ -238,8 +238,14 @@ async function main() {
   r = await admin.arquivo('/importacoes/categorias', 'cat.csv', 'text/csv', `nome;preco_padrao;venda_por_categoria\nNova ${sufixo};5,00;sim\nRuim ${sufixo};;sim\nNova ${sufixo};5,00;sim\n${catImp.nome};;não\n`);
   check(r.status === 200 && r.data.total === 4 && r.data.aceitas.length === 1 && r.data.recusadas.length === 3, 'cadastros: grava a válida e recusa as outras (sem preço, repetida na planilha, já cadastrada)', r.data);
   check(r.data?.recusadas?.some((x: any) => x.motivo === 'nome repetido na planilha') && r.data?.recusadas?.some((x: any) => x.motivo === 'já cadastrado'), 'o motivo diz se repetiu na planilha ou se já existe', r.data?.recusadas);
-  r = await admin.arquivo('/carga-inicial', 'carga.csv', 'text/csv', `categoria;quantidade;preco;estoque;controle\n${catImp.nome};3;4,00;Bazar;categoria\nInexistente ${sufixo};1;4,00;Bazar;categoria\n${catImp.nome};2;4,00;Depósito;categoria\n`);
-  check(r.status === 200 && r.data.aceitas.length === 1 && r.data.recusadas.length === 2 && r.data.recusadas[0].linha === 3 && r.data.recusadas[1].linha === 4, 'carga inicial: grava a válida e devolve as recusadas na ordem das linhas', r.data);
+  // S6-17: a carga inicial só vale uma vez. Planilha só com linhas recusadas não grava nada e devolve as recusadas na ordem
+  r = await admin.arquivo('/carga-inicial', 'carga.csv', 'text/csv', `categoria;quantidade;preco;estoque;controle\nInexistente ${sufixo};1;4,00;Bazar;categoria\n${catImp.nome};2;4,00;Depósito;categoria\n`);
+  check(r.status === 200 && r.data.aceitas.length === 0 && r.data.recusadas.length === 2 && r.data.recusadas[0].linha === 2 && r.data.recusadas[1].linha === 3, 'carga inicial só com linhas ruins: não grava nada e devolve as recusadas na ordem das linhas', r.data);
+  r = await admin.arquivo('/carga-inicial', 'carga.csv', 'text/csv', `categoria;quantidade;preco;estoque;controle\n${catImp.nome};3;4,00;Bazar;categoria\n`);
+  const primeira = r.status === 200 && r.data.aceitas.length === 1; // o reteste, se rodou antes, já fez a carga
+  check(primeira || (r.status === 409 && r.data?.code === 'CARGA_JA_FEITA'), 'carga inicial com linha válida: grava (a primeira) ou é recusada (já feita)', r.data);
+  r = await admin.arquivo('/carga-inicial', 'carga.csv', 'text/csv', `categoria;quantidade;preco;estoque;controle\n${catImp.nome};3;4,00;Bazar;categoria\n`);
+  check(r.status === 409 && r.data?.code === 'CARGA_JA_FEITA', 'segunda carga inicial é recusada (estoque novo só por lote e aprovação)', r.data);
   // correções do QA da S5-05
   r = await admin.arquivo('/importacoes/campanhas', 'camp.csv', 'text/csv', `nome;inicio;fim\nInvertida ${sufixo};2026-11-10;2026-11-01\n`);
   check(r.status === 200 && r.data.aceitas.length === 0 && r.data.recusadas[0]?.motivo === 'fim: antes do início', 'campanha com fim antes do início é recusada, como na tela', r.data);
@@ -262,6 +268,27 @@ async function main() {
   forjada.writeUInt16LE(1, fimZip + 8); forjada.writeUInt16LE(1, fimZip + 10);
   r = await est.arquivo(`/lotes/${loteImp.id}/importacao`, 'forjada.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', forjada);
   check(r.status === 413 && r.data?.code === 'PLANILHA_GRANDE', 'zip-bomba com a contagem de arquivos adulterada também é recusada', { status: r.status, code: r.data?.code });
+  // S6-04: XLSX corrompido (zip bom, conteúdo estragado) derrubava o ExcelJS com TypeError e virava 500; agora é 415 (10ª importação do lote no minuto: o limite é 10)
+  const { deflateRawSync } = await import('node:zlib');
+  const zipCom = (arquivos: [string, string][]) => { // zip mínimo, sem biblioteca: o bastante para o ExcelJS achar o workbook e quebrar nele
+    const locais: Buffer[] = [], centrais: Buffer[] = []; let off = 0;
+    for (const [nome, txt] of arquivos) {
+      const dados = deflateRawSync(Buffer.from(txt)), n = Buffer.from(nome), crc = (zlibCrc(Buffer.from(txt)) >>> 0);
+      const l = Buffer.alloc(30); l.writeUInt32LE(0x04034b50, 0); l.writeUInt16LE(20, 4); l.writeUInt16LE(8, 8); l.writeUInt32LE(crc, 14); l.writeUInt32LE(dados.length, 18); l.writeUInt32LE(txt.length, 22); l.writeUInt16LE(n.length, 26);
+      const c = Buffer.alloc(46); c.writeUInt32LE(0x02014b50, 0); c.writeUInt16LE(20, 4); c.writeUInt16LE(20, 6); c.writeUInt16LE(8, 10); c.writeUInt32LE(crc, 16); c.writeUInt32LE(dados.length, 20); c.writeUInt32LE(txt.length, 24); c.writeUInt16LE(n.length, 28); c.writeUInt32LE(off, 42);
+      locais.push(l, n, dados); centrais.push(c, n); off += 30 + n.length + dados.length;
+    }
+    const cd = Buffer.concat(centrais), fim = Buffer.alloc(22); fim.writeUInt32LE(0x06054b50, 0); fim.writeUInt16LE(arquivos.length, 8); fim.writeUInt16LE(arquivos.length, 10); fim.writeUInt32LE(cd.length, 12); fim.writeUInt32LE(off, 16);
+    return Buffer.concat([...locais, cd, fim]);
+  };
+  const zlibCrc = (b: Buffer) => { let c = ~0; for (const x of b) { c ^= x; for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1)); } return ~c; };
+  const corrompido = zipCom([
+    ['[Content_Types].xml', '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/></Types>'],
+    ['_rels/.rels', '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="r1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'],
+    ['xl/workbook.xml', '<workbook><sheets><sheet name="a" sheetId="1"'],
+  ]);
+  r = await est.arquivo(`/lotes/${loteImp.id}/importacao`, 'corrompido.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', corrompido);
+  check(r.status === 415 && r.data?.code === 'TIPO_INVALIDO', 'XLSX corrompido é recusado como tipo inválido (415), não erro interno', { status: r.status, code: r.data?.code });
 
   console.log('Importação de NF-e (S5-04, P-20)');
   const XML = 'application/xml';
@@ -310,6 +337,9 @@ async function main() {
   };
   await recusa(base.replace('<?xml version="1.0" encoding="UTF-8"?>', '<?xml version="1.0"?><!DOCTYPE nfeProc [<!ENTITY x SYSTEM "file:///etc/passwd">]>'), 'XML com DTD/entidade (XXE) é recusado sem ler', 'NFE_INVALIDA');
   await recusa('%PDF-1.4 não é xml', 'arquivo que não é XML (PDF da DANFE) é recusado');
+  // S6-04: o teto de 2 MB vale já na leitura do arquivo, com o mesmo código de antes
+  const enorme = await fin.arquivo('/lotes/nfe', 'enorme.xml', XML, base.replace('<infNFe', ' '.repeat(2 * 1024 * 1024 + 10) + '<infNFe'));
+  check(enorme.status === 413 && enorme.data?.code === 'ARQUIVO_GRANDE', 'NF-e acima de 2 MB é recusada (413 ARQUIVO_GRANDE)', [enorme.status, enorme.data?.code]);
   await recusa(base.slice(0, 400), 'XML cortado é recusado');
   await recusa(base.replace('<cStat>100</cStat>', '<cStat>101</cStat>'), 'nota cancelada é recusada', 'NFE_CANCELADA');
   await recusa(base.replace(/<protNFe[\s\S]*<\/protNFe>/, ''), 'nota sem protocolo de autorização é recusada', 'NFE_SEM_PROTOCOLO');

@@ -92,10 +92,10 @@ async function acharItemId(db: Db, b: { itemId?: string | undefined; codigo?: st
 const zTransf = z.object({
   id: zUuid, itemId: zUuid.optional(), codigo: z.string().trim().max(40).optional(), quantidade: z.number().int().min(1).max(100_000),
   origem: zLocal, destino: zLocal, motivo: z.string().trim().max(300).optional(),
-}).refine((b) => b.itemId || b.codigo, 'informe itemId ou codigo').refine((b) => b.origem !== b.destino, 'origem e destino devem ser diferentes');
-const zBaixa = z.object({ id: zUuid, itemId: zUuid, quantidade: z.number().int().min(1).max(100_000), local: zLocal, motivoId: zUuid, observacao: z.string().trim().max(300).optional() });
+}).strict().refine((b) => b.itemId || b.codigo, 'informe itemId ou codigo').refine((b) => b.origem !== b.destino, 'origem e destino devem ser diferentes');
+const zBaixa = z.object({ id: zUuid, itemId: zUuid, quantidade: z.number().int().min(1).max(100_000), local: zLocal, motivoId: zUuid, observacao: z.string().trim().max(300).optional() }).strict();
 // S3-03: o ajuste de inventário é só de saída (estoque só sobe por entrada aprovada; o banco também recusa, 0010)
-const zAjuste = z.object({ id: zUuid, itemId: zUuid, local: zLocal, tipo: z.literal('AJUSTE_SAIDA').default('AJUSTE_SAIDA'), quantidade: z.number().int().min(1).max(100_000), motivo: zMotivo });
+const zAjuste = z.object({ id: zUuid, itemId: zUuid, local: zLocal, tipo: z.literal('AJUSTE_SAIDA').default('AJUSTE_SAIDA'), quantidade: z.number().int().min(1).max(100_000), motivo: zMotivo }).strict();
 const zPreco = z.object({ preco: zMoney.refine((v) => toCents(v) > 0, 'preço deve ser maior que zero'), motivo: zMotivo });
 
 export async function rotasEstoque(app: FastifyInstance) {
@@ -125,9 +125,14 @@ export async function rotasEstoque(app: FastifyInstance) {
 
   app.get('/itens/codigo/:codigo', { config: { acesso: ['estoque.consultar', 'caixa.operar'] } }, async (req) => {
     const { codigo } = parse(z.object({ codigo: z.string().trim().min(1).max(40) }), req.params);
-    const i = await itemPorCodigo(prisma, codigo.toUpperCase(), tem(exigirUsuario(req), 'custo.consultar'));
+    const u = exigirUsuario(req);
+    const i = await itemPorCodigo(prisma, codigo.toUpperCase(), tem(u, 'custo.consultar'));
     if (!i) throw new AppError(404, 'Código não encontrado', 'CODIGO_INEXISTENTE');
-    return i;
+    if (tem(u, 'estoque.consultar')) return i;
+    // S6-16: quem só vende (PDV) vê o que a venda precisa; sem doador, campanha, lote nem o saldo de Doações
+    // (só se a peça está lá, para o PDV avisar que ela não pode ser vendida)
+    return { id: i.id, codigo: i.codigo, descricao: i.descricao, categoriaId: i.categoriaId, categoriaNome: i.categoriaNome, controle: i.controle,
+      produtoId: i.produtoId, pecaUnica: i.pecaUnica, preco: i.preco, precoSemDesconto: i.precoSemDesconto, saldoBazar: i.saldoBazar, estaEmDoacoes: i.saldoDoacoes > 0 };
   });
 
   app.get('/itens/:id/historico', { config: { acesso: ['estoque.consultar'] } }, async (req) => {
@@ -161,7 +166,7 @@ export async function rotasEstoque(app: FastifyInstance) {
     const u = exigirUsuario(req);
     const b = parse(zTransf, req.body);
     await prisma.$transaction(async (tx) => {
-      if (!(await reservarChave(tx, b.id, 'transferencia', u.id))) return; // reenvio: já feito
+      if (!(await reservarChave(tx, b.id, 'transferencia', u.id, b))) return; // reenvio: já feito (outro conteúdo com o mesmo id: 409)
       const itemId = await acharItemId(tx, b);
       // RN-23: origem, destino, quantidade, usuário, data/hora e motivo opcional — numa única linha
       await tx.movimentacao.create({
@@ -176,7 +181,7 @@ export async function rotasEstoque(app: FastifyInstance) {
     const u = exigirUsuario(req);
     const b = parse(zBaixa, req.body);
     await prisma.$transaction(async (tx) => {
-      if (!(await reservarChave(tx, b.id, 'baixa', u.id))) return;
+      if (!(await reservarChave(tx, b.id, 'baixa', u.id, b))) return;
       if (!(await tx.motivoBaixa.findFirst({ where: { id: b.motivoId, ativo: true } }))) throw new AppError(400, 'Motivo de baixa inexistente ou inativo', 'VALIDACAO');
       await tx.movimentacao.create({
         data: { itemId: await acharItemId(tx, b), tipo: 'BAIXA', localOrigemId: LOCAL_ID[b.local], quantidade: b.quantidade, motivoBaixaId: b.motivoId, motivo: b.observacao || null, usuarioId: u.id },
@@ -190,7 +195,7 @@ export async function rotasEstoque(app: FastifyInstance) {
     const u = exigirUsuario(req);
     const b = parse(zAjuste, req.body);
     await prisma.$transaction(async (tx) => {
-      if (!(await reservarChave(tx, b.id, 'ajuste', u.id))) return;
+      if (!(await reservarChave(tx, b.id, 'ajuste', u.id, b))) return;
       const loc = LOCAL_ID[b.local];
       await tx.movimentacao.create({
         data: {
@@ -264,8 +269,14 @@ export async function rotasEstoque(app: FastifyInstance) {
     }
     const aceitas: { linha: number; nome: string; quantidade: number }[] = [];
     if (validas.length) {
+      // S6-17: a carga inicial entra no estoque sem aprovação, então só vale uma vez (na implantação). Planilha só com linhas
+      // recusadas não grava nada e pode voltar corrigida. O banco também garante (índice único do lote de saldo inicial).
+      if (await prisma.loteEntrada.findFirst({ where: { tipo: 'SALDO_INICIAL' }, select: { id: true } })) {
+        conflito('CARGA_JA_FEITA', 'A carga inicial já foi feita', 'Estoque novo entra por lote de entrada, com aprovação');
+      }
       // o lote de saldo inicial nasce uma vez; cada linha na sua transação (a falha de uma não desfaz as outras)
-      const lote = await prisma.loteEntrada.create({ data: { tipo: 'SALDO_INICIAL', recebidoEm: new Date(), recebidoPorId: u.id, observacao: 'Carga inicial da implantação' } });
+      const lote = await prisma.loteEntrada.create({ data: { tipo: 'SALDO_INICIAL', recebidoEm: new Date(), recebidoPorId: u.id, observacao: 'Carga inicial da implantação' } })
+        .catch((e: { code?: string }) => { throw e.code === 'P2002' ? new AppError(409, 'A carga inicial já foi feita', 'CARGA_JA_FEITA') : e; }); // duas cargas ao mesmo tempo
       const agora = new Date();
       for (const l of validas) {
         const descricao = l.descricao || `${l.cat.nome} (saldo inicial)`;

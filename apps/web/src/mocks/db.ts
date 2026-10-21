@@ -48,7 +48,7 @@ export interface CaixaDb extends CaixaSessao { operadorId: string; lancamentos: 
 // o Administrador tem o mesmo id fixo da API real (as telas comparam com PERFIL_ADMIN_ID)
 const PERFIL_ADMIN = PERFIL_ADMIN_ID, PERFIL_VENDEDOR = sid('perfcxa'), PERFIL_ESTOQUISTA = sid('perftri'), PERFIL_FINANCEIRO = sid('perffin');
 // Mesmas permissões dos perfis padrão (migrações 0005 e 0006: o Administrador tem tudo, inclusive abrir caixa).
-const vendedorPerms: Permissao[] = ['caixa.operar', 'clientes.gerenciar'];
+const vendedorPerms: Permissao[] = ['caixa.operar']; // sem clientes.gerenciar desde a 0014 (S6-15)
 // 0010 (Sprint 3): o Estoquista vê o custo, muda o preço e aprova (não o próprio); o Financeiro vê o custo e dá desconto
 const estoquistaPerms: Permissao[] = ['entrada.registrar', 'estoque.consultar', 'estoque.transferir', 'cadastros.consultar', 'relatorios.estoque', 'parceiros.criar', 'custo.consultar', 'produtos.preco', 'produtos.aprovar', 'etiquetas.imprimir'];
 const financeiroPerms: Permissao[] = ['parceiros.criar', 'contas_pagar.gerenciar', 'contas_receber.receber', 'contas_receber.lancar', 'relatorios.consultar', 'relatorios.estoque', 'estoque.consultar', 'custo.consultar', 'produtos.desconto'];

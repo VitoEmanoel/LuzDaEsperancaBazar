@@ -23,7 +23,14 @@ import { exigirUsuario, tem, type UsuarioCtx } from '../../plugins/auth.js';
 import { PERFIL_ADMIN_ID } from '../../shared/permissoes.js';
 import { mudarPrecoProduto } from '../estoque/produtos.routes.js';
 import { codigoErro, lerPlanilha } from '../../shared/planilha.js';
-import { cortar, lerNfe, nfeExemplo } from './nfe.js';
+import { cortar, lerNfe, MAX_BYTES_NFE, nfeExemplo } from './nfe.js';
+import type { MultipartFile } from '@fastify/multipart';
+
+/** Lê o arquivo do multipart; passou do `fileSize` dado no `req.file`, devolve o erro desta rota (com o código de sempre). */
+async function lerAteOTeto(arq: MultipartFile, grande: () => AppError): Promise<Buffer> {
+  try { return await arq.toBuffer(); }
+  catch (e) { throw (e as { code?: string }).code === 'FST_REQ_FILE_TOO_LARGE' ? grande() : e; }
+}
 
 export const LOCAL_ID = { BAZAR: 1, DOACOES: 2 } as const;
 export const LOCAL_COD: Record<number, 'BAZAR' | 'DOACOES'> = { 1: 'BAZAR', 2: 'DOACOES' };
@@ -316,10 +323,12 @@ export async function rotasLotes(app: FastifyInstance) {
   // o emitente vira fornecedor quando ainda não existe. Os produtos não viram itens: o estoque cadastra depois.
   app.post('/lotes/nfe', { config: { acesso: ['contas_pagar.gerenciar'], rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
     const u = exigirUsuario(req);
-    const arq = await req.file();
+    // o teto da NF-e vale já na leitura: o multipart para de ler ao passar de 2 MB (S6-04), em vez de ler os 10 MB do teto geral
+    const arq = await req.file({ limits: { fileSize: MAX_BYTES_NFE } });
     if (!arq || arq.fieldname !== 'arquivo') throw new AppError(400, 'Arquivo obrigatório (campo "arquivo")', 'ARQUIVO_OBRIGATORIO');
+    const xml = await lerAteOTeto(arq, () => new AppError(413, 'Arquivo grande demais', 'ARQUIVO_GRANDE', 'A NF-e deve ter até 2 MB'));
     const inst = await prisma.instituicao.findUnique({ where: { id: 1 }, select: { cnpj: true } });
-    const nota = lerNfe(await arq.toBuffer(), { cnpjInstituicao: inst?.cnpj?.trim() || null, aceitaHomologacao: env.NODE_ENV !== 'production' });
+    const nota = lerNfe(xml, { cnpjInstituicao: inst?.cnpj?.trim() || null, aceitaHomologacao: env.NODE_ENV !== 'production' });
 
     const repetida = await prisma.loteEntrada.findUnique({ where: { nfeChave: nota.chave }, select: { numero: true } });
     if (repetida) conflito('NFE_JA_IMPORTADA', `Esta nota já foi importada no lote #${repetida.numero}`);
@@ -388,9 +397,9 @@ export async function rotasLotes(app: FastifyInstance) {
     if (!lote) naoEncontrado('Lote');
     if (lote!.tipo !== 'COMPRA' && !tem(u, 'entrada.registrar')) proibido('Sem permissão de entrada: só anexa documento de compra');
     const maxMb = await paramNum(prisma, 'anexo.tamanho_max_mb', 5);
-    const arquivo = await req.file();
+    const arquivo = await req.file({ limits: { fileSize: maxMb * 1024 * 1024 } }); // o teto vale já na leitura (S6-04)
     if (!arquivo || arquivo.fieldname !== 'arquivo') throw new AppError(400, 'Arquivo obrigatório (campo "arquivo")', 'ARQUIVO_OBRIGATORIO');
-    const buf = await arquivo.toBuffer();
+    const buf = await lerAteOTeto(arquivo, () => new AppError(413, `Arquivo maior que ${maxMb} MB`, 'ANEXO_GRANDE'));
     if (buf.length === 0) throw new AppError(400, 'Arquivo vazio', 'ARQUIVO_OBRIGATORIO');
     if (buf.length > maxMb * 1024 * 1024) throw new AppError(413, `Arquivo maior que ${maxMb} MB`, 'ANEXO_GRANDE');
     // Tipo REAL pelos magic bytes — ignora extensão e Content-Type enviados
@@ -696,6 +705,7 @@ export async function rotasLotes(app: FastifyInstance) {
     const { id: loteId } = parse(zIdParam, req.params);
     const b = parse(zDescarte, req.body);
     const ja = await prisma.descarte.findUnique({ where: { id: b.id }, include: descInclude });
+    if (ja && (ja.loteId !== loteId || ja.categoriaId !== b.categoriaId || ja.motivoId !== b.motivoId)) conflito('ID_EM_USO', 'Este identificador já foi usado em outro descarte'); // S6-14
     if (ja) return reply.code(200).send(descarteDto(ja));
     const lote = await prisma.loteEntrada.findUnique({ where: { id: loteId }, select: { status: true } });
     if (!lote) naoEncontrado('Lote');

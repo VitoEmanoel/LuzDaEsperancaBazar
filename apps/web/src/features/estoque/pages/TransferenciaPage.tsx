@@ -1,5 +1,5 @@
 /** Transferência Bazar ⇄ Doações por código (leitor) ou item/quantidade, com motivo opcional. */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { estoqueApi } from '../estoque.api';
 import { errorMessage } from '../../../shared/api/http';
 import type { ItemEstoque, LocalEstoque } from '../../../shared/api/types';
@@ -19,6 +19,9 @@ export function TransferenciaPage() {
   const destino: LocalEstoque = origem === 'BAZAR' ? 'DOACOES' : 'BAZAR';
   const saldoOrigem = item ? (origem === 'BAZAR' ? item.saldoBazar : item.saldoDoacoes) : 0;
   const q = Number.parseInt(qtd, 10);
+  // Id da OPERAÇÃO (S6-06): o mesmo em cada nova tentativa (resposta perdida → reenvio não duplica); muda quando muda o que se transfere
+  const opId = useRef(uuid());
+  useEffect(() => { opId.current = uuid(); }, [item?.id, q, origem, motivo]);
 
   function selecionar(it: ItemEstoque) { setItem(it); setOrigem(it.saldoBazar > 0 ? 'BAZAR' : 'DOACOES'); setQtd('1'); setErro(null); }
 
@@ -26,7 +29,8 @@ export function TransferenciaPage() {
     if (!item || !(q > 0) || q > saldoOrigem) return;
     setEnviando(true); setErro(null);
     try {
-      await estoqueApi.transferir({ id: uuid(), itemId: item.id, quantidade: q, origem, destino, motivo: motivo.trim() || undefined });
+      await estoqueApi.transferir({ id: opId.current, itemId: item.id, quantidade: q, origem, destino, motivo: motivo.trim() || undefined });
+      opId.current = uuid(); // gravou: a próxima transferência é outra operação
       toast(`${q} un. transferida(s) para ${destino === 'BAZAR' ? 'Bazar' : 'Doações'}.`);
       setItem(null); setMotivo('');
     } catch (err) { setErro(errorMessage(err)); } finally { setEnviando(false); }

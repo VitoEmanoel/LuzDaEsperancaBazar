@@ -46,6 +46,7 @@ export async function rotasCaixa(app: FastifyInstance) {
     const b = parse(z.object({ id: zUuid.optional(), nome: zTexto(60) }), req.body);
     if (b.id) {
       const ja = await prisma.terminal.findUnique({ where: { id: b.id } });
+      if (ja && ja.nome !== b.nome) conflito('ID_EM_USO', 'Este identificador já foi usado em outro terminal'); // S6-14
       if (ja) return reply.code(200).send({ id: ja.id, nome: ja.nome, ativo: ja.ativo });
     }
     const t = await prisma.$transaction(async (tx) => {
@@ -108,10 +109,11 @@ export async function rotasCaixa(app: FastifyInstance) {
   app.post('/caixas/:id/lancamentos', { config: { acesso: ['caixa.operar'] } }, async (req, reply) => {
     const u = exigirUsuario(req);
     const { id } = parse(zIdParam, req.params);
-    const b = parse(z.object({ id: zUuid, tipo: z.enum(['SANGRIA', 'SUPRIMENTO']), valor: zMoney.refine((v) => toCents(v) > 0, 'valor maior que zero'), motivo: zTexto(300) }), req.body);
+    const b = parse(z.object({ id: zUuid, tipo: z.enum(['SANGRIA', 'SUPRIMENTO']), valor: zMoney.refine((v) => toCents(v) > 0, 'valor maior que zero'), motivo: zTexto(300) }).strict(), req.body);
     await prisma.$transaction(async (tx) => {
       const ja = await tx.caixaLancamento.findUnique({ where: { id: b.id } });
-      if (ja) { if (ja.sessaoId !== id) conflito('ID_EM_USO', 'Identificador já usado'); return; } // reenvio idempotente
+      // reenvio idempotente; o mesmo id em outro caixa, com outro tipo ou outro valor é outro lançamento: 409 (S6-14)
+      if (ja) { if (ja.sessaoId !== id || ja.tipo !== b.tipo || toCents(money(ja.valor)) !== toCents(b.valor)) conflito('ID_EM_USO', 'Identificador já usado'); return; }
       const c = await meuCaixaAberto(tx, u, id);
       // trava a sessão para duas sangrias simultâneas não passarem do saldo
       await tx.$queryRaw`SELECT id FROM caixa_sessao WHERE id = ${c.id}::uuid FOR UPDATE`;

@@ -62,7 +62,7 @@ ON CONFLICT DO NOTHING;
 -- Vendedor (a2), Estoquista (a3) e Financeiro (a4), como na matriz do plano
 INSERT INTO perfil_permissao (perfil_id, permissao_codigo)
 SELECT p, unnest(c) FROM (VALUES
-  ('00000000-0000-4000-8000-0000000000a2'::uuid, ARRAY['caixa.operar', 'clientes.gerenciar']),
+  ('00000000-0000-4000-8000-0000000000a2'::uuid, ARRAY['caixa.operar']), -- sem clientes.gerenciar desde a 0014 (S6-15)
   ('00000000-0000-4000-8000-0000000000a3'::uuid, ARRAY['cadastros.consultar', 'custo.consultar', 'entrada.registrar', 'estoque.consultar', 'estoque.transferir',
                                                      'etiquetas.imprimir', 'parceiros.criar', 'produtos.aprovar', 'produtos.preco', 'relatorios.estoque']),
   ('00000000-0000-4000-8000-0000000000a4'::uuid, ARRAY['contas_pagar.gerenciar', 'contas_receber.lancar', 'contas_receber.receber', 'custo.consultar', 'estoque.consultar',

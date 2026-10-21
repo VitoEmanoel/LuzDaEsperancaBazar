@@ -33,14 +33,14 @@ export function LotesPage() {
       <ErrorAlert erro={erro} />
       {carregando ? <p>Carregando…</p> : !data?.items.length ? <Empty /> : (
         <TabelaRolavel><table className="table">
-          <thead><tr><th>Lote</th><th>Recebido</th><th>Tipo</th><th>Parceiro / campanha</th><th>Status</th><th className="num">No estoque</th><th className="num">Aguardando aprovação</th><th className="num">Descartados</th>{verCusto && <th className="num">Valor atribuído</th>}<th /></tr></thead>
+          <thead><tr><th>Lote</th><th>Recebido</th><th>Tipo</th><th>Parceiro / campanha</th><th>Status</th><th className="num">No estoque</th><th className="num">Aguardando aprovação</th><th className="num col-sec">Descartados</th>{verCusto && <th className="num col-sec">Valor atribuído</th>}<th /></tr></thead>
           <tbody>
             {data.items.map((l) => (
               <tr key={l.id}>
                 <td>#{l.numero}</td><td>{formatDate(l.recebidoEm)}</td><td>{TIPO[l.tipo]}</td>
                 <td>{[l.parceiroNome, l.campanhaNome].filter(Boolean).join(' · ')}</td>
                 <td>{l.status === 'ABERTO' ? <Badge tom="alerta">Recebendo cadastro</Badge> : <Badge tom="ok">Encerrado</Badge>}</td>
-                <td className="num">{l.aprovados}</td><td className="num">{(l.pendentes ?? 0) + (l.devolvidos ?? 0) || '—'}</td><td className="num">{l.descartados}</td>{verCusto && <td className="num"><MoneyText value={l.valorAtribuido} /></td>}
+                <td className="num">{l.aprovados}</td><td className="num">{(l.pendentes ?? 0) + (l.devolvidos ?? 0) || '—'}</td><td className="num col-sec">{l.descartados}</td>{verCusto && <td className="num col-sec"><MoneyText value={l.valorAtribuido} /></td>}
                 <td><Link className="btn btn-sm" to={`/entradas/${l.id}/triagem`}>{registra && l.status === 'ABERTO' ? 'Cadastrar' : 'Ver'}</Link></td>
               </tr>
             ))}

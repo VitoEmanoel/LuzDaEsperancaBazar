@@ -119,12 +119,12 @@ try {
 
   // ---------- PDV: o mesmo produto bipado de novo soma uma unidade ----------
   await entrar('vendedor', 'Vendedor@123');
-  await Promise.race([page.locator('.cat-btn').first().waitFor({ timeout: 15000 }), page.getByRole('heading', { name: 'Abrir caixa' }).waitFor({ timeout: 15000 })]);
+  await Promise.race([page.getByPlaceholder(/Passe o leitor/).waitFor({ timeout: 15000 }), page.getByRole('heading', { name: 'Abrir caixa' }).waitFor({ timeout: 15000 })]);
   if (page.url().includes('/pdv/abrir')) {
     await page.locator('select').selectOption({ index: 1 });
     await page.getByLabel(/Saldo inicial/).fill('50');
     await page.getByRole('button', { name: 'Abrir caixa' }).click();
-    await page.locator('.cat-btn').first().waitFor({ timeout: 15000 });
+    await page.getByPlaceholder(/Passe o leitor/).waitFor({ timeout: 15000 });
   }
   const bip = async (c) => { await page.getByPlaceholder(/Passe o leitor/).fill(c); await page.keyboard.press('Enter'); };
   await bip('BZ000006');

@@ -89,7 +89,7 @@ Todas as cores ficam em `src/styles/tokens.css`; telas não usam cor fixa.
 
 - Campo de código sempre focado; leitor USB em modo teclado (Enter). Feedback sonoro e visual.
 - **Ler pela câmera** (S5-12): lê Code 128 e as etiquetas antigas em Code 39 e segue o mesmo caminho do leitor (pergunta do CPF no primeiro bip, "restam N"); uma unidade por leitura. A busca do Estoque também tem o botão. A biblioteca (`@zxing/browser`) só carrega quando a câmera abre.
-- Atalhos: **F2** quantidade/categoria · **F4** pagamento · **Esc** remove último · **F6** sangria/suprimento.
+- Atalhos: **F2** quantidade (campo Qtd. ao lado do código) · **F4** pagamento · **Esc** remove último · **F6** sangria/suprimento.
 - Pagamento: o operador digita quanto recebeu em cada forma; o sistema mostra o que falta e o troco (só em dinheiro) e só finaliza quando a conta fecha. Fiado (cliente + vencimento), cadastro rápido de cliente com ciência LGPD, desconto limitado pelo perfil.
 - **CPF:** no primeiro bip da venda o PDV pergunta Sim/Não; em Sim valida os dígitos e mostra o saldo do mês; o CPF fica só na memória da tela e sai inteiro só no comprovante. O Admin define em Parâmetros o limite por CPF (em reais) e se o CPF é obrigatório.
 - O PDV bloqueia venda acima do estoque do Bazar e avisa a quantidade; o ✕ do carrinho pergunta quantas unidades tirar; Esc só tira item com o campo vazio.

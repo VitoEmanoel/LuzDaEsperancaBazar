@@ -73,7 +73,9 @@ function conferirTamanhoXlsx(buf: Buffer, teto = MAX_XLSX_DESCOMPACTADO): void {
 async function parseXlsx(buf: Buffer): Promise<string[][]> {
   conferirTamanhoXlsx(buf);
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(buf as unknown as ArrayBuffer);
+  // XLSX corrompido (zip bom, conteúdo estragado) derruba o ExcelJS com TypeError: é arquivo inválido (415), não erro interno (S6-04)
+  try { await wb.xlsx.load(buf as unknown as ArrayBuffer); }
+  catch { throw new AppError(415, 'Envie a planilha modelo em CSV ou XLSX', 'TIPO_INVALIDO'); }
   const ws = wb.worksheets[0];
   if (!ws) return [];
   const linhas: string[][] = [];

@@ -79,14 +79,14 @@ async function entrar(page, usuario, senha) {
 const ir = (page, rota) => page.evaluate((r) => { history.pushState({}, '', r); dispatchEvent(new PopStateEvent('popstate')); }, rota);
 async function abrirPdv(page) {
   await entrar(page, 'vendedor', 'Vendedor@123');
-  await Promise.race([page.locator('.cat-btn').first().waitFor({ timeout: 15000 }), page.getByRole('heading', { name: 'Abrir caixa' }).waitFor({ timeout: 15000 })]);
+  await Promise.race([page.getByPlaceholder(/Passe o leitor/).waitFor({ timeout: 15000 }), page.getByRole('heading', { name: 'Abrir caixa' }).waitFor({ timeout: 15000 })]);
   if (page.url().includes('/pdv/abrir')) {
     await page.locator('select').selectOption({ index: 1 });
     await page.getByLabel(/Saldo inicial/).fill('50');
     await page.getByRole('button', { name: 'Abrir caixa' }).click();
     await page.waitForURL(/\/pdv$/, { timeout: 15000 });
   }
-  await page.locator('.cat-btn').first().waitFor({ timeout: 15000 });
+  await page.getByPlaceholder(/Passe o leitor/).waitFor({ timeout: 15000 });
 }
 const camera = (video) => chromium.launch({ executablePath: CHROME, headless: true,
   args: ['--no-sandbox', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-video-capture=${video}`] });
@@ -160,7 +160,7 @@ try {
   await ctx.addInitScript(espiao);
   page = await ctx.newPage();
   await abrirPdv(page);
-  await page.locator('.cat-btn:not([disabled])').first().click();
+  await page.getByPlaceholder(/Passe o leitor/).fill('BZ000006'); await page.keyboard.press('Enter');
   await page.getByRole('button', { name: /Não/ }).click();
   await page.locator('ul.carrinho li').first().waitFor({ timeout: 5000 });
   await page.getByRole('button', { name: 'Ler pela câmera' }).click();

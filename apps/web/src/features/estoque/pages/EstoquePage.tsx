@@ -42,8 +42,10 @@ export function EstoquePage() {
         {ajusta && <button className="btn" onClick={() => setAcao({ tipo: 'precoCategoria' })}>Preço da categoria</button>}
       </PageHeader>
       <form className="filters" onSubmit={(e) => { e.preventDefault(); setF({ ...f, busca }); setPage(1); }}>
-        <Field label="Buscar (descrição ou código)"><input value={busca} onChange={(e) => setBusca(e.target.value)} /></Field>
-        {cameraDisponivel() && <button type="button" className="btn" onClick={() => setLendoCamera(true)}>Ler pela câmera</button>}
+        <div className="busca-camera">
+          <Field label="Buscar (descrição ou código)"><input value={busca} onChange={(e) => setBusca(e.target.value)} /></Field>
+          {cameraDisponivel() && <button type="button" className="btn" onClick={() => setLendoCamera(true)}>Ler pela câmera</button>}
+        </div>
         <Field label="Estoque"><select value={f.local} onChange={set('local')}><option value="">Ambos</option><option value="BAZAR">Bazar</option><option value="DOACOES">Doações</option></select></Field>
         <Field label="Categoria"><select value={f.categoriaId} onChange={set('categoriaId')}><option value="">Todas</option>{ops.data?.[0].map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}</select></Field>
         <Field label="Parceiro"><select value={f.parceiroId} onChange={set('parceiroId')}><option value="">Todos</option>{ops.data?.[1].map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}</select></Field>
@@ -59,8 +61,8 @@ export function EstoquePage() {
       {carregando ? <p>Carregando…</p> : !data?.items.length ? <Empty /> : (
         <TabelaRolavel><table className="table">
           <thead><tr>
-            <th>Código</th><th>Descrição</th><th>Categoria</th><th>Lote</th><th>Origem</th><th className="num">Preço</th>
-            {verCusto && <th className="num">Custo (unitário)</th>}
+            <th>Código</th><th>Descrição</th><th>Categoria</th><th className="col-sec">Lote</th><th className="col-sec">Origem</th><th className="num">Preço</th>
+            {verCusto && <th className="num col-sec">Custo (unitário)</th>}
             <th className="num">Quantidade no Bazar</th><th className="num">Quantidade em Doações</th><th className="num">Total</th>
             {temAcoes && <th />}
           </tr></thead>
@@ -70,9 +72,10 @@ export function EstoquePage() {
               {/* produto: a tela do produto (todas as entradas); por categoria: o histórico da entrada */}
               <td><Link to={i.produtoId ? `/estoque/produtos/${i.produtoId}` : `/estoque/itens/${i.id}`}>{i.descricao}</Link></td>
               <td>{i.categoriaNome}</td>
-              <td>#{i.loteNumero}</td><td>{[i.parceiroNome, i.campanhaNome].filter(Boolean).join(' · ')}</td>
+              {/* col-sec: some no celular e no tablet (S6-12); o lote e a origem estão na página do produto */}
+              <td className="col-sec">#{i.loteNumero}</td><td className="col-sec">{[i.parceiroNome, i.campanhaNome].filter(Boolean).join(' · ')}</td>
               <td className="num"><PrecoText value={i.preco} semDesconto={i.precoSemDesconto} /></td>
-              {verCusto && <td className="num"><MoneyText value={i.valorAtribuido} /></td>}
+              {verCusto && <td className="num col-sec"><MoneyText value={i.valorAtribuido} /></td>}
               <td className="num">{i.saldoBazar}</td><td className="num">{i.saldoDoacoes}</td><td className="num"><strong>{i.saldoBazar + i.saldoDoacoes}</strong></td>
               {/* sem botão nesta linha, a célula fica vazia (no celular ela some do cartão) */}
               {/* por categoria não tem código nem preço próprio: o preço é o da categoria (o botão já abre com ela) e não há etiqueta */}
