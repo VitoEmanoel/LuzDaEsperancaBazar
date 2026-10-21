@@ -184,3 +184,64 @@ a.alert:hover { filter: brightness(.98); color: var(--text); }
   /* Botões lado a lado de alturas diferentes: um embaixo do outro, largura cheia */
   .row > .btn:not(.btn-sm, .btn-ghost), .modal-footer > .btn { flex: 1 1 100%; }
 }
+
+/* ---------- gráficos e indicadores dos dashboards (S5-18) ---------- */
+.indicadores { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: .75rem; margin-bottom: 1rem; }
+.indicador { display: flex; flex-direction: column; gap: .2rem; padding: .9rem 1rem; text-decoration: none; color: var(--text); border-left: 4px solid var(--border); }
+a.indicador:hover { border-left-color: var(--primary); }
+.indicador[data-tom="ok"] { border-left-color: var(--ok); }
+.indicador[data-tom="alerta"] { border-left-color: var(--warn); }
+.indicador[data-tom="erro"] { border-left-color: var(--danger); }
+.indicador-rotulo { color: var(--muted); font-size: .85rem; }
+.indicador-valor { font-size: 1.5rem; font-weight: 700; color: var(--heading); line-height: 1.2; }
+.indicador-nota { font-size: .8rem; color: var(--muted); }
+.indicador[data-tom="erro"] .indicador-nota { color: var(--danger); }
+.indicador[data-tom="alerta"] .indicador-nota { color: var(--warn); }
+.graficos { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 1rem; margin-bottom: 1rem; }
+.grafico { margin: 0; padding: 1rem; min-width: 0; }
+.grafico h3 { margin: 0 0 .25rem; font-size: 1rem; }
+.grafico figcaption p { margin: 0 0 .5rem; font-size: .85rem; }
+.grafico-legenda { display: flex; flex-wrap: wrap; gap: .25rem 1rem; list-style: none; padding: 0; margin: 0 0 .5rem; font-size: .85rem; color: var(--text); }
+.grafico-legenda li { display: flex; align-items: center; gap: .35rem; }
+.grafico-chave { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.grafico-area { position: relative; width: 100%; }
+.grafico-area svg { display: block; overflow: visible; }
+.grafico-grade { stroke: var(--border); stroke-width: 1; }
+.grafico-base { stroke: var(--border-strong); stroke-width: 1; }
+.grafico-eixo { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.grafico-alvo { fill: transparent; }
+.grafico-grupo { outline: none; }
+.grafico-grupo[data-ativo] .grafico-alvo { fill: var(--surface-2); }
+.grafico-grupo:focus-visible .grafico-alvo { stroke: var(--focus); stroke-width: 2; }
+.grafico-vazio { padding: 2rem 0; text-align: center; }
+.grafico-dica { position: absolute; transform: translateX(-50%); z-index: 2; pointer-events: none; display: flex; flex-direction: column; gap: .15rem;
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); box-shadow: var(--shadow); padding: .4rem .6rem; font-size: .8rem; white-space: nowrap; }
+.grafico-dica-titulo { color: var(--muted); }
+.grafico-dica-linha { display: flex; align-items: center; gap: .35rem; color: var(--muted); }
+.grafico-dica-linha strong { color: var(--text); font-variant-numeric: tabular-nums; }
+.grafico-traco { width: 12px; height: 3px; border-radius: 2px; display: inline-block; }
+.grafico-barras { list-style: none; margin: 0; padding: 0; display: grid; gap: .35rem; }
+.grafico-barras li { position: relative; display: grid; grid-template-columns: minmax(80px, 34%) 1fr auto; align-items: center; gap: .5rem; padding: .15rem .25rem; border-radius: var(--radius-sm); font-size: .85rem; }
+.grafico-barras li[data-ativo] { background: var(--surface-2); }
+.grafico-barras li:focus-visible { outline: 2px solid var(--focus); }
+.grafico-barras-rotulo { overflow-wrap: anywhere; }
+.grafico-barras-trilho { display: flex; gap: 2px; height: 14px; }
+.grafico-barras-seg { height: 100%; min-width: 2px; }
+.grafico-barras-seg:last-child { border-radius: 0 4px 4px 0; }
+.grafico-barras-valor { font-variant-numeric: tabular-nums; color: var(--text); }
+.grafico-barras .grafico-dica { left: 50% !important; top: auto !important; bottom: 100%; }
+.grafico-tabela { margin-top: .5rem; font-size: .85rem; }
+.grafico-tabela summary { cursor: pointer; color: var(--primary); }
+.painel-secao { margin-bottom: 1.25rem; }
+.painel-secao > h2 { font-size: 1.1rem; margin: 0 0 .6rem; }
+.lista-simples { list-style: none; margin: 0; padding: 0; display: grid; gap: .35rem; font-size: .9rem; }
+.lista-simples li { display: flex; justify-content: space-between; gap: .75rem; border-bottom: 1px solid var(--border); padding: .25rem 0; }
+@media print { .grafico-tabela[open] summary, .grafico-dica { display: none; } }
+
+/* ---------- resultado da importação de planilha (S5-03): aceitas e recusadas com cor, ícone e texto ---------- */
+.importacao-bloco { border-left: 4px solid var(--border); padding: .5rem .75rem; margin-bottom: 1rem; border-radius: var(--radius-sm); }
+.importacao-bloco h3 { margin: 0 0 .5rem; font-size: 1rem; }
+.importacao-bloco[data-tipo="aceitas"] { border-left-color: var(--ok); background: var(--ok-bg); }
+.importacao-bloco[data-tipo="aceitas"] h3 { color: var(--ok); }
+.importacao-bloco[data-tipo="recusadas"] { border-left-color: var(--danger); background: var(--err-bg); }
+.importacao-bloco[data-tipo="recusadas"] h3 { color: var(--danger); }

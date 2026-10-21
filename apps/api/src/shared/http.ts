@@ -11,8 +11,12 @@ export function parse<T>(schema: ZodType<T>, data: unknown): T {
 }
 
 export const zUuid = z.string().uuid('id inválido');
-export const zData = z.string().regex(DATE_RE, 'data no formato aaaa-mm-dd');
-export const zMoney = z.string().trim().regex(MONEY_RE, 'valor no formato 12.50');
+// a data precisa existir (2026-02-31 e 2026-13-01 são recusadas); abort: sem o formato, a conferência nem roda
+/** A data aaaa-mm-dd existe no calendário (2026-02-31 e 2026-13-01 não existem). */
+export const dataExiste = (d: string) => { const t = new Date(`${d}T12:00:00Z`); return DATE_RE.test(d) && !Number.isNaN(t.getTime()) && t.toISOString().slice(0, 10) === d; };
+export const zData = z.string().regex(DATE_RE, { message: 'data no formato aaaa-mm-dd', abort: true }).refine(dataExiste, 'data inexistente');
+// abort: com o formato errado, as regras seguintes (ex.: maior que zero, que converte o valor) não rodam; sem isso viravam erro 500
+export const zMoney = z.string().trim().regex(MONEY_RE, { message: 'valor no formato 12.50', abort: true });
 export const zTexto = (max = 200) => z.string().trim().min(1, 'obrigatório').max(max);
 export const zMotivo = z.string().trim().min(5, 'mínimo de 5 caracteres').max(500);
 export const zBoolQuery = z.enum(['true', 'false']).transform((v) => v === 'true');

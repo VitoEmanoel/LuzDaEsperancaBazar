@@ -29,4 +29,6 @@ export const contasReceberApi = {
 
 export const financeiroApi = {
   resumo: (de: string, ate: string) => http.get<ResumoFinanceiro>('/financeiro/resumo', { query: { de, ate } }),
+  /** O mesmo resumo em PDF (S5-10). */
+  resumoPdf: (de: string, ate: string) => http.blob('/financeiro/resumo.pdf', { query: { de, ate } }),
 };

@@ -11,12 +11,12 @@ export interface DadosFechamentoPdf {
   eventos: EventoCaixa[]; gavetaAgora: string;
 }
 
-const brl = (v: string | number) => `R$ ${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+export const brl = (v: string | number) => `R$ ${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const quando = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Fortaleza' });
 const hora = new Intl.DateTimeFormat('pt-BR', { timeStyle: 'medium', timeZone: 'America/Fortaleza' });
 /** A fonte padrão do PDF só tem Latin-1. */
-const latin = (s: string) => s.replace(/[\u202f\u00a0]/g, ' ').replace(/→/g, '->').replace(/—/g, '-').replace(/[^\x20-\xFF]/g, '?');
-const FORMAS: [string, string][] = [['DINHEIRO', 'Dinheiro'], ['PIX', 'PIX'], ['CARTAO_DEBITO', 'Cartão de débito'], ['CARTAO_CREDITO', 'Cartão de crédito'], ['FIADO', 'Fiado']];
+export const latin = (s: string) => s.replace(/[\u202f\u00a0]/g, ' ').replace(/→/g, '->').replace(/—/g, '-').replace(/[^\x20-\xFF]/g, '?');
+export const FORMAS: [string, string][] = [['DINHEIRO', 'Dinheiro'], ['PIX', 'PIX'], ['CARTAO_DEBITO', 'Cartão de débito'], ['CARTAO_CREDITO', 'Cartão de crédito'], ['FIADO', 'Fiado']];
 
 export function gerarPdfFechamento(d: DadosFechamentoPdf): Promise<Buffer> {
   const doc = new PDFDocument({ size: 'A4', margin: 36, info: { Title: 'Fechamento de caixa', Author: d.instituicao.nome } });

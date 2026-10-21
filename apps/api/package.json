@@ -23,7 +23,8 @@
     "test:cpf": "tsx tests/cpf.ts",
     "test:produto": "tsx tests/produto.ts",
     "test:sprint3": "tsx tests/sprint3.ts",
-    "test:sprint4": "tsx tests/sprint4.ts"
+    "test:sprint4": "tsx tests/sprint4.ts",
+    "test:sprint5": "tsx tests/sprint5.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",
@@ -36,6 +37,7 @@
     "argon2": "^0.45.1",
     "dotenv": "^18.0.5",
     "exceljs": "^4.4.0",
+    "fast-xml-parser": "^5.11.2",
     "fastify": "^5.12.5",
     "fastify-plugin": "^5.1.0",
     "file-type": "^22.1.1",

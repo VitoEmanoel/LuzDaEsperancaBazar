@@ -43,7 +43,7 @@ O MVP é hoje um **monolito single-tenant** (uma instituição por instalação:
 | **Administrador** | Tudo: cadastros, usuários, perfis, parâmetros, regra fiscal, relatórios, financeiro, cancelamentos, LGPD, auditoria, e abrir caixa (para pagar contas e receber fiado com o dinheiro da gaveta) | Backoffice |
 | **Vendedor** | Abre/fecha o próprio caixa, vende, sangria/suprimento, cadastro rápido de cliente para fiado | PDV em tela cheia (entra direto nele) |
 | **Estoquista** | Registra lotes de doação, cadastra itens (com etiqueta), **aprova e devolve o que outra pessoa cadastrou** (Sprint 3), muda o preço do produto, transfere entre estoques, consulta estoque, custo e relatórios de estoque | Backoffice → Entradas e Estoque |
-| **Financeiro** | Contas a pagar e a receber, resumo financeiro, relatórios, consulta de estoque, de lotes e de produtos (só leitura), custo e **desconto no produto** (Sprint 3) | Backoffice → Financeiro |
+| **Financeiro** | Contas a pagar e a receber, **Nova compra** com o fornecedor novo (Sprint 5), resumo financeiro, **Caixas do dia**, relatórios, consulta de estoque, de lotes e de produtos (só leitura), custo e **desconto no produto** (Sprint 3) | Backoffice → Financeiro |
 
 Os perfis são **compostos por 30 permissões** (ex.: `caixa.operar`, `estoque.transferir`, `relatorios.consultar`, `custo.consultar`, `etiquetas.imprimir`). O Administrador cria perfis novos em **Administração › Perfis e permissões**: as permissões aparecem em português, agrupadas por área (Vendas e caixa, Entradas e estoque, Financeiro, Relatórios, Administração), com "marcar todas" por grupo; um perfil pode nascer como **cópia** de outro; o perfil criado por engano é **desativado** (só sem usuário ativo; os padrão nunca), e o nome fica livre. Outro Administrador é só um usuário com o perfil Administrador. O menu só esconde o que o usuário não usaria; **quem decide é sempre o servidor**.
 
@@ -103,7 +103,7 @@ Cada domínio tem **o mesmo nome no front e no back** (ex.: `features/financeiro
 **Fluxo:** lote recebido → o estoquista cadastra os produtos do lote (ficam **aguardando aprovação**, sem estoque) → o **Administrador aprova** item a item ou o lote inteiro (só aí o estoque recebe) ou **devolve com motivo** (o estoquista corrige e reenvia) → descartados nunca entram → lote encerrado. Desenho em `docs/arquitetura/produto-e-aprovacao.md`.
 
 1. **Registrar o lote** (`/entradas/novo`) com tipo:
-   - **Doação** — exige o **parceiro** (doador); a campanha é opcional (RN-04, S2-06). Sem doador conhecido, use "Doador não identificado". O estoquista **cria o parceiro na hora** (permissão `parceiros.criar`; editar e desativar continuam com o Administrador);
+   - **Doação** — exige o **parceiro** (doador); a campanha é opcional (RN-04, S2-06). Sem doador conhecido, use "Doador não identificado". O estoquista **cria o parceiro na hora** (permissão `parceiros.criar`, que o Financeiro também tem para o fornecedor da compra; editar e desativar continuam com o Administrador). O documento aceita CPF ou CNPJ, inclusive o **CNPJ com letras** emitido desde julho de 2026 (12 caracteres de 0-9 ou A-Z e 2 dígitos verificadores);
    - **Compra** — exige fornecedor e valor pago, e **gera automaticamente uma conta a pagar** (RN-05);
    - **Saldo inicial** — só pela carga inicial da implantação (o Administrador carrega; os itens já entram aprovados).
    Pode anexar o documento do lote (PDF/imagem; o servidor confere o tipo real).
@@ -117,6 +117,12 @@ Cada domínio tem **o mesmo nome no front e no back** (ex.: `features/financeiro
 3. **Aprovar** (Administrador e Estoquista, `produtos.aprovar`; Sprint 3, P-16): aprova item a item, o lote inteiro ou pela fila **Aprovação de produtos** (`/aprovacoes`, todos os lotes); o estoque recebe a quantidade no local escolhido. **Quem cadastrou não aprova nem devolve o próprio item** (outra pessoa confere; só o perfil Administrador pode o próprio): ao aprovar o lote, os itens da própria pessoa ficam para outra. Vale na API e no banco (`AUTO_APROVACAO`). **Devolver** exige motivo: o item fica "devolvido", o estoquista corrige (quantidade, valor, destino e, se o produto nasceu nessa entrada, título, nome e preço) e ele volta para a aprovação. Aprovado não volta atrás. Tudo na auditoria.
 4. **Etiquetas** (Sprint 4, permissão `etiquetas.imprimir`: Administrador e Estoquista): tela **Imprimir etiquetas** (`/estoque/etiquetas`) com busca, quantidade livre por produto (sugere uma por unidade em estoque) e pré-visualização no tamanho real do rolo; também abre já preenchida a partir do lote, da lista do Estoque e da tela do produto. A etiqueta leva o título curto, o código de barras **Code 128** (lido por qualquer leitor 1D; as etiquetas antigas em Code 39 têm o mesmo texto e continuam sendo lidas), o código legível e o **preço normal** do produto (o desconto aparece no caixa e não obriga reetiquetar; P-18). O papel sai com uma página do tamanho do rolo por etiqueta; o tamanho fica em **Parâmetros** (`etiqueta.largura_mm` e `etiqueta.altura_mm`, padrão 50 × 30 mm até a impressora chegar). Qualquer produto ativo ganha etiqueta, mesmo sem saldo no Bazar; no máximo 500 por vez. Cada impressão fica no **histórico do produto** (quem, quando, quantas), pela auditoria.
 5. **Encerrar o lote.** Lote encerrado não aceita item novo (RN-28), mas os itens dele ainda são aprovados, devolvidos e corrigidos; reabrir ou reverter descarte exige permissão e motivo, e vai para a auditoria. Item de descarte revertido também passa pela aprovação.
+
+**Importar planilha no lote** (Sprint 5, S5-03): na tela de cadastro dos produtos do lote, "Importar planilha" aceita CSV ou XLSX (até 1.000 linhas), uma linha por produto, com as colunas `titulo_etiqueta`, `nome`, `categoria`, `preco`, `quantidade`, `valor_atribuido` e, se quiser, `estoque` (Bazar ou Doações), `peca_unica` e os campos opcionais do produto; com `codigo` (BZ…) a linha vira nova entrada de um produto que já existe. Cada linha passa pelas mesmas regras do cadastro na tela e vira item **cadastrado, sem aprovar**. As linhas válidas são gravadas e as erradas voltam com a linha e o motivo, em blocos separados (✓ aceitas em verde, ✕ recusadas em vermelho). Importar o mesmo arquivo duas vezes cadastra tudo de novo.
+
+**Todas as importações funcionam do mesmo jeito** (S5-02 e S5-05): cada tela tem **"Baixar modelo"** em XLSX ou CSV (o cabeçalho certo e linhas de exemplo fictícias), grava as linhas válidas e mostra o mesmo resultado (✓ aceitas e ✕ recusadas, com a linha e o motivo). Vale para o lote, para os cadastros do Admin (categorias, parceiros, campanhas e clientes; o nome que já existe ou se repete na planilha volta recusado) e para a carga inicial do estoque (que antes era tudo ou nada).
+
+**NF-e (S5-04):** na **Nova compra**, o botão **"Importar NF-e (XML)"** recebe o XML que o fornecedor manda. A nota vira o lote de compra com a conta a pagar no valor dela (vencimento na primeira parcela) e, se o emitente ainda não for parceiro, ele é cadastrado pelo CNPJ (com ou sem letras). Os produtos da nota aparecem para conferência e ficam listados no lote; quem os cadastra é o estoque (a nota não traz categoria nem preço de venda). A mesma nota não entra duas vezes (chave de acesso única, também no banco). É recusada a nota sem autorização da SEFAZ, cancelada, de teste (homologação), NFC-e, de outro CNPJ que não o da instituição ou de fornecedor desativado; o arquivo com DTD/entidades é recusado antes de ser lido. Quem importa: Admin e Financeiro. Há uma **NF-e de exemplo** (fictícia, de homologação) para baixar e testar.
 
 ### 5.2 Estoque duplo (Bazar ⇄ Doações)
 
@@ -163,6 +169,7 @@ e o carrinho em andamento (sem dado pessoal, token ou senha), e o logout apaga i
 - **Abertura** com saldo inicial (troco) obrigatório: o operador digita o valor (0 se não houver troco).
 - **Total do caixa** (fechamento parcial): no PDV, mostra o dinheiro da gaveta, as vendas por forma e tudo o que aconteceu desde a abertura, sem fechar o caixa, com PDF.
 - **Linha do tempo e PDF do fechamento:** ao fechar, o sistema mostra tudo o que aconteceu da abertura ao fechamento (cada venda com o recebido e o troco, cancelamentos, sangrias, suprimentos, fiado recebido) com o dinheiro da gaveta depois de cada evento, e gera o PDF do fechamento. O Vendedor vê só o próprio caixa; Administrador e Financeiro veem qualquer caixa.
+- **Caixas do dia** (`/caixas`, Administrador e Financeiro, Sprint 5): todos os caixas do período, com filtro de situação (abertos agora, de qualquer dia; fechados; fechados com diferença, com "faltou" ou "sobrou") e o detalhe de cada um (totais por forma, gaveta, conferência, linha do tempo e PDF). É também a tela dos fechamentos de caixa.
 - **Fechamento** (RN-19): prévia com totais por forma e **dinheiro esperado** = fundo + vendas em dinheiro + fiado recebido em dinheiro + suprimentos − sangrias. O operador informa o contado; a diferença fica registrada com justificativa.
 - Fiado recebido em PIX ou cartão é gravado com a forma correta; só dinheiro entra no esperado da gaveta.
 
@@ -170,7 +177,16 @@ e o carrinho em andamento (sem dado pessoal, token ou senha), e o logout apaga i
 
 - **Contas a pagar** (`/financeiro/pagar`): lançamento com categoria de despesa e vencimento; alertas de vencidas e a vencer na tela inicial; no pagamento, informa a forma. Se "saiu do caixa", vira sangria automática; cancelar uma conta paga com dinheiro do caixa devolve o valor como suprimento (RN-32).
 - **Contas a receber / fiado** (`/financeiro/receber`): nascem das vendas fiadas ou de lançamento manual; recebimento total ou parcial, dentro ou fora do caixa, com forma obrigatória; extrato por cliente; estorno pelo administrador, sempre do recebimento inteiro e uma única vez (RN-27).
-- **Resumo financeiro:** entradas por forma, fiado recebido, saídas e resultado do período.
+- **Nova compra** (`/financeiro/compra`, Financeiro e Administrador, Sprint 5): abre o lote de compra e a conta a pagar do fornecedor na mesma operação; o fornecedor novo é criado na hora. O Financeiro lança só compra (doação e saldo inicial continuam com o estoque e o Administrador) e não cadastra os produtos do lote, que ficam para o estoque.
+- **Resumo financeiro:** entradas por forma, fiado recebido, saídas, reembolsos (à parte, já fora das vendas) e resultado do período, com **impressão e PDF** (Sprint 5).
+
+- **Fluxo de caixa** (`/financeiro/fluxo`, Financeiro e Administrador, S5-08): por dia, o que entrou e saiu até hoje (vendas sem fiado mais fiado recebido; contas pagas, sem reembolso) e, depois de hoje, o previsto (fiado e contas a pagar pelo vencimento), com o saldo do dia e o acumulado. Contas e fiado já vencidos e em aberto aparecem à parte.
+
+### 5.6.1 Painéis (dashboards, Sprint 5)
+Cada perfil vê o seu painel na tela inicial, junto com os atalhos (o Vendedor fica só com os atalhos). Filtros numa linha acima dos gráficos: período (hoje, 7 dias, 30 dias ou personalizado, até 366 dias) e os do painel. Os gráficos são do próprio sistema, com as cores da marca validadas para daltonismo nos temas claro e escuro, dica no mouse e no teclado e **"Ver em tabela"** com os mesmos números.
+- **Administrador** (S5-07): vendas (total, quantidade, ticket médio, por dia e por forma), caixas abertos agora com o dinheiro esperado, itens esperando aprovação, estoque (itens e valor de venda; o custo só para quem pode ver custo), contas vencidas e dos próximos 7 dias, fiado em aberto e os últimos eventos sensíveis (cancelamentos, estornos, reembolsos e diferenças de caixa). Filtros: operador e forma de pagamento.
+- **Estoque** (S5-15, também em `/painel/estoque`): itens no Bazar e em Doações por categoria, fila de entrada, entradas de hoje e dos últimos 7 dias, descartes, produtos com **pouco saldo** (parâmetro `estoque.pouco_saldo`, padrão 5, um valor para todos; peça única não entra) e as últimas movimentações. Sem custo nem valor. Filtros: categoria e parceiro (o parceiro filtra entradas, descartes e movimentações).
+- **Financeiro** (S5-16, também em `/painel/financeiro`): entradas, saídas e resultado de hoje e do mês, contas vencidas e dos próximos 7 dias, fiado a receber, caixas fechados com diferença e reembolsos. Filtro: forma de pagamento (no gráfico de entradas).
 
 ### 5.7 Relatórios e prestação de contas
 
@@ -299,15 +315,18 @@ Segue o brandbook da instituição (`docs/marca/`):
 | `tests/smoke.ts` (fluxos críticos e segurança) | 157 ok |
 | `tests/concorrencia.ts` (disputa da última peça, IDOR) | OK |
 | `tests/reteste-qa.ts` (regressão dos 12 tickets) | 37 ok |
-| `tests/perfis.ts` (acesso de cada perfil, perfil personalizado, proteção dos perfis padrão, custo escondido, desativação) | 212 ok |
+| `tests/perfis.ts` (acesso de cada perfil, perfil personalizado, proteção dos perfis padrão, custo escondido, desativação) | 248 ok |
 | `tests/cpf.ts` (CPF: dígitos, limite em reais, obrigatório, só no comprovante, trava entre vendas, limpeza do mês) | 37 ok |
 | `tests/produto.ts` (Sprint 2: cadastro, devolução, aprovação, nova entrada, PEPS por produto, estorno, disputa da última unidade) | 49 ok |
 | `tests/sprint3.ts` (Sprint 3: aprovação por outra pessoa, fila, ajuste só de saída, produto, custo, preço, desconto no PDV e na venda, relatórios, auditoria do parceiro) | 46 ok |
 | `tests/sprint4.ts` (Sprint 4: tamanho do rolo, etiqueta com preço normal, limites do pedido, histórico na auditoria, permissão, venda acima do saldo) | 22 ok |
+| `tests/sprint5.ts` (Sprint 5: CNPJ com letras, pouco saldo, Nova compra e fornecedor pelo Financeiro, Caixas do dia e detalhe, resumo em PDF, painéis, fluxo de caixa, importação de planilha no lote, datas e valores fora do formato, modelos para baixar e importações padronizadas, NF-e) | 115 ok |
 | `database/04_testes_0003.sql` (tentativas de violar regras do banco) | 23 de 23 (28 com o papel da API) |
 | `database/08_testes_0009.sql` (regras do produto e da aprovação no banco) | 32 de 32 (35 com o papel da API) |
 | `database/09_testes_0010.sql` (Sprint 3: quem aprova e devolve, ajuste só de saída, desconto e preço efetivo, perfis, auditoria do parceiro) | 34 de 34 |
 | `database/10_testes_0011.sql` (Sprint 4: permissão de etiquetas, rolo padrão, auditoria da impressão sem dado pessoal) | 9 de 9 |
+| `database/11_testes_0012.sql` (Sprint 5: formato do CNPJ com letras no parceiro e na instituição, Financeiro cria parceiro, pouco saldo) | 14 de 14 |
+| `database/12_testes_0013.sql` (Sprint 5: formato da chave da NF-e, chave única, só compra tem nota) | 9 de 9 |
 | `database/07_manutencao_rotina.sql` (conferência de saldo e prestação de contas) | 0 divergência |
 | Telas no navegador (`apps/web/tests-ui/`: CPF, janelas do PDV, cadastro e aprovação de produtos, PDV e etiquetas da Sprint 4) | 11, 14, 19 e 30 ok |
 | Telas da Sprint 3 no navegador (Chrome por CDP, sistema real) | 20 + 9 (perfis pela tela) + 11 (correções do QA e impressão do caixa) ok |

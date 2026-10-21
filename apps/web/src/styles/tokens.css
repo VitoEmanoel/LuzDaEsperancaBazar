@@ -69,6 +69,9 @@
   --shadow: 0 1px 2px rgb(45 70 31 / 0.06), 0 2px 8px rgb(45 70 31 / 0.05);
   --shadow-lg: 0 12px 40px rgb(45 70 31 / 0.22);
   --focus: var(--marca-verde-esperanca);
+  /* séries dos gráficos (S5-18): acentos da marca, nesta ordem fixa; validados para daltonismo e contraste
+     (o laranja fica abaixo de 3:1 no branco, então todo gráfico tem rótulo e tabela) */
+  --serie-1: #5b8c3e; --serie-2: #3d9bd1; --serie-3: #f2994a; --serie-4: #9b6fc4;
 
   color-scheme: light;
 }
@@ -98,6 +101,8 @@
     --nav-bg: #0f180a;
     --nav-active-bg: #26361d;
     --focus: #a5cb88;
+    /* os mesmos matizes, mais escuros para a faixa de luminosidade do fundo escuro (validados contra #1c2a15) */
+    --serie-1: #6b9f4c; --serie-2: #3b95cf; --serie-3: #c9802d; --serie-4: #9d77cc;
     color-scheme: dark;
   }
 }

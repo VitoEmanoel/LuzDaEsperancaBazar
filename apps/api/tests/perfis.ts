@@ -48,7 +48,7 @@ const ACESSOS: [string, string, unknown, Perfil[], number[]?][] = [
   ['POST', '/categorias', {}, ['admin'], [400]],
   // Sprint 3: o Financeiro lê os lotes (só leitura, P-07); o Estoquista também aprova e devolve (P-16)
   ['GET', '/lotes', undefined, ['admin', 'estoquista', 'financeiro']],
-  ['POST', '/lotes', {}, ['admin', 'estoquista'], [400]],
+  ['POST', '/lotes', {}, ['admin', 'estoquista', 'financeiro'], [400]], // o Financeiro só lança compra (S5-11)
   ['GET', '/aprovacoes', undefined, ['admin', 'estoquista']],
   ['POST', `/lotes/${uuid()}/aprovar`, {}, ['admin', 'estoquista'], [404]],
   ['POST', `/itens/${uuid()}/aprovar`, {}, ['admin', 'estoquista'], [404]],
@@ -64,7 +64,7 @@ const ACESSOS: [string, string, unknown, Perfil[], number[]?][] = [
   ['POST', '/baixas', {}, ['admin'], [400]],
   ['POST', '/ajustes', {}, ['admin'], [400]],
   ['POST', `/perfis/${uuid()}/desativar`, {}, ['admin'], [404]],
-  ['POST', '/parceiros', {}, ['admin', 'estoquista'], [400]],
+  ['POST', '/parceiros', {}, ['admin', 'estoquista', 'financeiro'], [400]],
   ['PATCH', `/parceiros/${uuid()}`, {}, ['admin'], [404]],
   ['GET', '/produtos', undefined, ['admin', 'estoquista', 'financeiro']],
   // etiquetas (S4-01 a S4-05): Admin e Estoquista; pedido vazio é recusado (400) por quem pode
@@ -77,6 +77,18 @@ const ACESSOS: [string, string, unknown, Perfil[], number[]?][] = [
   ['GET', '/contas-receber', undefined, ['admin', 'financeiro']],
   ['GET', '/financeiro/resumo?de=2026-01-01&ate=2026-12-31', undefined, ['admin', 'financeiro']],
   ['GET', '/caixas', undefined, ['admin', 'financeiro']],
+  // Caixas do dia (S5-06): o detalhe de outro caixa só com relatórios; o operador vê o próprio (aqui um id que não existe)
+  ['GET', `/caixas/${uuid()}/resumo`, undefined, ['admin', 'financeiro', 'vendedor'], [404]],
+  ['GET', '/financeiro/resumo.pdf', undefined, ['admin', 'financeiro'], [400]],
+  // dashboards e fluxo de caixa (S5-07, S5-08, S5-15, S5-16): sem período, 400 para quem pode
+  ['GET', '/painel/admin', undefined, ['admin'], [400]],
+  ['GET', '/painel/estoque', undefined, ['admin', 'estoquista', 'financeiro'], [400]],
+  ['GET', '/painel/financeiro', undefined, ['admin', 'financeiro'], [400]],
+  ['GET', '/financeiro/fluxo-caixa', undefined, ['admin', 'financeiro'], [400]],
+  // modelos para baixar (S5-02): o do lote é de quem registra entrada; os de cadastros, do Admin
+  ['GET', '/modelos/lote', undefined, ['admin', 'estoquista']],
+  ['GET', '/modelos/categorias', undefined, ['admin']],
+  ['GET', '/modelos/carga-inicial', undefined, ['admin']],
   // Caixa: só o Vendedor e o Administrador (o corpo vazio dá 400; o caixa pode ou não estar aberto)
   ['GET', '/caixas/atual', undefined, ['vendedor', 'admin'], [200, 404]],
   ['POST', '/caixas', {}, ['vendedor', 'admin'], [400]],
@@ -99,7 +111,8 @@ const PERMISSOES_ESPERADAS: Record<Perfil, string[]> = {
   vendedor: ['caixa.operar', 'clientes.gerenciar'],
   // parceiros.criar: 0009; custo, preço e aprovação: 0010; etiquetas: 0011
   estoquista: ['cadastros.consultar', 'custo.consultar', 'entrada.registrar', 'estoque.consultar', 'estoque.transferir', 'etiquetas.imprimir', 'parceiros.criar', 'produtos.aprovar', 'produtos.preco', 'relatorios.estoque'],
-  financeiro: ['contas_pagar.gerenciar', 'contas_receber.lancar', 'contas_receber.receber', 'custo.consultar', 'estoque.consultar', 'produtos.desconto', 'relatorios.consultar', 'relatorios.estoque'],
+  // parceiros.criar: 0012 (o fornecedor da compra, S5-11)
+  financeiro: ['contas_pagar.gerenciar', 'contas_receber.lancar', 'contas_receber.receber', 'custo.consultar', 'estoque.consultar', 'parceiros.criar', 'produtos.desconto', 'relatorios.consultar', 'relatorios.estoque'],
 };
 
 async function novoUsuario(admin: Cliente, login: string, perfilId: string) {

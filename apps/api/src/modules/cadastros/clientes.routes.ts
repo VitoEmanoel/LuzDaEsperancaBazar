@@ -10,6 +10,7 @@ import { conflito, naoEncontrado } from '../../shared/errors.js';
 import { parse, zIdParam, zTexto, zUuid } from '../../shared/http.js';
 import { auditar } from '../../shared/audit.js';
 import { exigirUsuario } from '../../plugins/auth.js';
+import { normalizarDocumento } from '../../shared/documento.js';
 
 export const VERSAO_AVISO = 'v1-2026-10';
 export const FINALIDADE_CLIENTE = 'Venda fiada (crediário) e contato de cobrança';
@@ -96,7 +97,7 @@ export async function rotasClientes(app: FastifyInstance) {
   // ---------------- instituição ----------------
   const zInst = z.object({
     nome: zTexto(150),
-    cnpj: z.string().trim().transform((s) => s.replace(/\D/g, '')).refine((s) => s === '' || /^\d{14}$/.test(s), 'CNPJ com 14 dígitos'),
+    cnpj: z.string().transform(normalizarDocumento).refine((s) => s === '' || /^[0-9A-Z]{12}\d{2}$/.test(s), 'CNPJ com 14 caracteres (pode ter letras)'),
     endereco: z.string().trim().max(250).default(''),
     telefone: z.string().trim().max(30).default(''),
   });

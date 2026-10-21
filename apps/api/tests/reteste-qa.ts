@@ -1,5 +1,5 @@
 /**
- * Regressão dos 12 tickets do QA (docs/qa/2026-10-05_reteste-qa.md) — parte de API.
+ * Regressão dos 12 tickets do QA (o relatório `docs/qa/2026-10-05_reteste-qa.md` saiu do projeto em 20/10/2026; está no histórico do git) — parte de API.
  * Rodar DEPOIS do smoke, no mesmo banco de TESTE (usa o admin com a senha que o smoke define).
  * Uso: API_URL=http://127.0.0.1:3000/api/v1 npm run test:reteste
  * Dados 100% fictícios (CPF/CNPJ de exemplo, válidos só no cálculo).
@@ -56,7 +56,7 @@ async function main() {
   const csvCat = new FormData();
   csvCat.append('arquivo', new Blob([`nome;preco_padrao;venda_por_categoria\nImportada sem preço ${uuid().slice(0, 4)};;sim\n`], { type: 'text/csv' }), 'categorias.csv');
   r = await admin.req('POST', '/importacoes/categorias', undefined, csvCat);
-  check(r.status === 200 && r.data.gravado === false && r.data.erros?.[0]?.linha, 'importação registra erro por linha', r.data);
+  check(r.status === 200 && r.data.aceitas?.length === 0 && r.data.recusadas?.[0]?.linha === 2, 'importação registra erro por linha (a linha recusada volta com o motivo)', r.data);
 
   console.log('Ticket 4 — CPF/CNPJ com dígito verificador');
   r = await admin.post('/parceiros', { id: uuid(), nome: `Repetido ${uuid().slice(0, 6)}`, tipo: 'EMPRESA', documento: '11111111111111' });
@@ -82,7 +82,7 @@ async function main() {
   const csvCarga = new FormData();
   csvCarga.append('arquivo', new Blob([`categoria;quantidade;preco;estoque;controle\n${catCarga.nome};2;3,00;Doações;Categoria\n${catCarga.nome};1;3,00; doacoes ;categoria\n${catCarga.nome};1;3,00;Bazar;CATEGORIA\n`], { type: 'text/csv' }), 'carga.csv');
   r = await admin.req('POST', '/carga-inicial', undefined, csvCarga);
-  check(r.status === 200 && r.data.gravado === true && r.data.erros.length === 0, '"Doações", " doacoes " e "Categoria" aceitos', r.data);
+  check(r.status === 200 && r.data.aceitas?.length === 3 && r.data.recusadas?.length === 0, '"Doações", " doacoes " e "Categoria" aceitos', r.data);
 
   console.log('Ticket 6 — valor atribuído em lote de compra');
   const forn = pj.data;

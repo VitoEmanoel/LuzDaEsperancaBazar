@@ -1,6 +1,6 @@
 /** ADM / PRV — parâmetros, importações e direitos do titular (LGPD). */
 import { http } from '../../shared/api/http';
-import type { ImportacaoResultado, Parametro } from '../../shared/api/types';
+import type { Parametro, ResultadoImportacao, TipoModelo } from '../../shared/api/types';
 
 export type TipoTitular = 'cliente';
 
@@ -12,8 +12,13 @@ export const parametrosApi = {
 export const importacoesApi = {
   importar: (tipo: 'categorias' | 'parceiros' | 'campanhas' | 'clientes', arquivo: File) => {
     const fd = new FormData(); fd.append('arquivo', arquivo);
-    return http.upload<ImportacaoResultado>(`/importacoes/${tipo}`, fd);
+    return http.upload<ResultadoImportacao>(`/importacoes/${tipo}`, fd);
   },
+};
+
+/** Modelos para baixar (S5-02): o cabeçalho de cada importação com linhas de exemplo, em CSV ou XLSX. */
+export const modelosApi = {
+  baixar: (tipo: TipoModelo, formato: 'csv' | 'xlsx') => http.blob(`/modelos/${tipo}`, { query: { formato } }),
 };
 
 export const privacidadeApi = {

@@ -45,7 +45,8 @@ async function parseXlsx(buf: Buffer): Promise<string[][]> {
     const vals: string[] = [];
     row.eachCell({ includeEmpty: true }, (cell, col) => {
       const v = cell.value;
-      const s = v === null || v === undefined ? '' : typeof v === 'object' && 'text' in v ? String(v.text)
+      const s = v === null || v === undefined ? '' : typeof v === 'object' && 'richText' in v ? v.richText.map((t) => t.text).join('') // texto colado com formatação
+        : typeof v === 'object' && 'text' in v ? String(v.text)
         : typeof v === 'object' && 'result' in v ? String(v.result ?? '') : v instanceof Date ? v.toISOString().slice(0, 10) : String(v);
       vals[col - 1] = s;
     });
@@ -72,6 +73,9 @@ export async function lerPlanilha(buf: Buffer): Promise<Planilha> {
     })),
   };
 }
+
+/** Log da linha que falhou: só o código do erro (a mensagem do Prisma repete os valores, com dado pessoal). */
+export const codigoErro = (e: unknown): string => (e as { code?: string })?.code ?? (e as Error)?.name ?? 'desconhecido';
 
 // ---------------- escrita ----------------
 /** Evita CSV/XLSX injection: células que começam com = + - @ (ou tab/CR) viram texto. */

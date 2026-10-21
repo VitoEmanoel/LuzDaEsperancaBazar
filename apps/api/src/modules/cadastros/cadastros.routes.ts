@@ -6,7 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma, type Tx } from '../../shared/prisma.js';
 import { conflito, invalido, naoEncontrado } from '../../shared/errors.js';
-import { documentoValido } from '../../shared/documento.js';
+import { documentoValido, normalizarDocumento } from '../../shared/documento.js';
 import { parse, zBoolQuery, zData, zIdParam, zMoney, zTexto, zUuid } from '../../shared/http.js';
 import { auditar } from '../../shared/audit.js';
 import { money } from '../../shared/money.js';
@@ -67,8 +67,8 @@ const categorias: Definicao = {
 const zParceiro = z.object({
   nome: zTexto(120),
   tipo: z.enum(['EMPRESA', 'LOJA', 'PESSOA_FISICA', 'OUTRO']).optional(),
-  documento: z.string().trim().regex(/^(\d{11}|\d{14})$/, 'CPF (11) ou CNPJ (14) só com dígitos')
-    .refine(documentoValido, 'CPF/CNPJ inválido (dígito verificador não confere)').optional(),
+  documento: z.string().transform(normalizarDocumento).pipe(z.string().regex(/^(\d{11}|[0-9A-Z]{12}\d{2})$/, 'CPF (11 dígitos) ou CNPJ (14 caracteres)')
+    .refine(documentoValido, 'CPF/CNPJ inválido (dígito verificador não confere)')).optional(),
   telefone: z.string().trim().regex(/^\d{10,11}$/, 'telefone com DDD, só dígitos').optional(),
   email: z.string().trim().email().max(120).optional(),
   cidade: z.string().trim().max(80).optional(),
@@ -76,7 +76,7 @@ const zParceiro = z.object({
   ativo: z.boolean().optional(),
 });
 const exibirDocumento = (d?: string | null) => (!d ? undefined : d.length === 14
-  ? d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5')
+  ? d.replace(/^([0-9A-Z]{2})([0-9A-Z]{3})([0-9A-Z]{3})([0-9A-Z]{4})(\d{2})$/, '$1.$2.$3/$4-$5')
   : `•••.•••.••${d.slice(8, 9)}-${d.slice(9)}`);
 const parceiros: Definicao = {
   entidade: 'parceiro',

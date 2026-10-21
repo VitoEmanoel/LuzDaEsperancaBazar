@@ -1,4 +1,4 @@
-/** Início: atalhos por perfil e alertas (contas vencidas/a vencer, lotes recebendo cadastro). */
+/** Início: atalhos por perfil, alertas e o painel de cada perfil (S5-07, S5-15, S5-16) junto com os atalhos. */
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
 import { useAsync } from '../../../shared/hooks/useAsync';
@@ -6,6 +6,9 @@ import { contasPagarApi } from '../../financeiro/financeiro.api';
 import { lotesApi } from '../../entradas/entradas.api';
 import { todayLocal } from '../../../shared/lib/format';
 import { PageHeader } from '../../../shared/components/ui';
+import { PainelAdmin } from '../components/PainelAdmin';
+import { PainelEstoque } from '../components/PainelEstoque';
+import { PainelFinanceiro } from '../components/PainelFinanceiro';
 
 export function HomePage() {
   const { me, can } = useAuth();
@@ -45,6 +48,8 @@ export function HomePage() {
       <section className="shortcut-grid" aria-label="Atalhos">
         {atalhos.map((x) => <Link key={x.to} to={x.to} className="card shortcut" data-cor={x.cor}><strong>{x.titulo}</strong><span>{x.desc}</span></Link>)}
       </section>
+      {/* o painel de quem entrou: Admin (visão geral), Financeiro ou Estoque; o Vendedor fica só com os atalhos */}
+      {can('auditoria.consultar') ? <PainelAdmin /> : can('relatorios.consultar') ? <PainelFinanceiro /> : can('estoque.consultar') && can('entrada.registrar') ? <PainelEstoque /> : null}
     </div>
   );
 }

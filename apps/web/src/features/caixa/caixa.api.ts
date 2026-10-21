@@ -19,5 +19,8 @@ export const caixaApi = {
   linhaDoTempo: (caixaId: string) => http.get<LinhaDoTempo>(`/caixas/${caixaId}/linha-do-tempo`),
   /** PDF do fechamento (ou da parcial, se o caixa ainda estiver aberto). */
   pdfFechamento: (caixaId: string) => http.blob(`/caixas/${caixaId}/fechamento.pdf`),
-  historico: (q: { de?: string; ate?: string; page?: number }) => http.get<Page<CaixaSessao>>('/caixas', { query: q }),
+  /** Caixas do dia e fechamentos (Admin e Financeiro, S5-06): por período, situação e diferença. */
+  historico: (q: { de?: string; ate?: string; page?: number; status?: 'ABERTO' | 'FECHADO'; comDiferenca?: boolean }) => http.get<Page<CaixaSessao>>('/caixas', { query: q }),
+  /** Detalhe de um caixa: totais por forma e o dinheiro esperado (o de outro operador só com relatórios). */
+  resumo: (caixaId: string) => http.get<PreviaFechamento & { caixa: CaixaSessao }>(`/caixas/${caixaId}/resumo`),
 };

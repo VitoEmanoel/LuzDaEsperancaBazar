@@ -15,7 +15,7 @@
 - [ ] `npm run test:smoke`, `test:concorrencia` e `test:reteste` passando (em banco de teste)
 - [ ] Teste novo cobrindo a regra criada ou alterada
 - [ ] Sistema **executado de verdade** (caminho feliz, entrada inválida e cada perfil afetado), não só os testes
-- [ ] Revisão crítica por outra IA (o `agy`), com cada achado conferido antes de aceitar
+- [ ] Revisão crítica por outra IA (o agente de QA escolhido pelo humano), com cada achado conferido antes de aceitar
 - [ ] `docs/README_MVP.md` atualizado se a regra ou a tela mudou
 - [ ] Commit sem a linha `Co-Authored-By` do Claude
 
@@ -37,7 +37,7 @@ Quatro perfis padrão: **Admin, Estoquista, Vendedor e Financeiro**. O Admin cri
 | Preço do produto | sim | sim | — | — |
 | Desconto no produto | sim | — | — | sim |
 | Cadastros de apoio (categorias, campanhas, motivos) | sim | só consulta | — | — |
-| Parceiros | sim | cria e consulta | — | — |
+| Parceiros | sim | cria e consulta | — | cria fornecedor e consulta |
 | Contas a pagar e a receber, fluxo de caixa | ver | — | — | sim |
 | Relatórios de estoque, descartes e transferências | sim | sim | — | sim |
 | Relatórios de receita e prestação de contas | sim | — | — | sim |
@@ -233,28 +233,28 @@ PDV e caixa
 **Objetivo:** importar lotes, dar a cada perfil suas visões e dashboards com gráficos e filtros, e ler pela câmera.
 
 Importação
-- [ ] S5-01 Ticket 13: aceitar CNPJ alfanumérico (formato de 2026) no cadastro de parceiro
-- [ ] S5-02 Modelos para baixar (CSV, XLSX e NF-e de exemplo) em cada importação
-- [ ] S5-03 Importador CSV/XLSX de lote: cria itens **cadastrados**, com erros por linha
-- [ ] S5-04 Importador de NF-e (XML): leitura segura, chave de acesso única (sem importar a nota duas vezes), parceiro identificado pelo CNPJ do emitente
-- [ ] S5-05 Padronizar o formato e as mensagens de erro de todas as importações
+- [x] S5-01 Ticket 13: aceitar CNPJ alfanumérico (formato de 2026) no cadastro de parceiro
+- [x] S5-02 Modelos para baixar (CSV, XLSX e NF-e de exemplo) em cada importação (CSV e XLSX; a NF-e de exemplo em XML veio com a S5-04)
+- [x] S5-03 Importador CSV/XLSX de lote: cria itens **cadastrados**, com erros por linha
+- [x] S5-04 Importador de NF-e (XML): leitura segura, chave de acesso única (sem importar a nota duas vezes), parceiro identificado pelo CNPJ do emitente (decisões em P-20)
+- [x] S5-05 Padronizar o formato e as mensagens de erro de todas as importações
 
 Admin e Financeiro
-- [ ] S5-06 Tela **Caixas do dia** (Admin e Financeiro) com o detalhe de cada caixa
-- [ ] S5-07 **Dashboard do Admin** como primeira tela, com visão geral do que está acontecendo, **gráficos e filtros** (período: hoje, 7 dias, 30 dias e personalizado; por operador e por forma de pagamento): vendas (total, quantidade, ticket médio e por forma), caixas abertos agora (quem, desde quando, dinheiro esperado), lotes aguardando conferência, estoque (itens e valor), contas vencidas e a vencer, fiado em aberto e os últimos eventos sensíveis (cancelamentos, estornos, reembolsos e diferenças de caixa)
-- [ ] S5-15 **Dashboard do Estoque**, com gráficos e filtros (período, categoria, parceiro): itens no estoque (Bazar e Doações, por categoria), lotes aguardando triagem, entradas do dia e da semana, descartes, itens com pouco saldo e as últimas movimentações
-- [ ] S5-16 **Dashboard do Financeiro**, com gráficos e filtros (período, forma de pagamento): entradas e saídas do dia e do mês, resultado, contas a pagar vencidas e dos próximos 7 dias, fiado a receber (total e vencido), caixas fechados com diferença e reembolsos
-- [ ] S5-17 Parâmetro de "pouco saldo" para o alerta do dashboard do Estoque (ver P-08)
-- [ ] S5-18 Gráficos acessíveis e legíveis nos dois temas (usar a skill `dataviz` do Claude Code): cores com contraste, texto alternativo e tabela equivalente
-- [ ] S5-08 Tela **Fluxo de caixa** (Financeiro)
-- [ ] S5-09 Tela **Fechamentos de caixa** (Financeiro)
-- [ ] S5-10 Resumo financeiro com impressão e PDF
-- [ ] S5-11 Tela **Nova compra** (Financeiro e Admin) gerando a conta a pagar
+- [x] S5-06 Tela **Caixas do dia** (Admin e Financeiro) com o detalhe de cada caixa
+- [x] S5-07 **Dashboard do Admin** como primeira tela, com visão geral do que está acontecendo, **gráficos e filtros** (período: hoje, 7 dias, 30 dias e personalizado; por operador e por forma de pagamento): vendas (total, quantidade, ticket médio e por forma), caixas abertos agora (quem, desde quando, dinheiro esperado), lotes aguardando conferência, estoque (itens e valor), contas vencidas e a vencer, fiado em aberto e os últimos eventos sensíveis (cancelamentos, estornos, reembolsos e diferenças de caixa)
+- [x] S5-15 **Dashboard do Estoque**, com gráficos e filtros (período, categoria, parceiro): itens no estoque (Bazar e Doações, por categoria), lotes aguardando triagem, entradas do dia e da semana, descartes, itens com pouco saldo e as últimas movimentações
+- [x] S5-16 **Dashboard do Financeiro**, com gráficos e filtros (período, forma de pagamento): entradas e saídas do dia e do mês, resultado, contas a pagar vencidas e dos próximos 7 dias, fiado a receber (total e vencido), caixas fechados com diferença e reembolsos
+- [x] S5-17 Parâmetro de "pouco saldo" para o alerta do dashboard do Estoque (ver P-08)
+- [x] S5-18 Gráficos acessíveis e legíveis nos dois temas (usar a skill `dataviz` do Claude Code): cores com contraste, texto alternativo e tabela equivalente
+- [x] S5-08 Tela **Fluxo de caixa** (Financeiro)
+- [x] S5-09 Tela **Fechamentos de caixa** (Financeiro)
+- [x] S5-10 Resumo financeiro com impressão e PDF
+- [x] S5-11 Tela **Nova compra** (Financeiro e Admin) gerando a conta a pagar
 
 Câmera
 - [ ] S5-12 Leitura por câmera no PDV e no Estoque (testar com a webcam em `localhost`) **(corte possível)**
 - [ ] S5-13 Definir onde hospedar com HTTPS e testar a câmera no celular **(corte possível)**
-- [ ] S5-14 Testes e rodar a definição de pronto; revisão pelo agy; atualizar a documentação
+- [ ] S5-14 Testes e rodar a definição de pronto; revisão pelo QA (agente escolhido pelo humano); atualizar a documentação
 
 ### Sprint 6 — Validação do protótipo (07/12 a 13/12)
 **Objetivo:** provar que o protótipo funciona inteiro e colher os ajustes.
@@ -264,7 +264,7 @@ Câmera
 - [ ] S6-03 Teste de volume (`05_carga_volume_teste.sql`) e conferência (`07_manutencao_rotina.sql`) no novo modelo
 - [ ] S6-04 Revisão de segurança: dependências, rotas novas, leitura de XML, uploads
 - [ ] S6-05 Revisão de acessibilidade e de responsividade
-- [ ] S6-06 Revisão crítica do protótipo inteiro pelo agy
+- [ ] S6-06 Revisão crítica do protótipo inteiro pelo QA (agente escolhido pelo humano)
 - [ ] S6-07 Demonstração ao grupo e ao professor
 - [ ] S6-08 Registrar os ajustes pedidos e a decisão de validar o protótipo
 
@@ -291,7 +291,7 @@ Ficha de cada tela (objetivo, quem usa, esboço, ações, requisitos funcionais 
 - [ ] S7-15 Admin: Auditoria · LGPD · Cadastros de apoio · Carga inicial e modelos
 
 Fechamento
-- [ ] S7-16 Revisão de cada lote de fichas pelo agy, com os achados conferidos
+- [ ] S7-16 Revisão de cada lote de fichas pelo QA (agente escolhido pelo humano), com os achados conferidos
 - [ ] S7-17 Product backlog formal e sprints seguintes
 - [ ] S7-18 Atualizar os três documentos de planejamento da faculdade (WBS/EAP, Product Backlog e Sprint Planning, em `/home/VT/Documentos/referencia/docBazar/`, fonte em `docBazar/fonte/`) com o que o protótipo validou, incluindo os pedidos novos (perfis e permissões, celular, impressão do fechamento) *(decisão do humano, 20/10/2026: depois de finalizar o protótipo)*
 
@@ -305,7 +305,7 @@ Fechamento
 - [x] P-05 Desconto: a validade é **opcional** (decidido em 20/10/2026): sem data de fim, vale até alguém encerrar. O desconto manual do PDV **pode somar** ao do produto, calculado sobre o preço já com desconto e dentro do limite do perfil. O custo tem **permissão própria** ("Ver custo"), ligada no Admin, no Estoquista e no Financeiro
 - [x] P-06 Prefixo do código do produto e campos obrigatórios do cadastro (S2-03). Decidido em 19/10/2026: o código continua **`BZ` + 6 dígitos**, na mesma sequência de hoje (as etiquetas já impressas valem). Obrigatórios: **título da etiqueta, nome, categoria, preço, quantidade e valor atribuído**; modelo, marca, ano, tipo, tamanho, cor e condição são opcionais
 - [x] P-07 Financeiro consulta lotes e produtos **só para leitura** (confirmado em 20/10/2026; S3-12)
-- [ ] P-08 "Pouco saldo" no dashboard do Estoque: um valor único (sugestão: 5 unidades, configurável pelo Admin em Parâmetros) ou um valor por categoria (S5-15, S5-17)
+- [x] P-08 "Pouco saldo" no dashboard do Estoque: **um valor único**, configurável pelo Admin em Parâmetros, começando em 5 unidades (decidido pelo humano em 20/10/2026; S5-15, S5-17)
 - [ ] P-09 O Vendedor pode **ver** o limite da sangria? Para bloquear com uma mensagem útil ("só há R$ X em dinheiro no caixa"), o sistema mostra o dinheiro da gaveta; isso desfaz o fechamento "às cegas". Confirmar (S1B-07)
 - [x] P-10 Pagar conta "com dinheiro do caixa" e receber fiado na gaveta exigem caixa aberto de quem faz. Decidido em 19/10/2026: o **Administrador** pode abrir caixa (S1B-16). O Financeiro continua sem caixa; se ele precisar dessas duas operações na gaveta, o Admin ou um perfil personalizado as faz
 - [ ] P-11 Recebimento de fiado em dinheiro no caixa: informar o valor recebido e calcular o troco, como na venda? Hoje o recebimento só tem o valor (achado do QA do agy)
@@ -315,6 +315,8 @@ Fechamento
 - [x] P-16 Quem aprova a entrada no estoque: **Admin e Estoquista** (decidido em 20/10/2026, muda a decisão da Sprint 2 de só o Admin). O Estoquista não aprova nem devolve o item que ele mesmo cadastrou; o Admin aprova qualquer um (S3-22)
 - [x] P-17 Valor potencial do relatório de posição de estoque: continua pelo **preço normal** do produto, sem o desconto (decidido pelo humano em 20/10/2026)
 - [x] P-18 Decisões da Sprint 4 (humano, 20/10/2026): a etiqueta imprime **só o preço normal** do produto (o desconto aparece no caixa; não obriga reetiquetar); rolo padrão **50 × 30 mm** até a impressora chegar (o Admin muda); o histórico de impressão (S4-05) vai **na auditoria**, sem tabela nova; dá para imprimir etiqueta de **qualquer produto ativo**, mesmo sem saldo no Bazar; código de barras passa de Code 39 para **Code 128** (as etiquetas já coladas continuam lidas); permissão nova **Imprimir etiquetas** (Admin e Estoquista, como a S1-11 previa). PDV: `n*código` acima do saldo é **recusado inteiro** com aviso; "restam N" **só na mensagem do bip**; a confirmação do Esc abre com o foco em **Cancelar**, tira com **S** ou clique em **Tirar**, ignora a digitação rápida do leitor e vale também para o botão "Remover último"
+- [x] P-19 Decisões da Sprint 5 (humano, 20/10/2026): a importação de lote **grava as linhas válidas** e mostra as aceitas e as recusadas com destaque diferente, cada recusada com o motivo; **todas as importações gravam as válidas** (cadastros e carga inicial também, que antes eram tudo ou nada; decidido na S5-05); a NF-e **cadastra o emitente** como parceiro automaticamente quando ele não existe e vira **lote de compra** com a conta a pagar no valor da nota; "Nova compra" entra no menu do Financeiro (S5-11); **Caixas do dia e Fechamentos de caixa numa tela só**, com filtro (S5-06 e S5-09); gráficos **feitos no projeto**, sem biblioteca, com as cores da identidade visual; o dashboard do Admin fica na tela inicial **junto com os atalhos**; o **Financeiro cadastra o fornecedor** novo na hora da compra (editar parceiro continua só com o Admin); o **CNPJ alfanumérico** vale onde já se aceita CNPJ (parceiro, importação de parceiros, emitente da NF-e e instituição; escolha do Claude, a pedido do humano); a câmera fica nesta sprint se der para testar e validar (no computador pela webcam em `localhost`; no celular depende de HTTPS, P-03)
+- [x] P-20 Importação da NF-e (S5-04): o humano deixou a decisão com o Claude (20/10/2026, "faça o que achar melhor"). Ficou assim: **quem importa** é quem tem contas a pagar (Admin e Financeiro; criar o fornecedor novo exige `parceiros.criar`); a nota **cria o lote de compra** com a conta a pagar no **valor total da nota**, vencendo na **primeira parcela** (sem parcela, na emissão; uma conta por lote, como na Nova compra); os **produtos não viram itens** (a NF-e não traz categoria nem preço de venda): vão listados na observação do lote e o estoque os cadastra; **recusa** nota sem protocolo de autorização, cancelada, de homologação (aceita só fora de produção, para testes), NFC-e, de entrada própria, de outro destinatário (quando a instituição tem CNPJ) e de fornecedor desativado; o **XML não é guardado** (o anexo continua PDF ou imagem). A nota entra inteira ou é recusada inteira, com o motivo (não é planilha de linhas)
 - [x] P-15 Admin sem segundo aprovador: decidido em 19/10/2026 que o cancelamento **pede motivo**. Já é assim para todos os perfis (mínimo de 5 caracteres, testado no smoke); nada a mudar
 
 ## 4. Riscos

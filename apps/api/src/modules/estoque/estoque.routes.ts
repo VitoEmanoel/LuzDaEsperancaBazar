@@ -13,7 +13,7 @@ import { page, parse, zIdParam, zMoney, zMotivo, zPage, zUuid } from '../../shar
 import { auditar } from '../../shared/audit.js';
 import { money, toCents } from '../../shared/money.js';
 import { reservarChave } from '../../shared/idempotencia.js';
-import { lerPlanilha } from '../../shared/planilha.js';
+import { codigoErro, lerPlanilha } from '../../shared/planilha.js';
 import { exigirUsuario, tem } from '../../plugins/auth.js';
 import { mudarPrecoProduto } from './produtos.routes.js';
 import { LOCAL_COD, LOCAL_ID, proximoCodigo } from '../entradas/lotes.routes.js';
@@ -238,10 +238,11 @@ export async function rotasEstoque(app: FastifyInstance) {
     const faltando = ['categoria', 'quantidade', 'preco', 'estoque'].filter((c) => !pl.cabecalho.includes(c));
     if (faltando.length) throw new AppError(400, 'Planilha fora do modelo', 'PLANILHA_INVALIDA', `Colunas obrigatórias ausentes: ${faltando.join(', ')}`);
 
-    const cats = await prisma.categoria.findMany();
+    const cats = await prisma.categoria.findMany({ where: { ativa: true } }); // categoria desativada não recebe saldo
     const porNome = new Map(cats.map((c) => [c.nome.trim().toLowerCase(), c]));
-    const erros: { linha: number; mensagem: string }[] = [];
-    const validas: { cat: (typeof cats)[number]; descricao: string; quantidade: number; preco: string; valor: string; local: 'BAZAR' | 'DOACOES'; controle: 'ETIQUETADO' | 'CATEGORIA' }[] = [];
+    // S5-05 (P-19): grava as linhas válidas e devolve as aceitas e as recusadas, como as outras importações
+    const recusadas: { linha: number; nome: string; motivo: string }[] = [];
+    const validas: { linha: number; cat: (typeof cats)[number]; descricao: string; quantidade: number; preco: string; valor: string; local: 'BAZAR' | 'DOACOES'; controle: 'ETIQUETADO' | 'CATEGORIA' }[] = [];
     for (const { numero, valores: v } of pl.linhas) {
       const cat = porNome.get((v.categoria ?? '').trim().toLowerCase());
       const qtd = Number(v.quantidade);
@@ -258,33 +259,41 @@ export async function rotasEstoque(app: FastifyInstance) {
       if (local !== 'BAZAR' && local !== 'DOACOES') e.push('Estoque deve ser BAZAR ou DOACOES');
       if (controle !== 'ETIQUETADO' && controle !== 'CATEGORIA') e.push('Controle deve ser ETIQUETADO ou CATEGORIA');
       if (controle === 'ETIQUETADO' && qtd !== 1) e.push('Peça etiquetada tem quantidade 1 (uma linha por peça)');
-      if (e.length) erros.push({ linha: numero, mensagem: e.join('; ') });
-      else validas.push({ cat: cat!, descricao: (v.descricao ?? '').slice(0, 120), quantidade: qtd, preco: precoTxt, valor: valorTxt, local: local as 'BAZAR' | 'DOACOES', controle: controle as 'ETIQUETADO' | 'CATEGORIA' });
+      if (e.length) recusadas.push({ linha: numero, nome: (v.descricao || v.categoria || '').slice(0, 120), motivo: e.join('; ') });
+      else validas.push({ linha: numero, cat: cat!, descricao: (v.descricao ?? '').slice(0, 120), quantidade: qtd, preco: precoTxt, valor: valorTxt, local: local as 'BAZAR' | 'DOACOES', controle: controle as 'ETIQUETADO' | 'CATEGORIA' });
     }
-    if (erros.length) return { gravado: false, linhas: pl.linhas.length, erros: erros.slice(0, 500) };
-
-    await prisma.$transaction(async (tx) => {
-      const lote = await tx.loteEntrada.create({ data: { tipo: 'SALDO_INICIAL', recebidoEm: new Date(), recebidoPorId: u.id, observacao: 'Carga inicial da implantação' } });
+    const aceitas: { linha: number; nome: string; quantidade: number }[] = [];
+    if (validas.length) {
+      // o lote de saldo inicial nasce uma vez; cada linha na sua transação (a falha de uma não desfaz as outras)
+      const lote = await prisma.loteEntrada.create({ data: { tipo: 'SALDO_INICIAL', recebidoEm: new Date(), recebidoPorId: u.id, observacao: 'Carga inicial da implantação' } });
       const agora = new Date();
       for (const l of validas) {
         const descricao = l.descricao || `${l.cat.nome} (saldo inicial)`;
-        // cada linha etiquetada vira um produto de peça única (como antes: quantidade 1)
-        const produto = l.controle === 'ETIQUETADO' ? await tx.produto.create({
-          data: { codigo: await proximoCodigo(tx), tituloEtiqueta: descricao.slice(0, 40), nome: descricao, categoriaId: l.cat.id, precoVenda: l.preco, pecaUnica: true, criadoPorId: u.id },
-        }) : null;
-        // quem carrega é o Administrador (estoque.ajustar): os itens já entram aprovados
-        const it = await tx.item.create({
-          data: {
-            loteId: lote.id, categoriaId: l.cat.id, tipoControle: l.controle, produtoId: produto?.id ?? null, descricao,
-            valorAtribuido: l.valor, quantidadeInicial: l.quantidade, criadoPorId: u.id,
-            localDestinoId: LOCAL_ID[l.local], status: 'APROVADO', aprovadoPorId: u.id, aprovadoEm: agora,
-          },
-        });
-        await tx.movimentacao.create({ data: { itemId: it.id, tipo: 'ENTRADA', localDestinoId: LOCAL_ID[l.local], quantidade: l.quantidade, usuarioId: u.id, motivo: 'Saldo inicial' } });
+        try {
+          await prisma.$transaction(async (tx) => {
+            // cada linha etiquetada vira um produto de peça única (como antes: quantidade 1)
+            const produto = l.controle === 'ETIQUETADO' ? await tx.produto.create({
+              data: { codigo: await proximoCodigo(tx), tituloEtiqueta: descricao.slice(0, 40), nome: descricao, categoriaId: l.cat.id, precoVenda: l.preco, pecaUnica: true, criadoPorId: u.id },
+            }) : null;
+            // quem carrega é o Administrador (estoque.ajustar): os itens já entram aprovados
+            const it = await tx.item.create({
+              data: {
+                loteId: lote.id, categoriaId: l.cat.id, tipoControle: l.controle, produtoId: produto?.id ?? null, descricao,
+                valorAtribuido: l.valor, quantidadeInicial: l.quantidade, criadoPorId: u.id,
+                localDestinoId: LOCAL_ID[l.local], status: 'APROVADO', aprovadoPorId: u.id, aprovadoEm: agora,
+              },
+            });
+            await tx.movimentacao.create({ data: { itemId: it.id, tipo: 'ENTRADA', localDestinoId: LOCAL_ID[l.local], quantidade: l.quantidade, usuarioId: u.id, motivo: 'Saldo inicial' } });
+          });
+          aceitas.push({ linha: l.linha, nome: descricao, quantidade: l.quantidade });
+        } catch (er) {
+          req.log.error({ erro: codigoErro(er), linha: l.linha }, 'carga inicial'); // sem a mensagem: o Prisma repete os valores da linha
+          recusadas.push({ linha: l.linha, nome: descricao, motivo: 'Erro ao gravar a linha' });
+        }
       }
-      await tx.loteEntrada.update({ where: { id: lote.id }, data: { status: 'TRIADO' } });
-      await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'CARGA_INICIAL', 'lote_entrada', lote.id, undefined, { linhas: validas.length });
-    }, { timeout: 120_000 });
-    return { gravado: true, linhas: pl.linhas.length, erros: [] };
+      await prisma.loteEntrada.update({ where: { id: lote.id }, data: { status: 'TRIADO' } }); // encerrado depois dos itens, como antes
+      await auditar(prisma, { usuarioId: u.id, ip: req.ip }, 'CARGA_INICIAL', 'lote_entrada', lote.id, undefined, { linhas: pl.linhas.length, aceitas: aceitas.length, recusadas: recusadas.length });
+    }
+    return { total: pl.linhas.length, aceitas, recusadas: recusadas.sort((a, b) => a.linha - b.linha) };
   });
 }

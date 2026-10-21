@@ -1,6 +1,6 @@
 /** ENT/TRI — lotes de entrada, cadastro dos produtos do lote e aprovação. */
 import { http } from '../../shared/api/http';
-import type { CorrecaoItemRequest, ItemAprovacao, ItemLote, LoteDetalhe, LoteEntrada, NovoLoteRequest, Page, ProdutoBusca, TriagemDescarteRequest, TriagemItemRequest } from '../../shared/api/types';
+import type { CorrecaoItemRequest, ItemAprovacao, ItemLote, LoteDetalhe, LoteEntrada, NovoLoteRequest, Page, ProdutoBusca, ResultadoImportacao, ResultadoNfe, TriagemDescarteRequest, TriagemItemRequest } from '../../shared/api/types';
 
 export const lotesApi = {
   listar: (q: { parceiroId?: string; campanhaId?: string; status?: string; de?: string; ate?: string; page?: number }) =>
@@ -13,6 +13,19 @@ export const lotesApi = {
     return http.upload<void>(`/lotes/${id}/documento`, fd);
   },
   baixarDocumento: (id: string) => http.blob(`/lotes/${id}/documento`),
+  /** Importa a planilha (CSV ou XLSX) no lote (S5-03): grava as linhas válidas e devolve as aceitas e as recusadas. */
+  importar: (id: string, arquivo: File) => {
+    const fd = new FormData();
+    fd.append('arquivo', arquivo);
+    return http.upload<ResultadoImportacao>(`/lotes/${id}/importacao`, fd);
+  },
+  /** Importa o XML da NF-e (S5-04): cria o lote de compra, a conta a pagar e, se preciso, o fornecedor. */
+  importarNfe: (arquivo: File) => {
+    const fd = new FormData();
+    fd.append('arquivo', arquivo);
+    return http.upload<ResultadoNfe>('/lotes/nfe', fd);
+  },
+  baixarModeloNfe: () => http.blob('/modelos/nfe'),
   /** Cadastra o item no lote: fica "cadastrado", sem estoque, até o Administrador aprovar (Sprint 2). */
   cadastrarItem: (loteId: string, item: TriagemItemRequest) => http.post<ItemLote>(`/lotes/${loteId}/itens`, item),
   corrigirItem: (loteId: string, itemId: string, c: CorrecaoItemRequest) => http.patch<ItemLote>(`/lotes/${loteId}/itens/${itemId}`, c),

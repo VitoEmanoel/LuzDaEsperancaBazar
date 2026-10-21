@@ -129,6 +129,15 @@ export async function rotasCaixa(app: FastifyInstance) {
     return (await calcularPrevia(prisma, id)).dto;
   });
 
+  // Detalhe do caixa (S5-06): totais por forma, suprimentos, sangrias e o dinheiro esperado; o de outro operador só com relatórios
+  app.get('/caixas/:id/resumo', { config: { acesso: ['caixa.operar', 'relatorios.consultar'] } }, async (req) => {
+    const u = exigirUsuario(req);
+    const { id } = parse(zIdParam, req.params);
+    const c = await caixaVisivel(prisma, u, id);
+    const operador = await prisma.usuario.findUnique({ where: { id: c.abertoPorId }, select: { nome: true } });
+    return { caixa: caixaDto(c, operador?.nome ?? '—'), ...(await calcularPrevia(prisma, id)).dto };
+  });
+
   // Tudo o que aconteceu no caixa, da abertura ao fechamento (ou até agora, se ainda estiver aberto)
   app.get('/caixas/:id/linha-do-tempo', { config: { acesso: ['caixa.operar', 'relatorios.consultar'] } }, async (req) => {
     const u = exigirUsuario(req);
@@ -183,11 +192,17 @@ export async function rotasCaixa(app: FastifyInstance) {
     return caixaDto(c, u.nome);
   });
 
+  // Caixas do dia e fechamentos (S5-06 e S5-09, uma tela só): por período, situação e diferença na conferência
   app.get('/caixas', { config: { acesso: ['relatorios.consultar'] } }, async (req) => {
-    const q = parse(zPage.merge(zPeriodo).extend({ operadorId: zUuid.optional(), terminalId: zUuid.optional() }), req.query);
+    const q = parse(zPage.merge(zPeriodo).extend({
+      operadorId: zUuid.optional(), terminalId: zUuid.optional(),
+      status: z.enum(['ABERTO', 'FECHADO']).optional(), comDiferenca: zBoolQuery.optional(),
+    }), req.query);
     const where = {
       ...(periodo(q.de, q.ate) ? { abertoEm: periodo(q.de, q.ate) } : {}),
       ...(q.operadorId ? { abertoPorId: q.operadorId } : {}), ...(q.terminalId ? { terminalId: q.terminalId } : {}),
+      ...(q.status ? { status: q.status } : {}),
+      ...(q.comDiferenca ? { status: 'FECHADO' as const, diferenca: { not: 0 } } : {}),
     };
     const [rows, total] = await Promise.all([
       prisma.caixaSessao.findMany({ where, include: incTerminal, orderBy: { abertoEm: 'desc' }, ...skipTake(q) }),

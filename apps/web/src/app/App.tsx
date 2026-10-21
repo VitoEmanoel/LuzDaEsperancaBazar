@@ -10,6 +10,9 @@ import { HomePage } from '../features/inicio/pages/HomePage';
 import { AbrirCaixaPage } from '../features/caixa/pages/AbrirCaixaPage';
 import { PdvPage } from '../features/pdv/pages/PdvPage';
 import { FecharCaixaPage } from '../features/caixa/pages/FecharCaixaPage';
+import { CaixasPage } from '../features/caixa/pages/CaixasPage';
+import { FluxoCaixaPage } from '../features/financeiro/pages/FluxoCaixaPage';
+import { PainelEstoquePage, PainelFinanceiroPage } from '../features/inicio/pages/PaineisPage';
 import { VendasPage } from '../features/pdv/pages/VendasPage';
 import { LotesPage } from '../features/entradas/pages/LotesPage';
 import { NovoLotePage } from '../features/entradas/pages/NovoLotePage';
@@ -58,8 +61,13 @@ export function App() {
               <Route path="estoque/transferir" element={P(['estoque.transferir'], <TransferenciaPage />)} />
               <Route path="estoque/etiquetas" element={P(['etiquetas.imprimir'], <EtiquetasPage />)} />
               <Route path="financeiro/pagar" element={P(['contas_pagar.gerenciar'], <ContasPagarPage />)} />
+              <Route path="financeiro/compra" element={P(['contas_pagar.gerenciar'], <NovoLotePage compra />)} />
               <Route path="financeiro/receber" element={P(['contas_receber.receber'], <ContasReceberPage />)} />
               <Route path="financeiro/resumo" element={P(['relatorios.consultar'], <ResumoFinanceiroPage />)} />
+              <Route path="caixas" element={P(['relatorios.consultar'], <CaixasPage />)} />
+              <Route path="financeiro/fluxo" element={P(['relatorios.consultar'], <FluxoCaixaPage />)} />
+              <Route path="painel/financeiro" element={P(['relatorios.consultar'], <PainelFinanceiroPage />)} />
+              <Route path="painel/estoque" element={P(['estoque.consultar'], <PainelEstoquePage />)} />
               <Route path="relatorios/:tipo" element={P(['relatorios.consultar', 'relatorios.estoque'], <RelatoriosPage />)} />
               <Route path="cadastros/:tipo" element={P(['cadastros.gerenciar', 'cadastros.consultar'], <CadastrosPage />)} />
               <Route path="admin/*" element={P(['usuarios.gerenciar', 'perfis.gerenciar', 'parametros.gerenciar', 'auditoria.consultar', 'terminais.gerenciar', 'privacidade.gerenciar', 'fiscal.gerenciar', 'cadastros.gerenciar', 'estoque.ajustar'], <AdminPage />)} />

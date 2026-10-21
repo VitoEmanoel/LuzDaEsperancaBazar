@@ -27,8 +27,11 @@ const MENU: { grupo: string; cor: 'coral' | 'laranja' | 'sol' | 'ceu' | 'roxo'; 
   ] },
   { grupo: 'Financeiro', cor: 'sol', itens: [
     { to: '/financeiro/pagar', rotulo: 'Contas a pagar', perms: ['contas_pagar.gerenciar'] },
+    { to: '/financeiro/compra', rotulo: 'Nova compra', perms: ['contas_pagar.gerenciar'] },
     { to: '/financeiro/receber', rotulo: 'Contas a receber / fiado', perms: ['contas_receber.receber'] },
     { to: '/financeiro/resumo', rotulo: 'Resumo financeiro', perms: ['relatorios.consultar'] },
+    { to: '/caixas', rotulo: 'Caixas do dia', perms: ['relatorios.consultar'] },
+    { to: '/financeiro/fluxo', rotulo: 'Fluxo de caixa', perms: ['relatorios.consultar'] },
   ] },
   { grupo: 'Gestão', cor: 'ceu', itens: [
     { to: '/relatorios/prestacao-contas', rotulo: 'Relatórios', perms: ['relatorios.consultar'] },

@@ -18,16 +18,18 @@ import { fromCents, tryCents } from '../../../shared/lib/money';
 import { uuid } from '../../../shared/lib/uuid';
 import { todayLocal } from '../../../shared/lib/format';
 import { useToast } from '../../../shared/components/Toast';
+import { ImportarNfeModal } from '../components/ImportarNfeModal';
 
 const MAX_MB = 5; // proposto; parâmetro anexo.tamanho_max_mb
 const TIPOS_ACEITOS = ['application/pdf', 'image/png', 'image/jpeg'];
 
-export function NovoLotePage() {
+/** `compra`: a Nova compra do Financeiro (S5-11), o mesmo formulário só com o tipo Compra; a conta a pagar nasce junto. */
+export function NovoLotePage({ compra = false }: { compra?: boolean }) {
   const { can } = useAuth();
   const nav = useNavigate();
   const toast = useToast();
   const ops = useAsync(() => Promise.all([cadastrosApi.listar('parceiros', { ativo: true }), cadastrosApi.listar('campanhas', { ativo: true })]), []);
-  const [tipo, setTipo] = useState<TipoEntrada>('DOACAO');
+  const [tipo, setTipo] = useState<TipoEntrada>(compra ? 'COMPRA' : 'DOACAO');
   const [parceiroId, setParceiroId] = useState('');
   const [campanhaId, setCampanhaId] = useState('');
   const [documento, setDocumento] = useState('');
@@ -39,6 +41,7 @@ export function NovoLotePage() {
   const [enviando, setEnviando] = useState(false);
   const [novoParceiro, setNovoParceiro] = useState(false);
   const [criados, setCriados] = useState<Parceiro[]>([]);
+  const [nfe, setNfe] = useState(false);
   const parceiros = [...criados, ...(ops.data?.[0] ?? []).filter((p) => !criados.some((c) => c.id === p.id))];
 
   const erroArquivo = arquivo && (arquivo.size > MAX_MB * 1024 * 1024 ? `Arquivo maior que ${MAX_MB} MB.` : !TIPOS_ACEITOS.includes(arquivo.type) ? 'Envie PDF, PNG ou JPEG.' : null);
@@ -59,6 +62,12 @@ export function NovoLotePage() {
         try { await lotesApi.enviarDocumento(lote.id, arquivo); }
         catch (err) { toast(`Lote criado, mas o anexo falhou: ${errorMessage(err)}`, 'erro'); }
       }
+      if (compra) {
+        // quem lança a compra não cadastra os produtos: eles ficam para o estoque, no lote
+        toast(`Compra lançada no lote #${lote.numero}, com a conta a pagar. Os produtos são cadastrados pelo estoque.`);
+        nav('/financeiro/pagar');
+        return;
+      }
       toast(`Lote #${lote.numero} criado.`);
       nav(`/entradas/${lote.id}/triagem`);
     } catch (err) { setErro(errorMessage(err)); } finally { setEnviando(false); }
@@ -66,14 +75,20 @@ export function NovoLotePage() {
 
   return (
     <div className="page narrow">
-      <PageHeader titulo="Novo lote de entrada" />
+      <PageHeader titulo={compra ? 'Nova compra' : 'Novo lote de entrada'} />
+      {compra && <p className="muted">A compra abre um lote de entrada e a conta a pagar do fornecedor. Os produtos do lote são cadastrados depois, pelo estoque.</p>}
+      {tipo === 'COMPRA' && can('contas_pagar.gerenciar') && (
+        <p className="row"><span className="muted">Tem o XML da nota fiscal?</span><button type="button" className="btn" onClick={() => setNfe(true)}>Importar NF-e (XML)</button></p>
+      )}
       <form className="card" onSubmit={salvar}>
-        <Field label="Tipo">
-          <select value={tipo} onChange={(e) => setTipo(e.target.value as TipoEntrada)}>
-            <option value="DOACAO">Doação</option>
-            {can('contas_pagar.gerenciar') && <option value="COMPRA">Compra</option>}
-          </select>
-        </Field>
+        {!compra && (
+          <Field label="Tipo">
+            <select value={tipo} onChange={(e) => setTipo(e.target.value as TipoEntrada)}>
+              <option value="DOACAO">Doação</option>
+              {can('contas_pagar.gerenciar') && <option value="COMPRA">Compra</option>}
+            </select>
+          </Field>
+        )}
         <div className="grid-2">
           <Field label={tipo === 'COMPRA' ? 'Fornecedor (obrigatório)' : 'Parceiro / doador (obrigatório)'}>
             <select value={parceiroId} onChange={(e) => setParceiroId(e.target.value)} required><option value="">Selecione…</option>{parceiros.map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}</select>
@@ -81,8 +96,8 @@ export function NovoLotePage() {
           <Field label="Campanha (opcional)"><select value={campanhaId} onChange={(e) => setCampanhaId(e.target.value)}><option value="">—</option>{ops.data?.[1].map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}</select></Field>
         </div>
         <div className="row">
-          {!parceiroId && <small className="hint">Sem doador conhecido, use “Doador não identificado”.</small>}
-          {can('cadastros.gerenciar', 'parceiros.criar') && <button type="button" className="btn btn-sm" onClick={() => setNovoParceiro(true)}>+ Novo parceiro</button>}
+          {!parceiroId && tipo === 'DOACAO' && <small className="hint">Sem doador conhecido, use “Doador não identificado”.</small>}
+          {can('cadastros.gerenciar', 'parceiros.criar') && <button type="button" className="btn btn-sm" onClick={() => setNovoParceiro(true)}>{tipo === 'COMPRA' ? '+ Novo fornecedor' : '+ Novo parceiro'}</button>}
         </div>
         <Field label="Documento de origem (nº do termo, nota…)"><input value={documento} onChange={(e) => setDocumento(e.target.value)} maxLength={60} /></Field>
         <Field label={`Anexo (PDF/PNG/JPEG, até ${MAX_MB} MB)`} erro={erroArquivo}>
@@ -97,17 +112,21 @@ export function NovoLotePage() {
           </fieldset>
         )}
         <ErrorAlert erro={erro ?? ops.erro} />
-        <div className="row"><button type="button" className="btn" onClick={() => nav(-1)}>Cancelar</button><button className="btn btn-primary" disabled={!valido || enviando}>Criar lote e cadastrar produtos</button></div>
+        <div className="row"><button type="button" className="btn" onClick={() => nav(-1)}>Cancelar</button><button className="btn btn-primary" disabled={!valido || enviando}>{compra ? 'Lançar compra' : 'Criar lote e cadastrar produtos'}</button></div>
       </form>
-      {novoParceiro && <NovoParceiroModal onFechar={() => setNovoParceiro(false)} onCriado={(p) => { setCriados((cs) => [p, ...cs]); setParceiroId(p.id); setNovoParceiro(false); toast(`Parceiro “${p.nome}” criado.`); }} />}
+      {nfe && <ImportarNfeModal onFechar={(r) => {
+        setNfe(false);
+        if (r) { toast(`NF-e importada: compra no lote #${r.lote.numero}, com a conta a pagar.`); nav(compra ? '/financeiro/pagar' : `/entradas/${r.lote.id}/triagem`); }
+      }} />}
+      {novoParceiro && <NovoParceiroModal fornecedor={tipo === 'COMPRA'} onFechar={() => setNovoParceiro(false)} onCriado={(p) => { setCriados((cs) => [p, ...cs]); setParceiroId(p.id); setNovoParceiro(false); toast(`${tipo === 'COMPRA' ? 'Fornecedor' : 'Parceiro'} “${p.nome}” criado.`); }} />}
     </div>
   );
 }
 
-/** Cadastro rápido do parceiro (S2-06): nome e tipo; documento e contatos ficam para Cadastros (Admin). */
-function NovoParceiroModal({ onFechar, onCriado }: { onFechar: () => void; onCriado: (p: Parceiro) => void }) {
+/** Cadastro rápido do parceiro (S2-06) ou do fornecedor da compra (S5-11): nome e tipo; documento e contatos ficam para Cadastros (Admin). */
+function NovoParceiroModal({ fornecedor, onFechar, onCriado }: { fornecedor: boolean; onFechar: () => void; onCriado: (p: Parceiro) => void }) {
   const [nome, setNome] = useState('');
-  const [tipo, setTipo] = useState<TipoParceiro>('PESSOA_FISICA');
+  const [tipo, setTipo] = useState<TipoParceiro>(fornecedor ? 'EMPRESA' : 'PESSOA_FISICA');
   const [erro, setErro] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [id] = useState(uuid); // o mesmo id em cada tentativa: reenvio não duplica
@@ -119,8 +138,8 @@ function NovoParceiroModal({ onFechar, onCriado }: { onFechar: () => void; onCri
     catch (err) { setErro(errorMessage(err)); } finally { setEnviando(false); }
   }
   return (
-    <Modal titulo="Novo parceiro" aberto onFechar={onFechar}
-      rodape={<><button type="button" className="btn" onClick={onFechar}>Cancelar</button><button type="submit" form="form-novo-parceiro" className="btn btn-primary" disabled={nome.trim().length < 2 || enviando}>Criar parceiro</button></>}>
+    <Modal titulo={fornecedor ? 'Novo fornecedor' : 'Novo parceiro'} aberto onFechar={onFechar}
+      rodape={<><button type="button" className="btn" onClick={onFechar}>Cancelar</button><button type="submit" form="form-novo-parceiro" className="btn btn-primary" disabled={nome.trim().length < 2 || enviando}>{fornecedor ? 'Criar fornecedor' : 'Criar parceiro'}</button></>}>
       <form id="form-novo-parceiro" onSubmit={criar}>
         <Field label="Nome"><input value={nome} onChange={(e) => setNome(e.target.value)} maxLength={120} autoFocus /></Field>
         <Field label="Tipo"><select value={tipo} onChange={(e) => setTipo(e.target.value as TipoParceiro)}>{TIPOS_PARCEIRO.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select></Field>

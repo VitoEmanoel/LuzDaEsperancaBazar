@@ -4,7 +4,7 @@ O código saiu de duas pastas soltas (`bazar-frontend/`, `bazar-backend/`) para 
 Nenhuma regra de negócio, contrato de API, migração Prisma ou script SQL mudou de conteúdo — só de lugar
 (as migrações `0001`–`0003` estão byte a byte iguais; mexer nelas quebraria o checksum do `migrate deploy`).
 
-Tickets do QA (`docs/qa/`) citam o nome do arquivo e a linha da versão anterior: os nomes de arquivo foram mantidos
+Tickets do QA (`docs/qa/`, apagada em 20/10/2026; continua no histórico do git) citam o nome do arquivo e a linha da versão anterior: os nomes de arquivo foram mantidos
 (exceto os listados abaixo), mas a linha pode ter andado algumas posições por causa dos imports reescritos.
 
 ## Pastas

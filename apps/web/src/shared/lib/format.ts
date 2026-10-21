@@ -31,10 +31,13 @@ export function maskPhone(tel?: string | null): string {
   return digits.length >= 4 ? `(••) •••••-${digits.slice(-4)}` : '••••';
 }
 
-/** CNPJ (14 dígitos) → 00.000.000/0000-00; CPF (11) → 000.000.000-00. Outro tamanho volta como veio. */
+/** Tira a pontuação e passa para maiúsculas: o CNPJ de 2026 tem letras (12 de 0-9 ou A-Z e 2 dígitos verificadores). */
+export const normalizarDocumento = (doc: string) => doc.toUpperCase().replace(/[^0-9A-Z]/g, '');
+
+/** CNPJ (14) → 00.000.000/0000-00, com ou sem letras; CPF (11) → 000.000.000-00. Outro tamanho volta como veio. */
 export function formatDocumento(doc?: string | null): string {
-  const d = (doc ?? '').replace(/\D/g, '');
-  if (d.length === 14) return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+  const d = normalizarDocumento(doc ?? '');
+  if (/^[0-9A-Z]{12}\d{2}$/.test(d)) return d.replace(/^(.{2})(.{3})(.{3})(.{4})(\d{2})$/, '$1.$2.$3/$4-$5');
   if (d.length === 11) return d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
   return doc ?? '';
 }
