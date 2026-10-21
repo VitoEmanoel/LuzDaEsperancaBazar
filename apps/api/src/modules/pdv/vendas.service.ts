@@ -272,6 +272,8 @@ export async function processarVenda(tx: Tx, id: string, req: VendaRequest, op: 
   // ----- pagamentos (RN-15) -----
   const pags = req.pagamentos.map((p) => ({ forma: p.forma, valor: toCents(p.valor), recebido: p.valorRecebido ? toCents(p.valorRecebido) : null }));
   if (pags.some((p) => p.valor <= 0)) throw new AppError(400, 'Pagamento com valor zero', 'VALIDACAO');
+  // cada forma numa linha só, como no PDV (duas linhas de dinheiro dariam dois trocos na mesma venda)
+  if (new Set(pags.map((p) => p.forma)).size !== pags.length) throw new AppError(400, 'Cada forma de pagamento aparece uma vez só', 'FORMA_REPETIDA');
   const pago = pags.reduce((s, p) => s + p.valor, 0);
   if (pago !== total) throw new AppError(409, 'Pagamentos não fecham com o total recalculado', 'PAGAMENTO_DIVERGENTE', `Total ${fromCents(total)}, pago ${fromCents(pago)}`);
   // Valor recebido OBRIGATÓRIO em dinheiro, PIX e cartão (decisão do humano, 19/10/2026): o operador informa o que recebeu em cada forma.

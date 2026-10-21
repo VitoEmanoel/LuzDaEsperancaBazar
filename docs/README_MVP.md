@@ -123,6 +123,7 @@ Cada domínio tem **o mesmo nome no front e no back** (ex.: `features/financeiro
 **Todas as importações funcionam do mesmo jeito** (S5-02 e S5-05): cada tela tem **"Baixar modelo"** em XLSX ou CSV (o cabeçalho certo e linhas de exemplo fictícias), grava as linhas válidas e mostra o mesmo resultado (✓ aceitas e ✕ recusadas, com a linha e o motivo). Vale para o lote, para os cadastros do Admin (categorias, parceiros, campanhas e clientes; o nome que já existe ou se repete na planilha volta recusado) e para a carga inicial do estoque (que antes era tudo ou nada).
 
 **NF-e (S5-04):** na **Nova compra**, o botão **"Importar NF-e (XML)"** recebe o XML que o fornecedor manda. A nota vira o lote de compra com a conta a pagar no valor dela (vencimento na primeira parcela) e, se o emitente ainda não for parceiro, ele é cadastrado pelo CNPJ (com ou sem letras). Os produtos da nota aparecem para conferência e ficam listados no lote; quem os cadastra é o estoque (a nota não traz categoria nem preço de venda). A mesma nota não entra duas vezes (chave de acesso única, também no banco). É recusada a nota sem autorização da SEFAZ, cancelada, de teste (homologação), NFC-e, de outro CNPJ que não o da instituição ou de fornecedor desativado; o arquivo com DTD/entidades é recusado antes de ser lido. Quem importa: Admin e Financeiro. Há uma **NF-e de exemplo** (fictícia, de homologação) para baixar e testar.
+**Limitação do protótipo:** o sistema confere a estrutura, a chave de acesso (dígito e emitente) e o protocolo que vêm dentro do XML, mas **não confere a assinatura digital** da nota nem consulta a SEFAZ. Quem tem a permissão de contas a pagar conseguiria montar um XML falso que pareça válido. Para a versão oficial: validar a assinatura (XML-DSig, certificado ICP-Brasil) ou consultar a chave no portal da SEFAZ antes de aceitar.
 
 ### 5.2 Estoque duplo (Bazar ⇄ Doações)
 
@@ -313,7 +314,7 @@ Segue o brandbook da instituição (`docs/marca/`):
 
 | Bateria | Resultado atual |
 |---|---|
-| `tests/smoke.ts` (fluxos críticos e segurança) | 157 ok |
+| `tests/smoke.ts` (fluxos críticos e segurança) | 158 ok |
 | `tests/concorrencia.ts` (disputa da última peça, IDOR) | OK |
 | `tests/reteste-qa.ts` (regressão dos 12 tickets) | 37 ok |
 | `tests/perfis.ts` (acesso de cada perfil, perfil personalizado, proteção dos perfis padrão, custo escondido, desativação) | 248 ok |
@@ -321,7 +322,7 @@ Segue o brandbook da instituição (`docs/marca/`):
 | `tests/produto.ts` (Sprint 2: cadastro, devolução, aprovação, nova entrada, PEPS por produto, estorno, disputa da última unidade) | 49 ok |
 | `tests/sprint3.ts` (Sprint 3: aprovação por outra pessoa, fila, ajuste só de saída, produto, custo, preço, desconto no PDV e na venda, relatórios, auditoria do parceiro) | 46 ok |
 | `tests/sprint4.ts` (Sprint 4: tamanho do rolo, etiqueta com preço normal, limites do pedido, histórico na auditoria, permissão, venda acima do saldo) | 22 ok |
-| `tests/sprint5.ts` (Sprint 5: CNPJ com letras, pouco saldo, Nova compra e fornecedor pelo Financeiro, Caixas do dia e detalhe, resumo em PDF, painéis, fluxo de caixa, importação de planilha no lote, datas e valores fora do formato, modelos para baixar e importações padronizadas, NF-e) | 115 ok |
+| `tests/sprint5.ts` (Sprint 5: CNPJ com letras, pouco saldo, Nova compra e fornecedor pelo Financeiro, Caixas do dia e detalhe, resumo em PDF, painéis, fluxo de caixa, importação de planilha no lote, datas e valores fora do formato, modelos para baixar e importações padronizadas, NF-e, XLSX zip-bomba) | 117 ok |
 | `database/04_testes_0003.sql` (tentativas de violar regras do banco) | 23 de 23 (28 com o papel da API) |
 | `database/08_testes_0009.sql` (regras do produto e da aprovação no banco) | 32 de 32 (35 com o papel da API) |
 | `database/09_testes_0010.sql` (Sprint 3: quem aprova e devolve, ajuste só de saída, desconto e preço efetivo, perfis, auditoria do parceiro) | 34 de 34 |
@@ -329,7 +330,8 @@ Segue o brandbook da instituição (`docs/marca/`):
 | `database/11_testes_0012.sql` (Sprint 5: formato do CNPJ com letras no parceiro e na instituição, Financeiro cria parceiro, pouco saldo) | 14 de 14 |
 | `database/12_testes_0013.sql` (Sprint 5: formato da chave da NF-e, chave única, só compra tem nota) | 9 de 9 |
 | `database/07_manutencao_rotina.sql` (conferência de saldo e prestação de contas) | 0 divergência |
-| Telas no navegador (`apps/web/tests-ui/`: CPF, janelas do PDV, cadastro e aprovação de produtos, PDV e etiquetas da Sprint 4) | 11, 14, 19 e 30 ok |
+| `database/05_carga_volume_teste.sql` no modelo do produto (escala 1: 64 mil produtos, 70 mil itens, 141 mil movimentações, 66 mil vendas, 2 mil com PEPS em duas entradas) + `07` + `06` | ~11 min de carga, 0 divergência, as 13 consultas abaixo de 150 ms |
+| Telas no navegador (`apps/web/tests-ui/`: CPF, janelas do PDV, cadastro e aprovação de produtos, PDV e etiquetas da Sprint 4, câmera) | 11, 14, 19, 30 e 18 ok |
 | Telas da Sprint 3 no navegador (Chrome por CDP, sistema real) | 20 + 9 (perfis pela tela) + 11 (correções do QA e impressão do caixa) ok |
 | Etiquetas no sistema real (PDF no tamanho do rolo, código lido pelo `zbarimg` de 30 × 20 a 120 × 100 mm) | 5 ok, todos os tamanhos lidos |
 | Typecheck web + api e `npm audit` | 0 erros, 0 vulnerabilidades |

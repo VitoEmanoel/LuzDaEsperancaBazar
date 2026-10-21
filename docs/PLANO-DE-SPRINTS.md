@@ -261,8 +261,8 @@ Câmera
 
 - [ ] S6-01 Roteiro de ponta a ponta por perfil (do lote doado até a venda e o fechamento) executado no sistema
 - [ ] S6-02 Rodar todas as baterias, mais a de acesso por perfil
-- [ ] S6-03 Teste de volume (`05_carga_volume_teste.sql`) e conferência (`07_manutencao_rotina.sql`) no novo modelo
-- [ ] S6-04 Revisão de segurança: dependências, rotas novas, leitura de XML, uploads
+- [x] S6-03 Teste de volume (`05_carga_volume_teste.sql`) e conferência (`07_manutencao_rotina.sql`) no novo modelo *(21/10/2026: o 05 foi reescrito para o produto, com aprovação por outra pessoa, PEPS e fila; escala 1 em ~11 min, 07 com 0 divergência, 06 com as 13 consultas abaixo de 150 ms; `02_dml_dados_iniciais.sql` atualizado às migrações 0001 a 0013)*
+- [ ] S6-04 Revisão de segurança: dependências, rotas novas, leitura de XML, uploads *(21/10/2026, adiantado: Vite 7.3.7 (0 vulnerabilidades), XLSX com teto contra zip-bomba, a mesma forma de pagamento em duas linhas recusada, consultas do CPF em sequência dentro da venda, NF-e sem conferência da assinatura registrada como limitação; falta a revisão completa das rotas novas e dos uploads)*
 - [ ] S6-05 Revisão de acessibilidade e de responsividade
 - [ ] S6-06 Revisão crítica do protótipo inteiro pelo QA (agente escolhido pelo humano)
 - [ ] S6-07 Demonstração ao grupo e ao professor

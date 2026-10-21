@@ -26,8 +26,10 @@ export async function limparCpfsVencidos(db: Db) {
   await db.vendaCpf.deleteMany({ where: { criadoEm: { lt: inicioDoMes() } } });
 }
 
+/** Uma consulta de cada vez: a venda chama isto dentro da transação, e o driver do banco não aceita duas ao mesmo tempo na mesma conexão. */
 export async function configCpf(db: Db) {
-  const [limite, obrigatorio] = await Promise.all([paramNum(db, 'cpf.limite_mensal', 0), paramNum(db, 'cpf.obrigatorio', 0)]);
+  const limite = await paramNum(db, 'cpf.limite_mensal', 0);
+  const obrigatorio = await paramNum(db, 'cpf.obrigatorio', 0);
   return { limiteCents: limite > 0 ? Math.round(limite * 100) : 0, obrigatorio: obrigatorio === 1 };
 }
 
@@ -41,7 +43,8 @@ export async function compradoNoMes(db: Db, cpf: string): Promise<number> {
 }
 
 export async function saldoDoCpf(db: Db, cpf: string) {
-  const [cfg, compradoCents] = await Promise.all([configCpf(db), compradoNoMes(db, cpf)]);
+  const cfg = await configCpf(db);
+  const compradoCents = await compradoNoMes(db, cpf);
   const limitado = cfg.limiteCents > 0;
   return {
     limite: limitado ? fromCents(cfg.limiteCents) : null,

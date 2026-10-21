@@ -5,8 +5,9 @@
 -- =====================================================================================
 \pset pager off
 SELECT id AS cat_id FROM categoria WHERE nome = 'Categoria carga 2' \gset
-SELECT codigo_barras AS cod FROM item i WHERE tipo_controle='ETIQUETADO' AND EXISTS (SELECT 1 FROM vw_saldo_estoque s WHERE s.item_id=i.id AND s.local_id=1 AND s.saldo>0) LIMIT 1 \gset
-SELECT id AS item_id FROM item WHERE codigo_barras = :'cod' \gset
+-- o código é do produto (0009): o item é a entrada aprovada do produto
+SELECT pr.codigo AS cod, i.id AS item_id FROM item i JOIN produto pr ON pr.id = i.produto_id
+WHERE i.tipo_controle='ETIQUETADO' AND i.status='APROVADO' AND EXISTS (SELECT 1 FROM vw_saldo_estoque s WHERE s.item_id=i.id AND s.local_id=1 AND s.saldo>0) LIMIT 1 \gset
 
 CREATE OR REPLACE FUNCTION pg_temp.t(q text) RETURNS text LANGUAGE plpgsql AS $$
 DECLARE r text; ms text;
@@ -41,9 +42,10 @@ SELECT pg_temp.t(format($q$SELECT local_id, saldo FROM vw_saldo_estoque WHERE it
 SELECT pg_temp.t(format($q$SELECT i.id, coalesce(s.b,0), coalesce(s.d,0) FROM item i
   JOIN categoria c ON c.id = i.categoria_id JOIN lote_entrada l ON l.id = i.lote_id
   LEFT JOIN parceiro p ON p.id = l.parceiro_id LEFT JOIN campanha cp ON cp.id = l.campanha_id
+  LEFT JOIN produto pr ON pr.id = i.produto_id
   LEFT JOIN (SELECT item_id, sum(saldo) FILTER (WHERE local_id = 1) AS b, sum(saldo) FILTER (WHERE local_id = 2) AS d
              FROM vw_saldo_estoque GROUP BY item_id) s ON s.item_id = i.id
-  WHERE i.codigo_barras = %L$q$, :'cod'));
+  WHERE pr.codigo = %L AND i.status = 'APROVADO'$q$, :'cod'));
 
 \echo '6. Listagem de estoque, página 1, com busca (estoque.routes.ts)'
 SELECT pg_temp.t($q$SELECT x.*, count(*) OVER () AS total FROM (

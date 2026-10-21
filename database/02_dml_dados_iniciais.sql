@@ -1,7 +1,8 @@
 -- =====================================================================================
 -- DML — dados de referência e da primeira instalação (idempotente: pode rodar de novo)
--- Os mesmos INSERTs já rodam dentro da 0002; este arquivo serve para conferir/restaurar
--- a carga de referência num banco existente. Rodar com o papel DONO.
+-- Os mesmos dados já entram pelas migrações (0002 e seguintes); este arquivo serve para conferir/restaurar
+-- a carga de referência num banco existente. Reflete as migrações 0001 a 0013 (perfis, permissões e parâmetros
+-- de hoje). Só ACRESCENTA o que falta: não muda o que o Administrador alterou. Rodar com o papel DONO.
 --   psql -v ON_ERROR_STOP=1 -1 -d bazar -f database/02_dml_dados_iniciais.sql
 -- O usuário Administrador NÃO é criado aqui (senha precisa de hash argon2id): use
 --   ADMIN_INITIAL_PASSWORD=... npm run db:seed     (troca obrigatória no 1º acesso)
@@ -37,28 +38,36 @@ INSERT INTO permissao (codigo, modulo, descricao) VALUES
   ('recebimento.estornar', 'FIN', 'Estornar recebimento'),
   ('relatorios.consultar', 'REL', 'Relatórios, prestação de contas, histórico de caixas'),
   ('fiscal.gerenciar', 'FIS', 'Regra de imposto'),
-  ('privacidade.gerenciar', 'PRV', 'Exportar e anonimizar titulares')
+  ('privacidade.gerenciar', 'PRV', 'Exportar e anonimizar titulares'),
+  ('relatorios.estoque', 'REL', 'Relatórios de estoque, descartes e transferências'),
+  ('produtos.aprovar', 'ENT', 'Aprovar ou devolver os produtos cadastrados nos lotes'),
+  ('parceiros.criar', 'CAD', 'Criar parceiro (doador ou fornecedor) ao registrar o lote ou a compra'),
+  ('custo.consultar', 'EST', 'Ver o custo (valor atribuído) dos produtos, das entradas e dos relatórios de estoque'),
+  ('produtos.preco', 'EST', 'Alterar o preço de venda do produto, com motivo'),
+  ('produtos.desconto', 'EST', 'Dar e encerrar desconto no produto (percentual ou preço promocional), com motivo'),
+  ('etiquetas.imprimir', 'EST', 'Imprimir etiquetas dos produtos (título, preço e código de barras)')
 ON CONFLICT (codigo) DO NOTHING;
 
+-- os quatro perfis padrão (0005): Caixa virou Vendedor e Triagem virou Estoquista, com os mesmos ids
 INSERT INTO perfil (id, nome, descricao, padrao, limite_desconto_pct) VALUES
   ('00000000-0000-4000-8000-0000000000a1', 'Administrador', 'Gestão do bazar', true, 100),
-  ('00000000-0000-4000-8000-0000000000a2', 'Caixa', 'Operador de caixa', true, 0),
-  ('00000000-0000-4000-8000-0000000000a3', 'Triagem', 'Equipe de triagem', true, 0)
+  ('00000000-0000-4000-8000-0000000000a2', 'Vendedor', 'Opera o PDV: vende e abre e fecha o próprio caixa', true, 0),
+  ('00000000-0000-4000-8000-0000000000a3', 'Estoquista', 'Entradas, cadastro de produtos e estoque (tudo que não é venda nem financeiro)', true, 0),
+  ('00000000-0000-4000-8000-0000000000a4', 'Financeiro', 'Contas a pagar e a receber, fluxo de caixa e relatórios', true, 0)
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO perfil_permissao (perfil_id, permissao_codigo)
 SELECT '00000000-0000-4000-8000-0000000000a1', codigo FROM permissao
 ON CONFLICT DO NOTHING;
-INSERT INTO perfil_permissao (perfil_id, permissao_codigo) VALUES
-  ('00000000-0000-4000-8000-0000000000a2', 'caixa.operar'),
-  ('00000000-0000-4000-8000-0000000000a2', 'clientes.gerenciar'),
-  ('00000000-0000-4000-8000-0000000000a2', 'contas_receber.receber'),
-  ('00000000-0000-4000-8000-0000000000a2', 'cadastros.consultar'),
-  ('00000000-0000-4000-8000-0000000000a2', 'estoque.consultar'),
-  ('00000000-0000-4000-8000-0000000000a3', 'entrada.registrar'),
-  ('00000000-0000-4000-8000-0000000000a3', 'estoque.consultar'),
-  ('00000000-0000-4000-8000-0000000000a3', 'estoque.transferir'),
-  ('00000000-0000-4000-8000-0000000000a3', 'cadastros.consultar')
+-- Vendedor (a2), Estoquista (a3) e Financeiro (a4), como na matriz do plano
+INSERT INTO perfil_permissao (perfil_id, permissao_codigo)
+SELECT p, unnest(c) FROM (VALUES
+  ('00000000-0000-4000-8000-0000000000a2'::uuid, ARRAY['caixa.operar', 'clientes.gerenciar']),
+  ('00000000-0000-4000-8000-0000000000a3'::uuid, ARRAY['cadastros.consultar', 'custo.consultar', 'entrada.registrar', 'estoque.consultar', 'estoque.transferir',
+                                                     'etiquetas.imprimir', 'parceiros.criar', 'produtos.aprovar', 'produtos.preco', 'relatorios.estoque']),
+  ('00000000-0000-4000-8000-0000000000a4'::uuid, ARRAY['contas_pagar.gerenciar', 'contas_receber.lancar', 'contas_receber.receber', 'custo.consultar', 'estoque.consultar',
+                                                     'parceiros.criar', 'produtos.desconto', 'relatorios.consultar', 'relatorios.estoque'])
+) AS t(p, c)
 ON CONFLICT DO NOTHING;
 
 INSERT INTO parceiro (id, nome, tipo, nao_identificado, atualizado_em)
@@ -68,6 +77,9 @@ ON CONFLICT DO NOTHING;
 INSERT INTO motivo_descarte (id, nome) VALUES (gen_random_uuid(), 'Defeito'), (gen_random_uuid(), 'Incompleto') ON CONFLICT (nome) DO NOTHING;
 INSERT INTO motivo_baixa (id, nome) VALUES (gen_random_uuid(), 'Avaria'), (gen_random_uuid(), 'Perda') ON CONFLICT (nome) DO NOTHING;
 
+-- reembolso em dinheiro de caixa fechado vira saída paga no financeiro (0005)
+INSERT INTO categoria_despesa (id, nome) VALUES ('00000000-0000-4000-8000-0000000000c1', 'Reembolso de venda') ON CONFLICT DO NOTHING;
+
 INSERT INTO parametro (chave, valor, descricao) VALUES
   ('fiado.prazo_dias', '', 'Prazo padrão do fiado em dias (PA-07)'),
   ('alerta.vencimento_dias', '3', 'Avisar contas a pagar com vencimento em até N dias'),
@@ -75,7 +87,10 @@ INSERT INTO parametro (chave, valor, descricao) VALUES
   ('senha.tamanho_minimo', '8', 'Tamanho mínimo da senha (PA-17)'),
   ('anexo.tamanho_max_mb', '5', 'Tamanho máximo do anexo do lote em MB (RNF-18)'),
   ('cpf.limite_mensal', '0', 'Limite de compras por CPF no mês, em reais (0 = sem limite)'),
-  ('cpf.obrigatorio', '0', 'CPF obrigatório na venda (1 = sim, 0 = não)')
+  ('cpf.obrigatorio', '0', 'CPF obrigatório na venda (1 = sim, 0 = não)'),
+  ('etiqueta.largura_mm', '50', 'Largura da etiqueta do rolo, em milímetros'),
+  ('etiqueta.altura_mm', '30', 'Altura da etiqueta do rolo, em milímetros'),
+  ('estoque.pouco_saldo', '5', 'Pouco saldo: o dashboard do Estoque avisa o produto com esta quantidade ou menos')
 ON CONFLICT (chave) DO NOTHING;
 
 INSERT INTO instituicao (id, nome, uf, atualizado_em) VALUES (1, 'Associação Luz da Esperança', 'PI', now())
