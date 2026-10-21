@@ -4,7 +4,7 @@
  * Compra pede valor e se foi pago (cria conta a pagar no servidor, exige contas_pagar.gerenciar).
  * Anexo: checagem de tamanho/tipo aqui é só UX — o servidor valida magic bytes (RNF-18).
  */
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { Modal } from '../../../shared/components/Modal';
 import { useNavigate } from 'react-router-dom';
 import { cadastrosApi } from '../../cadastros/cadastros.api';
@@ -42,6 +42,8 @@ export function NovoLotePage({ compra = false }: { compra?: boolean }) {
   const [novoParceiro, setNovoParceiro] = useState(false);
   const [criados, setCriados] = useState<Parceiro[]>([]);
   const [nfe, setNfe] = useState(false);
+  // S6-22: o mesmo id nas novas tentativas (a resposta pode se perder depois de gravar); renova só depois do sucesso
+  const opId = useRef(uuid());
   const parceiros = [...criados, ...(ops.data?.[0] ?? []).filter((p) => !criados.some((c) => c.id === p.id))];
 
   const erroArquivo = arquivo && (arquivo.size > MAX_MB * 1024 * 1024 ? `Arquivo maior que ${MAX_MB} MB.` : !TIPOS_ACEITOS.includes(arquivo.type) ? 'Envie PDF, PNG ou JPEG.' : null);
@@ -52,12 +54,13 @@ export function NovoLotePage({ compra = false }: { compra?: boolean }) {
     e.preventDefault();
     if (!valido) return;
     setEnviando(true); setErro(null);
-    const id = uuid();
+    const id = opId.current;
     try {
       const lote = await lotesApi.criar({
         id, tipo, parceiroId: parceiroId || undefined, campanhaId: campanhaId || undefined, documento: documento.trim() || undefined,
         ...(tipo === 'COMPRA' ? { valorCompra: fromCents(valorCents!), pago, vencimento: pago ? undefined : vencimento } : {}),
       });
+      opId.current = uuid();
       if (arquivo) {
         try { await lotesApi.enviarDocumento(lote.id, arquivo); }
         catch (err) { toast(`Lote criado, mas o anexo falhou: ${errorMessage(err)}`, 'erro'); }

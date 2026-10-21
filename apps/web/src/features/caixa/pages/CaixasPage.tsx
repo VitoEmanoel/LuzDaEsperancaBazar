@@ -10,10 +10,12 @@ import { Badge, Empty, ErrorAlert, Field, MoneyText, PageHeader, Pagination, Tab
 import { formatDateTime, todayLocal } from '../../../shared/lib/format';
 import { toCents } from '../../../shared/lib/money';
 import { CaixaDetalheModal } from '../components/CaixaDetalheModal';
+import { useAuth } from '../../auth/AuthContext';
 
 type Situacao = '' | 'ABERTO' | 'FECHADO' | 'DIFERENCA';
 
 export function CaixasPage() {
+  const { me } = useAuth();
   const [de, setDe] = useState(todayLocal());
   const [ate, setAte] = useState(todayLocal());
   const [situacao, setSituacao] = useState<Situacao>('');
@@ -63,8 +65,10 @@ export function CaixasPage() {
                   <td className="num">{c.esperado ? <MoneyText value={c.esperado} /> : '—'}</td>
                   <td className="num">{c.contado ? <MoneyText value={c.contado} /> : '—'}</td>
                   <td className="num">{c.status === 'ABERTO' ? '—' : dif === 0 ? <Badge tom="ok">Sem diferença</Badge>
-                    : <Badge tom={dif < 0 ? 'erro' : 'alerta'}>{dif < 0 ? 'Faltou ' : 'Sobrou '}<MoneyText value={c.diferenca!.replace('-', '')} /></Badge>}</td>
-                  <td className="actions"><button className="btn btn-sm" onClick={() => setDetalhe(c)} aria-label={`Detalhe do caixa de ${c.operadorNome} em ${formatDateTime(c.abertoEm)}`}>Detalhe</button></td>
+                    : <><Badge tom={dif < 0 ? 'erro' : 'alerta'}>{dif < 0 ? 'Faltou ' : 'Sobrou '}<MoneyText value={c.diferenca!.replace('-', '')} /></Badge>{c.semJustificativa && <> <Badge tom="alerta">Sem justificativa</Badge></>}</>}</td>
+                  <td className="actions">{c.status === 'ABERTO' && c.operadorId === me?.id
+                    ? <span className="muted">Seu caixa: às cegas até fechar</span> /* S6-19: quem opera não vê o esperado do próprio caixa aberto */
+                    : <button className="btn btn-sm" onClick={() => setDetalhe(c)} aria-label={`Detalhe do caixa de ${c.operadorNome} em ${formatDateTime(c.abertoEm)}`}>Detalhe</button>}</td>
                 </tr>
               );
             })}

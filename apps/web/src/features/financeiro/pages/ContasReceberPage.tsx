@@ -14,7 +14,7 @@ import { Modal } from '../../../shared/components/Modal';
 import { ConfirmMotivo } from '../../../shared/components/ConfirmMotivo';
 import { Can } from '../../auth/guards';
 import { formatDate, formatDateTime, maskPhone, todayLocal } from '../../../shared/lib/format';
-import { fromCents, toCents, tryCents } from '../../../shared/lib/money';
+import { formatMoney, fromCents, toCents, tryCents } from '../../../shared/lib/money';
 import { uuid } from '../../../shared/lib/uuid';
 import { useToast } from '../../../shared/components/Toast';
 
@@ -61,6 +61,8 @@ export function ContasReceberPage() {
 
 function ReceberModal({ conta, onFechar, onOk }: { conta: ContaReceber | null; onFechar: () => void; onOk: () => Promise<void> }) {
   const [valor, setValor] = useState('');
+  // S6-20: o que o cliente entregou, só em dinheiro; vazio = o próprio valor (sem troco)
+  const [recebido, setRecebido] = useState('');
   const [noCaixa, setNoCaixa] = useState(true);
   const [forma, setForma] = useState<FormaQuitacao>('DINHEIRO');
   const [caixa, setCaixa] = useState<CaixaSessao | null | undefined>(undefined);
@@ -71,16 +73,21 @@ function ReceberModal({ conta, onFechar, onOk }: { conta: ContaReceber | null; o
   // Descobre se o operador tem caixa aberto (para oferecer "receber no caixa").
   useEffect(() => {
     if (!conta) return;
-    setValor(conta.saldo.replace('.', ',')); setForma('DINHEIRO'); setCaixa(undefined); setErro(null);
+    setValor(conta.saldo.replace('.', ',')); setRecebido(''); setForma('DINHEIRO'); setCaixa(undefined); setErro(null);
     caixaApi.atual().then(setCaixa).catch(() => setCaixa(null));
   }, [conta]);
   const cents = tryCents(valor);
+  const dinheiro = forma === 'DINHEIRO';
+  const recCents = !dinheiro ? null : recebido.trim() === '' ? cents : tryCents(recebido);
+  const recebidoMenor = dinheiro && cents !== null && recCents !== null && recCents < cents;
+  // o troco é sobre o valor a receber agora (parcial ou não), nunca sobre o saldo; o recebido pode passar do saldo
+  const troco = dinheiro && cents !== null && recCents !== null && !recebidoMenor ? recCents - cents : 0;
   // o caixa entra no pedido: quando ele termina de carregar, o pedido muda e o id também (senão o reenvio daria 409)
-  useEffect(() => { opId.current = uuid(); }, [conta?.id, cents, forma, noCaixa, caixa?.id]);
-  const valido = conta && cents !== null && cents > 0 && cents <= toCents(conta.saldo);
+  useEffect(() => { opId.current = uuid(); }, [conta?.id, cents, forma, noCaixa, caixa?.id, recCents]);
+  const valido = conta && cents !== null && cents > 0 && cents <= toCents(conta.saldo) && (!dinheiro || (recCents !== null && !recebidoMenor));
   async function salvar() {
     if (!valido || enviando) return; setErro(null); setEnviando(true); // clique duplo não manda dois recebimentos
-    try { await contasReceberApi.receber(conta!.id, { id: opId.current, valor: fromCents(cents!), forma, caixaId: noCaixa && caixa ? caixa.id : undefined }); opId.current = uuid(); onFechar(); await onOk(); }
+    try { await contasReceberApi.receber(conta!.id, { id: opId.current, valor: fromCents(cents!), forma, caixaId: noCaixa && caixa ? caixa.id : undefined, valorRecebido: dinheiro ? fromCents(recCents!) : undefined }); opId.current = uuid(); onFechar(); await onOk(); }
     catch (e) { setErro(errorMessage(e)); }
     finally { setEnviando(false); }
   }
@@ -88,7 +95,7 @@ function ReceberModal({ conta, onFechar, onOk }: { conta: ContaReceber | null; o
     <Modal titulo={`Receber de ${conta?.clienteNome ?? ''}`} aberto={!!conta} onFechar={onFechar} largura="sm"
       rodape={<><button className="btn" onClick={onFechar}>Voltar</button><button className="btn btn-primary" disabled={!valido || enviando} onClick={salvar}>{enviando ? 'Registrando…' : 'Registrar'}</button></>}>
       <p>Saldo: <MoneyText value={conta?.saldo} /></p>
-      <Field label="Valor recebido (R$)" hint="Pode ser parcial." erro={cents !== null && conta && cents > toCents(conta.saldo) ? 'Maior que o saldo' : null}>
+      <Field label="Valor a receber (R$)" hint="Quanto da dívida o cliente paga agora. Pode ser parcial." erro={cents !== null && conta && cents > toCents(conta.saldo) ? 'Maior que o saldo' : null}>
         <input inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} autoFocus />
       </Field>
       <Field label="Forma de pagamento" hint="Só dinheiro entra no valor esperado da gaveta no fechamento.">
@@ -96,6 +103,12 @@ function ReceberModal({ conta, onFechar, onOk }: { conta: ContaReceber | null; o
           {FORMAS_QUITACAO.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
         </select>
       </Field>
+      {dinheiro && (<>
+        <Field label="Valor recebido (R$)" hint="Quanto o cliente entregou. Em branco: o valor exato, sem troco." erro={recebidoMenor ? 'Menor que o valor a receber' : recCents === null && recebido.trim() !== '' ? 'Valor inválido' : null}>
+          <input inputMode="decimal" value={recebido} onChange={(e) => setRecebido(e.target.value)} placeholder={cents !== null ? formatMoney(cents) : ''} />
+        </Field>
+        {troco > 0 && <div className="troco" aria-live="polite">Troco a devolver: <strong>{formatMoney(troco)}</strong></div>}
+      </>)}
       {caixa ? <label className="check"><input type="checkbox" checked={noCaixa} onChange={(e) => setNoCaixa(e.target.checked)} /> Entrou no caixa aberto ({caixa.terminalNome})</label>
         : caixa === null && <p className="muted">Sem caixa aberto: será registrado como recebimento fora do caixa.</p>}
       <ErrorAlert erro={erro} />
@@ -118,7 +131,7 @@ function ExtratoModal({ clienteId, onFechar, onAlterou }: { clienteId: string | 
         <h3>Recebimentos</h3>
         <TabelaRolavel><table className="table compact"><thead><tr><th>Data</th><th>Onde</th><th className="num">Valor</th><th /></tr></thead>
           <tbody>{ext.data.recebimentos.map((r) => (
-            <tr key={r.id} className={r.estornado ? 'riscado' : ''}><td>{formatDateTime(r.recebidoEm)}</td><td>{r.caixaId ? 'No caixa' : 'Fora do caixa'}{r.forma && ` · ${FORMAS_QUITACAO.find((f) => f.value === r.forma)?.label ?? r.forma}`}{r.estornado && ' · estornado'}</td><td className="num"><MoneyText value={r.valor} /></td>
+            <tr key={r.id} className={r.estornado ? 'riscado' : ''}><td>{formatDateTime(r.recebidoEm)}</td><td>{r.caixaId ? 'No caixa' : 'Fora do caixa'}{r.forma && ` · ${FORMAS_QUITACAO.find((f) => f.value === r.forma)?.label ?? r.forma}`}{r.valorRecebido && ` · recebido ${formatMoney(toCents(r.valorRecebido))}${r.troco && toCents(r.troco) > 0 ? `, troco ${formatMoney(toCents(r.troco))}` : ''}`}{r.estornado && ' · estornado'}</td><td className="num"><MoneyText value={r.valor} /></td>
               <td><Can perm="recebimento.estornar">{!r.estornado && <button className="btn btn-sm btn-danger" onClick={() => setEstornar(r.id)}>Estornar</button>}</Can></td></tr>
           ))}</tbody></table></TabelaRolavel>
       </>)}

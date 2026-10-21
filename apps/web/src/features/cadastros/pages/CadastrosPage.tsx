@@ -2,7 +2,7 @@
  * Cadastros genéricos (categorias, parceiros, campanhas, motivos, categorias de despesa, clientes).
  * Nada é excluído: só desativa (RN-24). Busca de clientes vai no corpo de POST (sem PII na URL).
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { cadastrosApi, clientesApi, type TipoCadastro } from '../cadastros.api';
 import { errorMessage, errosPorCampo } from '../../../shared/api/http';
@@ -136,6 +136,7 @@ function EditarModal({ tipo, campos, registro, onFechar, onOk }: { tipo: Tipo; c
   const [erro, setErro] = useState<string | null>(null);
   const [errosCampo, setErrosCampo] = useState<Record<string, string>>({});
   const [enviando, setEnviando] = useState(false);
+  const opId = useRef(uuid()); // S6-22: o mesmo id do cliente nas novas tentativas; renova só depois do sucesso
   const [duplicados, setDuplicados] = useState<ClienteResumo[] | null>(null);
   const toast = useToast();
 
@@ -181,7 +182,7 @@ function EditarModal({ tipo, campos, registro, onFechar, onOk }: { tipo: Tipo; c
           if (achados.length) { setDuplicados(achados); return; }
         }
         if (registro) await clientesApi.atualizar(registro.id, dados);
-        else await clientesApi.criar({ id: uuid(), nome: String(dados.nome), telefone: String(dados.telefone), cienciaAviso: true });
+        else { await clientesApi.criar({ id: opId.current, nome: String(dados.nome), telefone: String(dados.telefone), cienciaAviso: true }); opId.current = uuid(); }
       } else if (registro) await cadastrosApi.atualizar(tipo, registro.id, dados as never);
       else await cadastrosApi.criar(tipo, { ...dados, id: uuid() } as never);
       onFechar(); await onOk();

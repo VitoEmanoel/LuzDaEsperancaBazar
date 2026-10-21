@@ -71,6 +71,9 @@ a.alert:hover { filter: brightness(.98); color: var(--text); }
 .alert-warn { background: var(--warn-bg); border-color: var(--warn); }
 .alert-info { background: var(--info-bg); border-color: var(--info); }
 .alert-ok { background: var(--ok-bg); border-color: var(--ok); }
+/* S6-19: caixa fechado com diferença esperando a justificativa de quem fechou */
+.alerta-pendencia { background: var(--warn-bg); border-left: 4px solid var(--warn); }
+.alerta-pendencia > div + div { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border, currentColor); }
 .alert .btn { margin-left: .75rem; }
 
 /* --- Badges (pílulas, como as palavras-chave do brandbook) --- */

@@ -13,14 +13,18 @@ export const caixaApi = {
   atual: () => http.get<CaixaSessao>('/caixas/atual'),
   abrir: (c: { id: string; terminalId: string; fundoTroco: Money }) => http.post<CaixaSessao>('/caixas', c),
   lancar: (caixaId: string, l: CaixaLancamentoRequest) => http.post<void>(`/caixas/${caixaId}/lancamentos`, l),
-  previaFechamento: (caixaId: string) => http.get<PreviaFechamento>(`/caixas/${caixaId}/previa-fechamento`),
-  fechar: (caixaId: string, contado: Money, observacao?: string) => http.post<CaixaSessao>(`/caixas/${caixaId}/fechar`, { contado, observacao }),
+  /** S6-19: fechamento às cegas e definitivo; a resposta traz o esperado e a diferença. O id é o da operação (o mesmo nas novas tentativas). */
+  fechar: (caixaId: string, f: { id: string; contado: Money }) => http.post<CaixaSessao>(`/caixas/${caixaId}/fechar`, f),
+  /** S6-19: a justificativa da diferença, depois do fechamento, uma vez só. */
+  justificar: (caixaId: string, texto: string) => http.post<CaixaSessao>(`/caixas/${caixaId}/justificativa`, { texto }),
+  /** S6-19: caixas que eu fechei com diferença e ainda não justifiquei. */
+  minhasPendencias: () => http.get<CaixaSessao[]>('/caixas/minhas-pendencias'),
   /** Tudo o que aconteceu no caixa, da abertura ao fechamento (ou até agora). */
   linhaDoTempo: (caixaId: string) => http.get<LinhaDoTempo>(`/caixas/${caixaId}/linha-do-tempo`),
   /** PDF do fechamento (ou da parcial, se o caixa ainda estiver aberto). */
   pdfFechamento: (caixaId: string) => http.blob(`/caixas/${caixaId}/fechamento.pdf`),
   /** Caixas do dia e fechamentos (Admin e Financeiro, S5-06): por período, situação e diferença. */
   historico: (q: { de?: string; ate?: string; page?: number; status?: 'ABERTO' | 'FECHADO'; comDiferenca?: boolean }) => http.get<Page<CaixaSessao>>('/caixas', { query: q }),
-  /** Detalhe de um caixa: totais por forma e o dinheiro esperado (o de outro operador só com relatórios). */
+  /** Detalhe de um caixa: totais por forma e o dinheiro esperado (o de outro operador só com relatórios; o meu, só depois de fechado). */
   resumo: (caixaId: string) => http.get<PreviaFechamento & { caixa: CaixaSessao }>(`/caixas/${caixaId}/resumo`),
 };

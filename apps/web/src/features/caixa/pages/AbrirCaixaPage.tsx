@@ -14,6 +14,7 @@ import { fromCents, tryCents } from '../../../shared/lib/money';
 import { uuid } from '../../../shared/lib/uuid';
 import { armazenamento, CHAVES } from '../../../shared/lib/armazenamento';
 import { BrandMark } from '../../../shared/components/BrandMark';
+import { PendenciasDeJustificativa } from '../components/JustificarDiferenca';
 import { useAuth } from '../../auth/AuthContext';
 
 export function AbrirCaixaPage() {
@@ -83,6 +84,8 @@ export function AbrirCaixaPage() {
   return (
     <div className="center-page">
       <BrandMark />
+      {/* S6-19: o caixa anterior fechou com diferença e não foi justificado: avisa aqui também, sem bloquear a abertura */}
+      <PendenciasDeJustificativa />
       <form className="card login-card" onSubmit={abrir}>
         <h1>{fixo ? `Abrir caixa · ${fixo.nome}` : 'Abrir caixa'}</h1>
         {semTerminais && (

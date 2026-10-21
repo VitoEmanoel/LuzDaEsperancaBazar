@@ -2,7 +2,7 @@
  * Modal de pagamento: formas (pode dividir), valor recebido e troco, fiado com cliente e vencimento,
  * cadastro rápido de cliente e desconto dentro do limite do perfil (PA-08 pendente).
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal } from '../../../shared/components/Modal';
 import { ErrorAlert, Field } from '../../../shared/components/ui';
 import { FORMAS_PAGAMENTO, type CatalogoPdv, type FormaPagamento, type PagamentoRequest } from '../../../shared/api/types';
@@ -186,6 +186,7 @@ function SeletorCliente({ clientesLocais, cliente, onSelecionar, onNovoClienteLo
   const [remotos, setRemotos] = useState<{ id: string; nome: string; telefone: string }[] | null>(null);
   const [novo, setNovo] = useState(false);
   const [nome, setNome] = useState(''); const [tel, setTel] = useState(''); const [ciencia, setCiencia] = useState(false);
+  const opId = useRef(uuid()); // S6-22: o mesmo id nas novas tentativas; renova só depois do sucesso
   const [erro, setErro] = useState<string | null>(null);
   /** null = ainda não conferido; [] = conferido e livre; [...] = mostrar aviso (ticket 12) */
   const [duplicados, setDuplicados] = useState<ClienteResumo[] | null>(null);
@@ -212,8 +213,9 @@ function SeletorCliente({ clientesLocais, cliente, onSelecionar, onNovoClienteLo
       if (achados.length) { setDuplicados(achados); return; }
     }
     setDuplicados(null);
-    const c = { id: uuid(), nome: nome.trim(), telefone: tel.trim(), cienciaAviso: true };
+    const c = { id: opId.current, nome: nome.trim(), telefone: tel.trim(), cienciaAviso: true };
     try { await clientesApi.criar(c); } catch (e) { setErro(errorMessage(e)); return; }
+    opId.current = uuid();
     onNovoClienteLocal(c); onSelecionar({ id: c.id, nome: c.nome }); setNovo(false); setNome(''); setTel(''); setCiencia(false);
   }
   function usarExistente(c: ClienteResumo) {

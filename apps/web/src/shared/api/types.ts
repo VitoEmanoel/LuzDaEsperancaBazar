@@ -283,7 +283,11 @@ export interface Terminal { id: Uuid; nome: string; ativo: boolean; /** primeiro
 export interface CaixaSessao {
   id: Uuid; terminalId: Uuid; terminalNome: string; operadorId?: Uuid; operadorNome: string;
   abertoEm: IsoDateTime; fundoTroco: Money; status: 'ABERTO' | 'FECHADO';
-  fechadoEm?: IsoDateTime; esperado?: Money; contado?: Money; diferenca?: Money; observacao?: string;
+  fechadoEm?: IsoDateTime; esperado?: Money; contado?: Money; diferenca?: Money;
+  /** a justificativa da diferença (S6-19) ou a observação antiga, dos caixas fechados antes da 0016 */
+  observacao?: string;
+  /** fechou com diferença e quem fechou ainda não justificou (S6-19) */
+  semJustificativa?: boolean;
 }
 export interface CaixaLancamentoRequest { id: Uuid; tipo: 'SANGRIA' | 'SUPRIMENTO'; valor: Money; motivo: string }
 export interface PreviaFechamento {
@@ -316,6 +320,8 @@ export interface ContaReceber {
 }
 export interface Recebimento {
   id: Uuid; contaReceberId: Uuid; valor: Money; recebidoEm: IsoDateTime; caixaId?: Uuid; estornado: boolean; forma?: FormaQuitacao;
+  /** S6-20: só em dinheiro (os antigos não têm): o que o cliente entregou e o troco. Informativos: a conta e o caixa usam `valor`. */
+  valorRecebido?: Money; troco?: Money;
 }
 export interface ExtratoCliente {
   cliente: { id: Uuid; nome: string };

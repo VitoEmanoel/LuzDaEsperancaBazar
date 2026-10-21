@@ -265,10 +265,23 @@ rota('POST', '/clientes/busca', ['clientes.gerenciar', 'caixa.operar', 'contas_r
   return ok(r.slice(0, 50));
 });
 rota('GET', '/clientes', ['clientes.gerenciar'], () => ok(db.clientes.filter((c) => !c.anonimizado)));
+// S6-22: o mesmo id com outros dados ou de outra pessoa é recusado, como na API real (impressão do pedido com as chaves em ordem)
+const pedidosCadastro = new Map<string, string>();
+const impressaoPedido = (v: unknown): string => JSON.stringify(v, (_k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, x[k]])) : x));
+function outroPedido(escopo: string, id: string, usuarioId: string, corpo: unknown): boolean {
+  const atual = impressaoPedido([escopo, usuarioId, corpo]);
+  const antes = pedidosCadastro.get(id);
+  if (antes === undefined) { pedidosCadastro.set(id, atual); return false; } // gravado antes de a demonstração guardar a impressão
+  return antes !== atual;
+}
+const JA_GRAVADO = () => problem(409, 'Este cadastro já foi gravado com outros dados', 'ID_EM_USO');
+
 rota('POST', '/clientes', ['clientes.gerenciar', 'caixa.operar'], ({ user, body }) => {
   exigir(body?.nome?.trim(), 'nome'); exigir(/\d{10,11}/.test(String(body?.telefone ?? '').replace(/\D/g, '')), 'telefone');
   exigir(body?.cienciaAviso === true, 'cienciaAviso');
-  const existente = db.clientes.find((c) => c.id === body.id); if (existente) return ok(existente); // idempotente
+  const existente = db.clientes.find((c) => c.id === body.id);
+  if (existente) return outroPedido('criar_cliente', body.id, user.id, body) ? JA_GRAVADO() : ok(existente); // idempotente
+  if (body.id) pedidosCadastro.set(body.id, impressaoPedido(['criar_cliente', user.id, body]));
   const c = { id: body.id ?? uid(), nome: body.nome.trim(), telefone: body.telefone, ativo: true, cienciaAviso: true };
   db.clientes.push(c); auditar(user, 'CLIENTE_CRIADO', 'cliente', c.id); return ok(c, 201);
 });
@@ -332,7 +345,8 @@ rota('POST', '/lotes', ['entrada.registrar', 'contas_pagar.gerenciar'], ({ user,
     if (!perfilDe(user).permissoes.includes('contas_pagar.gerenciar')) return problem(403, 'Registrar compra exige permissão de contas a pagar');
     exigir(body.valorCompra && toCents(body.valorCompra) > 0, 'valorCompra');
   }
-  if (db.lotes.some((l) => l.id === body.id)) return ok(loteDto(db.lotes.find((l) => l.id === body.id)!));
+  if (db.lotes.some((l) => l.id === body.id)) return outroPedido('criar_lote', body.id, user.id, body) ? JA_GRAVADO() : ok(loteDto(db.lotes.find((l) => l.id === body.id)!));
+  if (body.id) pedidosCadastro.set(body.id, impressaoPedido(['criar_lote', user.id, body]));
   const l = { id: body.id ?? uid(), numero: ++db.seq.lote, tipo: body.tipo, parceiroId: body.parceiroId || undefined, campanhaId: body.campanhaId || undefined, documento: body.documento, temAnexo: false, recebidoEm: now(), status: 'ABERTO' as const, valorCompra: body.valorCompra ? toCents(body.valorCompra) : undefined, pago: body.pago };
   db.lotes.push(l);
   if (body.tipo === 'COMPRA') db.contasPagar.push({ id: uid(), descricao: `Compra — lote ${l.numero}`, categoriaDespesaId: db.categoriasDespesa[1]!.id, categoriaDespesaNome: db.categoriasDespesa[1]!.nome, valor: body.valorCompra, vencimento: body.vencimento ?? localDate(now()), status: body.pago ? 'PAGA' : 'ABERTA', pagaEm: body.pago ? now() : undefined });
@@ -356,7 +370,7 @@ function loteAberto(id: string) {
 let seqCodigo = 100;
 rota('POST', '/lotes/:id/itens', ['entrada.registrar'], ({ user, params, body }) => {
   const existente = db.itens.find((i) => i.id === body?.id);
-  if (existente) return ok(itemLoteDto(existente)); // reenvio idempotente
+  if (existente) return outroPedido('cadastrar_item', body.id, user.id, { loteId: params.id, ...body }) ? JA_GRAVADO() : ok(itemLoteDto(existente)); // reenvio idempotente
   const l = loteAberto(params.id!);
   exigir(db.categorias.some((c) => c.id === body?.categoriaId && c.ativo), 'categoriaId');
   exigir(['ETIQUETADO', 'CATEGORIA'].includes(body.controle), 'controle');
@@ -386,6 +400,7 @@ rota('POST', '/lotes/:id/itens', ['entrada.registrar'], ({ user, params, body })
     criadoPorId: user.id,
   };
   db.itens.push(it); auditar(user, 'ITEM_CADASTRADO', 'item', it.id);
+  pedidosCadastro.set(it.id, impressaoPedido(['cadastrar_item', user.id, { loteId: params.id, ...body }])); // só o que foi gravado
   return ok(itemLoteDto(it), 201);
 });
 rota('PATCH', '/lotes/:id/itens/:itemId', ['entrada.registrar'], ({ user, params, body }) => {
@@ -866,7 +881,11 @@ rota('GET', '/terminais', ['terminais.gerenciar', 'caixa.operar'], ({ user, quer
 })));
 rota('POST', '/terminais', ['terminais.gerenciar'], ({ user, body }) => { exigir(body?.nome, 'nome'); const t = { id: body.id ?? uid(), nome: body.nome, ativo: true }; db.terminais.push(t); auditar(user, 'TERMINAL_CRIADO', 'terminal', t.id); return ok(t, 201); });
 rota('PATCH', '/terminais/:id', ['terminais.gerenciar'], ({ user, params, body }) => { const t = db.terminais.find((x) => x.id === params.id); if (!t) return problem(404, 'Terminal não encontrado'); Object.assign(t, pick(body, ['nome', 'ativo'])); auditar(user, 'TERMINAL_ALTERADO', 'terminal', t.id); return ok(t); });
-const caixaDto = ({ lancamentos: _l, ...c }: CaixaDb) => c;
+const caixaDto = ({ lancamentos: _l, ...c }: CaixaDb) => ({
+  ...c,
+  // S6-19: fechou com diferença e quem fechou ainda não justificou
+  ...(c.status === 'FECHADO' && toCents(c.diferenca ?? '0') !== 0 && !c.observacao ? { semJustificativa: true } : {}),
+});
 rota('GET', '/caixas/atual', ['caixa.operar'], ({ user }) => { const c = db.caixas.find((x) => x.operadorId === user.id && x.status === 'ABERTO'); return c ? ok(caixaDto(c)) : problem(404, 'Nenhum caixa aberto', 'SEM_CAIXA_ABERTO'); });
 rota('POST', '/caixas', ['caixa.operar'], ({ user, body }) => {
   const ja = db.caixas.find((c) => c.id === body?.id);
@@ -892,7 +911,8 @@ function meuCaixa(user: UsuarioDb, id: string) {
 rota('POST', '/caixas/:id/lancamentos', ['caixa.operar'], ({ user, params, body }) => {
   const c = meuCaixa(user, params.id!); exigir(['SANGRIA', 'SUPRIMENTO'].includes(body?.tipo), 'tipo'); exigir(toCents(body.valor) > 0, 'valor'); exigir(String(body.motivo ?? '').trim(), 'motivo');
   if (c.lancamentos.some((l) => l.id === body.id)) return { status: 204, headers: {}, body: null };
-  if (body.tipo === 'SANGRIA' && toCents(body.valor) > toCents(previa(c).esperadoDinheiro)) return problem(409, 'Sangria maior que o dinheiro em caixa', 'SANGRIA_ACIMA_SALDO');
+  // S6-19: às cegas, a recusa não diz quanto há na gaveta
+  if (body.tipo === 'SANGRIA' && toCents(body.valor) > toCents(previa(c).esperadoDinheiro)) { auditar(user, 'SANGRIA_RECUSADA', 'caixa_sessao', c.id); return problem(409, 'Valor maior do que o dinheiro disponível no caixa', 'SANGRIA_ACIMA_SALDO'); }
   c.lancamentos.push({ id: body.id ?? uid(), tipo: body.tipo, valor: toCents(body.valor), motivo: body.motivo, em: now() });
   auditar(user, body.tipo, 'caixa_sessao', c.id); return { status: 204, headers: {}, body: null };
 });
@@ -907,9 +927,10 @@ function previa(c: CaixaDb) {
   const esperado = toCents(c.fundoTroco) + porForma.DINHEIRO + receb + sup - sang;
   return { fundoTroco: c.fundoTroco, suprimentos: fromCents(sup), sangrias: fromCents(sang), totaisPorForma: Object.fromEntries(FORMAS.map((f) => [f, fromCents(porForma[f])])) as Record<FormaPagamento, string>, esperadoDinheiro: fromCents(esperado), quantidadeVendas: vendas.length };
 }
-/** Caixa do próprio operador ou, para quem vê relatórios, qualquer caixa. */
+/** Caixa do próprio operador depois de fechado ou, para quem vê relatórios, o de outra pessoa. S6-19: o dono do caixa ABERTO não vê. */
 function caixaVisivel(user: UsuarioDb, id: string) {
   const c = db.caixas.find((x) => x.id === id); if (!c) falha(404, 'Caixa não encontrado');
+  if (c!.operadorId === user.id && c!.status === 'ABERTO') falha(403, 'Seu caixa está aberto: o total e a gaveta aparecem depois do fechamento', 'CAIXA_ABERTO_AS_CEGAS');
   if (c!.operadorId !== user.id && !perfilDe(user).permissoes.includes('relatorios.consultar')) falha(403, 'Caixa não pertence a esta sessão', 'CAIXA_DE_OUTRO_OPERADOR');
   return c!;
 }
@@ -937,14 +958,32 @@ rota('GET', '/caixas/:id/fechamento.pdf', ['caixa.operar', 'relatorios.consultar
   const pdf = '%PDF-1.1\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 320 120]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n4 0 obj<</Length 60>>stream\nBT /F1 12 Tf 20 60 Td (Demonstracao: o PDF real vem do servidor) Tj ET\nendstream endobj\n5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\ntrailer<</Root 1 0 R/Size 6>>\n%%EOF';
   return { status: 200, headers: { 'content-type': 'application/pdf' }, body: new Blob([pdf], { type: 'application/pdf' }) };
 });
-rota('GET', '/caixas/:id/previa-fechamento', ['caixa.operar'], ({ user, params }) => ok(previa(meuCaixa(user, params.id!))));
+// S6-19: fechamento às cegas e definitivo (sem a prévia); a justificativa vem depois, uma vez só, de quem fechou
+const fechamentos = new Map<string, string>(); // id da operação -> caixa e contado (o reenvio devolve o fechamento já feito)
 rota('POST', '/caixas/:id/fechar', ['caixa.operar'], ({ user, params, body }) => {
-  const c = meuCaixa(user, params.id!); const contado = toCents(body?.contado ?? '-1'); exigir(contado >= 0, 'contado');
+  exigir(typeof body?.id === 'string', 'id'); const contado = toCents(body?.contado ?? '-1'); exigir(contado >= 0, 'contado');
+  const pedido = `${user.id}|${params.id}|${fromCents(contado)}`;
+  if (fechamentos.has(body.id)) {
+    if (fechamentos.get(body.id) !== pedido) return problem(409, 'Identificador já usado', 'ID_EM_USO');
+    return ok(caixaDto(db.caixas.find((x) => x.id === params.id)!));
+  }
+  const c = meuCaixa(user, params.id!);
   const esp = toCents(previa(c).esperadoDinheiro); const dif = contado - esp;
-  if (dif !== 0 && String(body.observacao ?? '').trim().length < 5) return problem(400, 'Diferença de caixa exige observação', 'OBSERVACAO_OBRIGATORIA');
-  Object.assign(c, { status: 'FECHADO', fechadoEm: now(), esperado: fromCents(esp), contado: fromCents(contado), diferenca: fromCents(dif), observacao: body.observacao });
+  Object.assign(c, { status: 'FECHADO', fechadoEm: now(), esperado: fromCents(esp), contado: fromCents(contado), diferenca: fromCents(dif) });
+  fechamentos.set(body.id, pedido);
   auditar(user, 'CAIXA_FECHADO', 'caixa_sessao', c.id); return ok(caixaDto(c));
 });
+rota('POST', '/caixas/:id/justificativa', ['caixa.operar'], ({ user, params, body }) => {
+  const texto = String(body?.texto ?? '').trim(); exigir(texto.length >= 5, 'texto');
+  const c = db.caixas.find((x) => x.id === params.id); if (!c) return problem(404, 'Caixa não encontrado');
+  if (c.status !== 'FECHADO') return problem(409, 'A justificativa vem depois do fechamento', 'CAIXA_ABERTO');
+  if (c.operadorId !== user.id) return problem(403, 'Só quem fechou o caixa justifica a diferença', 'JUSTIFICATIVA_DE_OUTRO');
+  if (toCents(c.diferenca ?? '0') === 0) return problem(409, 'Este caixa fechou sem diferença', 'SEM_DIFERENCA');
+  if (c.observacao) return c.observacao === texto ? ok(caixaDto(c)) : problem(409, 'A justificativa deste caixa já foi registrada', 'JUSTIFICATIVA_JA_REGISTRADA');
+  c.observacao = texto; auditar(user, 'CAIXA_JUSTIFICADO', 'caixa_sessao', c.id); return ok(caixaDto(c));
+});
+rota('GET', '/caixas/minhas-pendencias', ['caixa.operar'], ({ user }) => ok(db.caixas
+  .filter((c) => c.operadorId === user.id && c.status === 'FECHADO' && toCents(c.diferenca ?? '0') !== 0 && !c.observacao).map(caixaDto)));
 rota('GET', '/caixas', ['relatorios.consultar'], ({ query }) => ok(paginar(db.caixas
   .filter((c) => noPeriodo(c.abertoEm, query) && (!query.get('status') || c.status === query.get('status'))
     && (query.get('comDiferenca') !== 'true' || (c.status === 'FECHADO' && toCents(c.diferenca ?? '0') !== 0)))
@@ -965,6 +1004,7 @@ rota('POST', '/contas-pagar/:id/pagar', ['contas_pagar.gerenciar'], ({ user, par
   if (body?.saiuDoCaixa) {
     const cx = db.caixas.find((x) => x.status === 'ABERTO' && x.operadorId === user.id);
     if (!cx) return problem(409, 'Você não tem caixa aberto para registrar a sangria', 'CAIXA_FECHADO');
+    if (toCents(c.valor) > toCents(previa(cx).esperadoDinheiro)) { auditar(user, 'SANGRIA_RECUSADA', 'caixa_sessao', cx.id); return problem(409, 'Valor maior do que o dinheiro disponível no caixa', 'SANGRIA_ACIMA_SALDO'); } // S6-19
     cx.lancamentos.push({ id: uid(), tipo: 'SANGRIA', valor: toCents(c.valor), motivo: `Pagamento: ${c.descricao}`, em: now() });
   }
   Object.assign(c, { status: 'PAGA', pagaEm: now(), saiuDoCaixa: !!body?.saiuDoCaixa, formaPagamento: body?.saiuDoCaixa ? 'DINHEIRO' : body?.formaPagamento ?? 'PIX' }); auditar(user, 'CONTA_PAGA', 'conta_pagar', c.id); return ok(c);
@@ -987,12 +1027,19 @@ rota('POST', '/contas-receber', ['contas_receber.lancar'], ({ user, body }) => {
 });
 rota('POST', '/contas-receber/:id/recebimentos', ['contas_receber.receber'], ({ user, params, body }) => {
   const c = db.contasReceber.find((x) => x.id === params.id); if (!c) return problem(404, 'Conta não encontrada');
-  if (db.recebimentos.some((r) => r.id === body?.id)) return ok(db.recebimentos.find((r) => r.id === body.id));
+  // reenvio igual devolve o gravado; o mesmo id com outro pedido (outro recebido, por exemplo): 409, como na API (S6-14)
+  if (db.recebimentos.some((r) => r.id === body?.id)) return outroPedido('recebimento', body.id, user.id, { contaId: c.id, ...body }) ? problem(409, 'Identificador já usado', 'ID_EM_USO') : ok(db.recebimentos.find((r) => r.id === body.id));
   const v = toCents(body?.valor ?? '0'); exigir(v > 0, 'valor');
+  const forma = body.forma ?? 'DINHEIRO'; exigir(['DINHEIRO', 'PIX', 'CARTAO_DEBITO', 'CARTAO_CREDITO'].includes(forma), 'forma');
+  // S6-20: em dinheiro, o recebido (ausente = o valor) não é menor que o valor e a diferença é o troco; PIX e cartão sem troco
+  const rec = body.valorRecebido === undefined ? v : toCents(body.valorRecebido);
+  if (forma === 'DINHEIRO' && rec < v) return problem(400, 'Valor recebido menor que o valor a receber', 'RECEBIDO_INSUFICIENTE');
+  if (forma !== 'DINHEIRO' && rec !== v) return problem(400, 'PIX e cartão não têm troco: o valor recebido deve ser igual ao valor', 'TROCO_INVALIDO');
   if (v > toCents(c.saldo)) return problem(409, 'Valor maior que o saldo da conta', 'RECEBIMENTO_ACIMA_SALDO');
   if (body.caixaId) meuCaixa(user, body.caixaId);
-  const forma = body.forma ?? 'DINHEIRO'; exigir(['DINHEIRO', 'PIX', 'CARTAO_DEBITO', 'CARTAO_CREDITO'].includes(forma), 'forma');
-  const r = { id: body.id ?? uid(), contaReceberId: c.id, valor: fromCents(v), recebidoEm: now(), caixaId: body.caixaId, estornado: false, forma };
+  const r = { id: body.id ?? uid(), contaReceberId: c.id, valor: fromCents(v), recebidoEm: now(), caixaId: body.caixaId, estornado: false, forma,
+    ...(forma === 'DINHEIRO' ? { valorRecebido: fromCents(rec), troco: fromCents(rec - v) } : {}) };
+  if (body.id) pedidosCadastro.set(body.id, impressaoPedido(['recebimento', user.id, { contaId: c.id, ...body }]));
   db.recebimentos.push(r); recalcular(c); auditar(user, 'RECEBIMENTO', 'conta_receber', c.id); return ok(r, 201);
 });
 rota('POST', '/recebimentos/:id/estornar', ['recebimento.estornar'], ({ user, params, body }) => {
@@ -1042,7 +1089,7 @@ function fluxoMock(de: string, ate: string, forma?: string | null) {
   const pagas = db.contasPagar.filter((c) => c.status === 'PAGA' && c.pagaEm).map((c) => ({ quando: c.pagaEm!, valor: toCents(c.valor) }));
   return diasEntre(de, ate).map((dia) => ({ dia, entradas: somaDia(dia, vendas) + somaDia(dia, receb), saidas: somaDia(dia, pagas) }));
 }
-rota('GET', '/painel/admin', ['auditoria.consultar'], ({ query }) => {
+rota('GET', '/painel/admin', ['auditoria.consultar'], ({ user, query }) => {
   const de = query.get('de')!, ate = query.get('ate')!, op = query.get('operadorId'), forma = query.get('forma');
   const vendas = db.vendas.filter((v) => v.status === 'CONCLUIDA' && noPeriodo(v.ocorridaEm, query) && (!op || v.operadorId === op));
   const pags = vendas.flatMap((v) => v.pagamentos.filter((p) => !forma || p.forma === forma).map((p) => ({ v, forma: p.forma, valor: toCents(p.valor) })));
@@ -1053,7 +1100,7 @@ rota('GET', '/painel/admin', ['auditoria.consultar'], ({ query }) => {
     vendas: { total: fromCents(total), quantidade: qtd, ticketMedio: fromCents(qtd ? Math.round(total / qtd) : 0),
       porForma: Object.fromEntries(FORMAS.map((f) => [f, fromCents(pags.filter((p) => p.forma === f).reduce((s, p) => s + p.valor, 0))])),
       porDia: diasEntre(de, ate).map((dia) => ({ dia, total: fromCents(pags.filter((p) => localDate(p.v.ocorridaEm) === dia).reduce((s, p) => s + p.valor, 0)), quantidade: new Set(pags.filter((p) => localDate(p.v.ocorridaEm) === dia).map((p) => p.v.id)).size })) },
-    caixasAbertos: db.caixas.filter((c) => c.status === 'ABERTO').map((c) => ({ id: c.id, terminalNome: c.terminalNome, operadorNome: c.operadorNome, abertoEm: c.abertoEm, esperadoDinheiro: previa(c).esperadoDinheiro })),
+    caixasAbertos: db.caixas.filter((c) => c.status === 'ABERTO' && c.operadorId !== user.id).map((c) => ({ id: c.id, terminalNome: c.terminalNome, operadorNome: c.operadorNome, abertoEm: c.abertoEm, esperadoDinheiro: previa(c).esperadoDinheiro })),
     entrada: filaPainel(),
     estoque: { itensBazar: itens.reduce((s, i) => s + i.saldo.BAZAR, 0), itensDoacoes: itens.reduce((s, i) => s + i.saldo.DOACOES, 0),
       valorPotencial: fromCents(itens.reduce((s, i) => s + (i.saldo.BAZAR + i.saldo.DOACOES) * i.preco, 0)), valorAtribuido: fromCents(itens.reduce((s, i) => s + (i.saldo.BAZAR + i.saldo.DOACOES) * (i.valorAtribuido ?? i.preco), 0)) },

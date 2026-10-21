@@ -1,5 +1,5 @@
 /**
- * Teste de TELA, no navegador de verdade: as janelas do PDV (CPF Não, tirar por quantidade, pagamento com troco, comprovante, sangria, total do caixa) e onde fica o foco em cada uma.
+ * Teste de TELA, no navegador de verdade: as janelas do PDV (CPF Não, tirar por quantidade, pagamento com troco, comprovante, sangria; o "Total do caixa" saiu na S6-19) e onde fica o foco em cada uma.
  * Prova o conserto do foco das janelas (o foco ia para o ✕ a cada tecla). NÃO faz parte do build nem de nenhum script do projeto.
  *
  * Como rodar (a demonstração precisa estar no ar: `VITE_USE_MOCK=true npx vite --port 5174`, dentro de apps/web):
@@ -62,21 +62,18 @@ try {
   await page.keyboard.press('Enter');
   check((await page.getByRole('dialog').count()) === 0, 'Enter em "Nova venda" fecha o comprovante');
 
-  // sangria: foco no valor, digitação mantém o foco; mostra o dinheiro da gaveta
+  // sangria: foco no valor, digitação mantém o foco; às cegas, sem o dinheiro da gaveta (S6-19)
   await page.getByRole('button', { name: /Sangria\/Suprimento/ }).click();
-  await page.getByRole('dialog').getByText('Dinheiro na gaveta agora').waitFor({ timeout: 5000 });
+  await page.getByRole('dialog', { name: 'Sangria / suprimento' }).waitFor({ timeout: 5000 });
+  check(!/gaveta/i.test(await page.getByRole('dialog').innerText()), 'sangria às cegas: a janela não mostra o dinheiro da gaveta');
   check((await foco()).includes('INPUT'), 'sangria: o foco está no campo do valor', await foco());
   await page.keyboard.type('12', { delay: 30 });
   check((await foco()).includes('INPUT') && await dentro(), 'sangria: digitar não tira o foco do campo', await foco());
   await page.keyboard.press('Escape');
   check((await page.getByRole('dialog').count()) === 0, 'Esc fecha a janela da sangria');
 
-  // total do caixa abre e fecha
-  await page.getByRole('button', { name: 'Total do caixa' }).click();
-  await page.getByRole('dialog').getByText('Total do caixa agora').waitFor({ timeout: 5000 });
-  check(await dentro(), 'total do caixa: o foco está dentro da janela', await foco());
-  await page.keyboard.press('Escape');
-  check((await page.getByRole('dialog').count()) === 0, 'Esc fecha o total do caixa');
+  // S6-19: o botão "Total do caixa" saiu do PDV (decisão do humano: deixava somar a gaveta)
+  check((await page.getByRole('button', { name: 'Total do caixa' }).count()) === 0, 'o PDV não tem mais o botão "Total do caixa"');
 } catch (e) { console.log('ERRO DO TESTE:', e.message.split('\n')[0]); falhas++; await page.screenshot({ path: `${SHOT}/janelas-erro.png` }).catch(() => {}); }
 await browser.close();
 console.log(falhas ? `\n${falhas} falha(s)` : '\ntudo certo');

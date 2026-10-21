@@ -9,6 +9,7 @@ import { PageHeader } from '../../../shared/components/ui';
 import { PainelAdmin } from '../components/PainelAdmin';
 import { PainelEstoque } from '../components/PainelEstoque';
 import { PainelFinanceiro } from '../components/PainelFinanceiro';
+import { PendenciasDeJustificativa } from '../../caixa/components/JustificarDiferenca';
 
 export function HomePage() {
   const { me, can } = useAuth();
@@ -40,6 +41,7 @@ export function HomePage() {
     <div className="page">
       <PageHeader titulo={`Olá, ${me?.nome.split(' ')[0] ?? ''}!`} />
       <p className="saudacao">Que bom ter você aqui. Veja o que precisa de atenção hoje.</p>
+      {can('caixa.operar') && <PendenciasDeJustificativa />}
       <section className="alerts-grid" aria-label="Alertas">
         {a && a.vencidas > 0 && <Link to="/financeiro/pagar" className="alert alert-error">{a.vencidas} conta(s) a pagar vencida(s)</Link>}
         {a && a.aVencer > 0 && <Link to="/financeiro/pagar" className="alert alert-warn">{a.aVencer} conta(s) vencem nos próximos 3 dias</Link>}

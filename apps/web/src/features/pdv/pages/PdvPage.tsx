@@ -15,7 +15,6 @@ import { PagamentoModal, type ResultadoPagamento } from '../components/Pagamento
 import { RemoverQuantidadeModal } from '../components/RemoverQuantidadeModal';
 import { ConfirmarRemoverUltimoModal } from '../components/ConfirmarRemoverUltimoModal';
 import { CpfModal, type DecisaoCpf } from '../components/CpfModal';
-import { ResumoCaixaModal } from '../../caixa/components/ResumoCaixaModal';
 import { ComprovanteModal } from '../components/ComprovanteModal';
 import { LancamentoModal } from '../../caixa/components/LancamentoModal';
 import { ApiError } from '../../../shared/api/http';
@@ -71,7 +70,6 @@ export function PdvPage() {
   /** Código bipado que está esperando a resposta do CPF: se a pergunta for cancelada, volta para a caixa de leitura. */
   const codigoPendente = useRef<string | null>(null);
   const [lancando, setLancando] = useState(false);
-  const [resumindo, setResumindo] = useState(false);
   const [removendo, setRemovendo] = useState<LinhaCarrinho | null>(null);
   const [confirmandoUltimo, setConfirmandoUltimo] = useState(false);
   const [comprovante, setComprovante] = useState<Venda | null>(null);
@@ -86,7 +84,7 @@ export function PdvPage() {
   useEffect(() => { if (linhas.length === 0) { cpfAtual.current = null; setCpfSel(null); } }, [linhas.length]);
   useEffect(() => { if ((restaurado.current?.linhas.length ?? 0) > 0) setCpfAberto(true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const modalAberto = pagando || lancando || resumindo || !!removendo || !!comprovante || cpfAberto || lendoCamera || (confirmandoUltimo && linhas.length > 0);
+  const modalAberto = pagando || lancando || !!removendo || !!comprovante || cpfAberto || lendoCamera || (confirmandoUltimo && linhas.length > 0);
   const focarCodigo = useCallback(() => { setTimeout(() => codigoRef.current?.focus(), 0); }, []);
 
   useEffect(() => {
@@ -341,7 +339,7 @@ export function PdvPage() {
         <div className="spacer" />
         {/* no celular e no tablet os botões ganham uma linha só deles, todos da mesma largura (S6-12) */}
         <div className="pdv-acoes">
-          <button className="btn" onClick={() => setResumindo(true)}>Total do caixa</button>
+          {/* S6-19: sem "Total do caixa" (decisão do humano): os totais deixavam somar a gaveta; aparecem depois de fechar */}
           <button className="btn" onClick={() => setLancando(true)} aria-label="Sangria/Suprimento" aria-keyshortcuts="F6">Sangria/<wbr />Suprimento<span className="atalho"> (F6)</span></button>
           <button className="btn" onClick={() => nav('/pdv/fechar')}>Fechar caixa</button>
           {can('estoque.consultar', 'relatorios.consultar', 'entrada.registrar', 'contas_receber.receber') && <Link className="btn btn-ghost" to="/">Backoffice</Link>}
@@ -404,7 +402,6 @@ export function PdvPage() {
       <ConfirmarRemoverUltimoModal linha={confirmandoUltimo ? linhas[linhas.length - 1] ?? null : null} onConfirmar={removerUltimo}
         onFechar={() => { setConfirmandoUltimo(false); focarCodigo(); }} />
       <RemoverQuantidadeModal linha={removendo} onConfirmar={(n) => tirarQuantidade(removendo!, n)} onFechar={() => { setRemovendo(null); focarCodigo(); }} />
-      <ResumoCaixaModal aberto={resumindo} caixaId={caixa.id} onFechar={() => setResumindo(false)} />
       <LancamentoModal aberto={lancando} caixaId={caixa.id} onFechar={() => setLancando(false)} onOk={(m) => toast(m)} />
       <LeitorCameraModal aberto={lendoCamera} onLer={(c) => lerTexto(c)} onFechar={() => setLendoCamera(false)} />
       <ComprovanteModal venda={comprovante} instituicao={sessao.instituicao} onFechar={() => setComprovante(null)} />

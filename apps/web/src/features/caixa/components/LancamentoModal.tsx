@@ -1,11 +1,10 @@
-/** Sangria / suprimento do caixa aberto. */
+/** Sangria / suprimento do caixa aberto. S6-19: às cegas, sem mostrar o dinheiro da gaveta (acima do que há, o servidor recusa). */
 import { useEffect, useRef, useState } from 'react';
 import { Modal } from '../../../shared/components/Modal';
 import { ErrorAlert, Field } from '../../../shared/components/ui';
 import { caixaApi } from '../caixa.api';
 import { errorMessage } from '../../../shared/api/http';
-import { formatMoney, fromCents, toCents, tryCents } from '../../../shared/lib/money';
-import { useAsync } from '../../../shared/hooks/useAsync';
+import { fromCents, tryCents } from '../../../shared/lib/money';
 import { uuid } from '../../../shared/lib/uuid';
 
 export function LancamentoModal({ aberto, caixaId, onFechar, onOk }: { aberto: boolean; caixaId: string; onFechar: () => void; onOk: (msg: string) => void }) {
@@ -18,11 +17,7 @@ export function LancamentoModal({ aberto, caixaId, onFechar, onOk }: { aberto: b
   const idRef = useRef<string | null>(null);
   useEffect(() => { idRef.current = null; }, [tipo, valor, motivo]);
   const cents = tryCents(valor);
-  // Dinheiro que de fato está na gaveta agora: a sangria não pode passar disso (o servidor confere de novo).
-  const gaveta = useAsync(() => (aberto ? caixaApi.previaFechamento(caixaId) : Promise.resolve(null)), [aberto, caixaId, enviando]);
-  const gavetaCents = gaveta.data ? toCents(gaveta.data.esperadoDinheiro) : null;
-  const acimaDaGaveta = tipo === 'SANGRIA' && cents !== null && gavetaCents !== null && cents > gavetaCents;
-  const valido = cents !== null && cents > 0 && motivo.trim().length >= 3 && !acimaDaGaveta && (tipo !== 'SANGRIA' || gavetaCents !== null);
+  const valido = cents !== null && cents > 0 && motivo.trim().length >= 3;
 
   async function salvar() {
     if (!valido) return;
@@ -43,8 +38,7 @@ export function LancamentoModal({ aberto, caixaId, onFechar, onOk }: { aberto: b
           <label key={t} className="check"><input type="radio" checked={tipo === t} onChange={() => setTipo(t)} /> {t === 'SANGRIA' ? 'Sangria (retirada)' : 'Suprimento (reforço)'}</label>
         ))}
       </div>
-      {gavetaCents !== null && <p className="gaveta">Dinheiro na gaveta agora: <strong>{formatMoney(gavetaCents)}</strong></p>}
-      <Field label="Valor (R$)" erro={acimaDaGaveta ? `Só há ${formatMoney(gavetaCents!)} em dinheiro na gaveta` : null}><input inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} autoFocus /></Field>
+      <Field label="Valor (R$)"><input inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} autoFocus /></Field>
       <Field label="Motivo"><input value={motivo} onChange={(e) => setMotivo(e.target.value)} maxLength={200} /></Field>
       <ErrorAlert erro={erro} />
     </Modal>

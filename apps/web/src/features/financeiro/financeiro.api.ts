@@ -21,8 +21,9 @@ export const contasReceberApi = {
   /**
    * Sem caixaId = recebimento fora do caixa. `forma` é obrigatória: só DINHEIRO entra no dinheiro esperado do
    * fechamento (ticket 1 — antes o servidor assumia DINHEIRO e o caixa mostrava sobra inexistente).
+   * `valorRecebido` só em dinheiro (S6-20): o que o cliente entregou; o servidor confere e calcula o troco.
    */
-  receber: (contaId: string, r: { id: string; valor: Money; forma: FormaQuitacao; caixaId?: string }) => http.post<Recebimento>(`/contas-receber/${contaId}/recebimentos`, r),
+  receber: (contaId: string, r: { id: string; valor: Money; forma: FormaQuitacao; caixaId?: string; valorRecebido?: Money }) => http.post<Recebimento>(`/contas-receber/${contaId}/recebimentos`, r),
   estornar: (recebimentoId: string, motivo: string) => http.post<void>(`/recebimentos/${recebimentoId}/estornar`, { motivo }),
   extrato: (clienteId: string) => http.get<ExtratoCliente>(`/clientes/${clienteId}/extrato`),
 };
