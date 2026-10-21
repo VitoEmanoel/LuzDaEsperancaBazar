@@ -1,6 +1,6 @@
 -- =====================================================================================
 -- Sistema de Bazar — Luz da Esperança · DDL COMPLETA (instalação do zero, PostgreSQL 11+; testado no 16)
--- Gerado pela concatenação das migrações oficiais (0001 a 0014) — a fonte da verdade continua sendo
+-- Gerado pela concatenação das migrações oficiais (0001 a 0015) — a fonte da verdade continua sendo
 -- prisma/migrations/* aplicadas com `prisma migrate deploy`. Use este arquivo para revisão,
 -- ambientes sem Node/Prisma ou para recriar um banco de teste:
 --   createdb -O bazar_owner bazar_teste
@@ -2394,3 +2394,26 @@ DELETE FROM perfil_permissao
 -- ------------------------------------------------------------------ S6-17: carga inicial só uma vez
 -- A carga inicial entra no estoque sem passar pela aprovação: só vale na implantação. Um lote de saldo inicial, no máximo.
 CREATE UNIQUE INDEX uq_lote_saldo_inicial_unico ON lote_entrada ((tipo)) WHERE tipo = 'SALDO_INICIAL';
+
+-- #####################################################################################
+-- ## 0015_terminal_do_usuario — terminal fixo no usuário, opcional (quem tem só abre caixa nele)
+-- #####################################################################################
+-- Sprint 6, S6-21 (decisões do humano em 21/10/2026): terminal fixo no usuário, opcional.
+-- O Administrador define no cadastro ("Ana → Caixa 1"); vários usuários podem ter o mesmo terminal (turnos).
+-- Quem tem terminal definido só abre caixa nele: a API recusa (403) e o banco confere de novo.
+
+ALTER TABLE "usuario" ADD COLUMN "terminal_id" UUID;
+ALTER TABLE "usuario" ADD CONSTRAINT "usuario_terminal_id_fkey" FOREIGN KEY ("terminal_id") REFERENCES "terminal"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+CREATE INDEX "usuario_terminal_id_idx" ON "usuario"("terminal_id");
+
+-- Abrir caixa: com terminal definido, só no dele. Vale só para caixas novos (os abertos antes continuam como estão).
+CREATE OR REPLACE FUNCTION fn_caixa_no_terminal_do_usuario() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE v_terminal uuid;
+BEGIN
+  SELECT terminal_id INTO v_terminal FROM usuario WHERE id = NEW.aberto_por_id;
+  IF v_terminal IS NOT NULL AND v_terminal <> NEW.terminal_id THEN
+    PERFORM fn_falha('TERMINAL_DO_USUARIO', 'Este usuário só abre caixa no terminal definido para ele');
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER tg_caixa_no_terminal_do_usuario BEFORE INSERT ON "caixa_sessao" FOR EACH ROW EXECUTE FUNCTION fn_caixa_no_terminal_do_usuario();

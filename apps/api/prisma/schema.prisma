@@ -161,9 +161,10 @@ model Terminal {
   ativo    Boolean  @default(true)
   criadoEm DateTime @default(now()) @map("criado_em") @db.Timestamptz(3)
 
-  sessoes SessaoUsuario[]
-  caixas  CaixaSessao[]
-  vendas  Venda[]
+  sessoes  SessaoUsuario[]
+  caixas   CaixaSessao[]
+  vendas   Venda[]
+  usuarios Usuario[]       @relation("TerminalDoUsuario")
 
   @@map("terminal")
 }
@@ -216,9 +217,12 @@ model Usuario {
   ultimoAcessoEm DateTime? @map("ultimo_acesso_em") @db.Timestamptz(3)
   criadoEm       DateTime  @default(now()) @map("criado_em") @db.Timestamptz(3)
   atualizadoEm   DateTime  @updatedAt @map("atualizado_em") @db.Timestamptz(3)
+  /// Terminal fixo, opcional (S6-21, 0015): quem tem só abre caixa nele
+  terminalId     String?   @map("terminal_id") @db.Uuid
 
-  perfil  Perfil          @relation(fields: [perfilId], references: [id])
-  sessoes SessaoUsuario[]
+  perfil   Perfil          @relation(fields: [perfilId], references: [id])
+  terminal Terminal?       @relation("TerminalDoUsuario", fields: [terminalId], references: [id])
+  sessoes  SessaoUsuario[]
 
   // FKs de autoria (0003_dba_integridade_desempenho)
   auditoriaUsuario           Auditoria[]       @relation("AuditoriaUsuario")
@@ -244,6 +248,7 @@ model Usuario {
   itemDevolvidoPor           Item[]            @relation("ItemDevolvidoPor")
   produtoDescontoPor         Produto[]         @relation("ProdutoDescontoPor")
 
+  @@index([terminalId])
   @@map("usuario")
 }
 
