@@ -16,6 +16,7 @@ import { caixaAbertoDoOperador, registrarSangria, FORMAS, type Forma } from '../
 import { CATEGORIA_REEMBOLSO_ID, registrarReembolso } from './reembolso.service.js';
 import { obterClienteAtivo } from '../cadastros/clientes.routes.js';
 import { gerarPdfResumo } from './resumo.pdf.js';
+import { reservarChave } from '../../shared/idempotencia.js';
 
 const zValor = zMoney.refine((v) => toCents(v) > 0, 'valor maior que zero');
 
@@ -79,25 +80,28 @@ export async function rotasFinanceiro(app: FastifyInstance) {
       id: zUuid, descricao: zTexto(200), favorecido: z.string().trim().max(120).optional(),
       categoriaDespesaId: zUuid.optional().or(z.literal('').transform(() => undefined)), valor: zValor, vencimento: zData,
     }).strict(), req.body);
-    const ja = await prisma.contaPagar.findUnique({ where: { id: b.id }, include: cpInclude });
-    if (ja) { // reenvio: a mesma conta volta; o mesmo id com outra conta é recusado (S6-14)
-      const d = contaPagarDto(ja);
-      if (d.descricao !== b.descricao || toCents(d.valor) !== toCents(b.valor) || d.vencimento !== b.vencimento || (d.categoriaDespesaId || undefined) !== b.categoriaDespesaId) conflito('ID_EM_USO', 'Este identificador já foi usado em outra conta');
-      return reply.code(200).send(d);
-    }
-    semReembolsoManual(b.categoriaDespesaId);
-    if (b.categoriaDespesaId && !(await prisma.categoriaDespesa.findFirst({ where: { id: b.categoriaDespesaId, ativa: true } }))) {
-      throw new AppError(400, 'Categoria de despesa inexistente ou inativa', 'VALIDACAO');
-    }
-    const c = await prisma.$transaction(async (tx) => {
+    const { c, reenvio } = await prisma.$transaction(async (tx) => {
+      // reenvio: a mesma conta volta; o mesmo id com outra conta (ou de outro usuário) é recusado (S6-14)
+      const nova = await reservarChave(tx, b.id, 'conta_pagar', u.id, b);
+      const ja = await tx.contaPagar.findUnique({ where: { id: b.id }, include: cpInclude });
+      if (ja) {
+        const d = contaPagarDto(ja); // chave já limpa: confere os campos
+        if (nova && (d.descricao !== b.descricao || toCents(d.valor) !== toCents(b.valor) || d.vencimento !== b.vencimento || (d.categoriaDespesaId || undefined) !== b.categoriaDespesaId)) conflito('ID_EM_USO', 'Este identificador já foi usado em outra conta');
+        return { c: ja, reenvio: true };
+      }
+      if (!nova) conflito('ID_EM_USO', 'Este identificador já foi usado em outra operação');
+      semReembolsoManual(b.categoriaDespesaId);
+      if (b.categoriaDespesaId && !(await tx.categoriaDespesa.findFirst({ where: { id: b.categoriaDespesaId, ativa: true } }))) {
+        throw new AppError(400, 'Categoria de despesa inexistente ou inativa', 'VALIDACAO');
+      }
       const n = await tx.contaPagar.create({
         data: { id: b.id, descricao: b.descricao, favorecido: b.favorecido ?? null, categoriaDespesaId: b.categoriaDespesaId ?? null, valor: b.valor, vencimento: toDbDate(b.vencimento), criadaPorId: u.id },
         include: cpInclude,
       });
       await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'CONTA_PAGAR_CRIADA', 'conta_pagar', n.id, undefined, { valor: b.valor, vencimento: b.vencimento });
-      return n;
+      return { c: n, reenvio: false };
     });
-    return reply.code(201).send(contaPagarDto(c));
+    return reply.code(reenvio ? 200 : 201).send(contaPagarDto(c));
   });
 
   app.patch('/contas-pagar/:id', { config: { acesso: ['contas_pagar.gerenciar'] } }, async (req) => {
@@ -181,19 +185,22 @@ export async function rotasFinanceiro(app: FastifyInstance) {
   app.post('/contas-receber', { config: { acesso: ['contas_receber.lancar'] } }, async (req, reply) => {
     const u = exigirUsuario(req);
     const b = parse(z.object({ id: zUuid, clienteId: zUuid, descricao: zTexto(200), valor: zValor, vencimento: zData }).strict(), req.body);
-    const ja = await prisma.contaReceber.findUnique({ where: { id: b.id }, include: crInclude });
-    if (ja) { // reenvio: a mesma conta volta; o mesmo id com outra conta é recusado (S6-14)
-      const d = contaReceberDto(ja);
-      if (d.clienteId !== b.clienteId || d.descricao !== b.descricao || toCents(d.valor) !== toCents(b.valor) || d.vencimento !== b.vencimento) conflito('ID_EM_USO', 'Este identificador já foi usado em outra conta');
-      return reply.code(200).send(d);
-    }
-    if (!(await obterClienteAtivo(prisma, b.clienteId))) throw new AppError(400, 'Cliente inexistente ou inativo', 'VALIDACAO');
-    const c = await prisma.$transaction(async (tx) => {
+    const { c, reenvio } = await prisma.$transaction(async (tx) => {
+      // reenvio: a mesma conta volta; o mesmo id com outra conta (ou de outro usuário) é recusado (S6-14)
+      const nova = await reservarChave(tx, b.id, 'conta_receber', u.id, b);
+      const ja = await tx.contaReceber.findUnique({ where: { id: b.id }, include: crInclude });
+      if (ja) {
+        const d = contaReceberDto(ja); // chave já limpa: confere os campos
+        if (nova && (d.clienteId !== b.clienteId || d.descricao !== b.descricao || toCents(d.valor) !== toCents(b.valor) || d.vencimento !== b.vencimento)) conflito('ID_EM_USO', 'Este identificador já foi usado em outra conta');
+        return { c: ja, reenvio: true };
+      }
+      if (!nova) conflito('ID_EM_USO', 'Este identificador já foi usado em outra operação');
+      if (!(await obterClienteAtivo(tx, b.clienteId))) throw new AppError(400, 'Cliente inexistente ou inativo', 'VALIDACAO');
       const n = await tx.contaReceber.create({ data: { id: b.id, clienteId: b.clienteId, descricao: b.descricao, valor: b.valor, vencimento: toDbDate(b.vencimento), criadaPorId: u.id }, include: crInclude });
       await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'CONTA_RECEBER_LANCADA', 'conta_receber', n.id, undefined, { valor: b.valor, clienteId: b.clienteId });
-      return n;
+      return { c: n, reenvio: false };
     });
-    return reply.code(201).send(contaReceberDto(c));
+    return reply.code(reenvio ? 200 : 201).send(contaReceberDto(c));
   });
 
   app.post('/contas-receber/:id/recebimentos', { config: { acesso: ['contas_receber.receber'] } }, async (req, reply) => {
@@ -204,12 +211,16 @@ export async function rotasFinanceiro(app: FastifyInstance) {
       forma: z.enum(['DINHEIRO', 'PIX', 'CARTAO_DEBITO', 'CARTAO_CREDITO']).default('DINHEIRO'),
       observacao: z.string().trim().max(300).optional(),
     }).strict(), req.body);
-    const ja = await prisma.recebimento.findUnique({ where: { id: b.id } });
-    if (ja) { // reenvio do MESMO recebimento volta o gravado; outra conta, outro valor ou outra forma com o mesmo id: 409 (S6-14)
-      if (ja.contaReceberId !== id || toCents(money(ja.valor)) !== toCents(b.valor) || ja.forma !== b.forma) conflito('ID_EM_USO', 'Identificador já usado');
-      return reply.code(200).send(recebimentoDto(ja));
-    }
-    const r = await prisma.$transaction(async (tx) => {
+    const { r, reenvio } = await prisma.$transaction(async (tx) => {
+      // reenvio do MESMO recebimento volta o gravado; outra conta, valor, forma, caixa ou observação com o mesmo id: 409 (S6-14).
+      // A conta da URL entra na impressão do pedido.
+      const nova = await reservarChave(tx, b.id, 'recebimento', u.id, { contaId: id, ...b });
+      const ja = await tx.recebimento.findUnique({ where: { id: b.id } });
+      if (ja) {
+        if (nova && (ja.contaReceberId !== id || toCents(money(ja.valor)) !== toCents(b.valor) || ja.forma !== b.forma)) conflito('ID_EM_USO', 'Identificador já usado');
+        return { r: ja, reenvio: true };
+      }
+      if (!nova) conflito('ID_EM_USO', 'Identificador já usado');
       const conta = await tx.contaReceber.findUnique({ where: { id }, include: crInclude });
       if (!conta) naoEncontrado('Conta');
       if (conta!.status === 'CANCELADA' || conta!.status === 'QUITADA') conflito('CONTA_NAO_ABERTA', 'Conta não aceita recebimento');
@@ -224,9 +235,9 @@ export async function rotasFinanceiro(app: FastifyInstance) {
         data: { id: b.id, contaReceberId: id, valor: b.valor, forma: b.forma, sessaoId: b.caixaId ?? null, usuarioId: u.id, observacao: b.observacao ?? null },
       });
       await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'RECEBIMENTO', 'conta_receber', id, undefined, { recebimentoId: n.id, valor: b.valor, noCaixa: !!b.caixaId });
-      return n;
+      return { r: n, reenvio: false };
     });
-    return reply.code(201).send(recebimentoDto(r));
+    return reply.code(reenvio ? 200 : 201).send(recebimentoDto(r));
   });
 
   app.post('/recebimentos/:id/estornar', { config: { acesso: ['recebimento.estornar'] } }, async (req, reply) => {

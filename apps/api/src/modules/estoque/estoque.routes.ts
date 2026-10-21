@@ -274,14 +274,16 @@ export async function rotasEstoque(app: FastifyInstance) {
       if (await prisma.loteEntrada.findFirst({ where: { tipo: 'SALDO_INICIAL' }, select: { id: true } })) {
         conflito('CARGA_JA_FEITA', 'A carga inicial já foi feita', 'Estoque novo entra por lote de entrada, com aprovação');
       }
-      // o lote de saldo inicial nasce uma vez; cada linha na sua transação (a falha de uma não desfaz as outras)
-      const lote = await prisma.loteEntrada.create({ data: { tipo: 'SALDO_INICIAL', recebidoEm: new Date(), recebidoPorId: u.id, observacao: 'Carga inicial da implantação' } })
-        .catch((e: { code?: string }) => { throw e.code === 'P2002' ? new AppError(409, 'A carga inicial já foi feita', 'CARGA_JA_FEITA') : e; }); // duas cargas ao mesmo tempo
+      // cada linha na sua transação (a falha de uma não desfaz as outras). O lote de saldo inicial nasce JUNTO da primeira
+      // linha que grava (S6-17): se nenhuma gravar, nenhum lote fica (um lote vazio travaria a carga para sempre, e nada se apaga)
+      let loteId: string | null = null;
       const agora = new Date();
       for (const l of validas) {
         const descricao = l.descricao || `${l.cat.nome} (saldo inicial)`;
         try {
-          await prisma.$transaction(async (tx) => {
+          loteId = await prisma.$transaction(async (tx) => {
+            const lote = loteId ?? (await tx.loteEntrada.create({ data: { tipo: 'SALDO_INICIAL', recebidoEm: agora, recebidoPorId: u.id, observacao: 'Carga inicial da implantação' } })
+              .catch((e: { code?: string }) => { throw e.code === 'P2002' ? new AppError(409, 'A carga inicial já foi feita', 'CARGA_JA_FEITA') : e; })).id; // duas cargas ao mesmo tempo
             // cada linha etiquetada vira um produto de peça única (como antes: quantidade 1)
             const produto = l.controle === 'ETIQUETADO' ? await tx.produto.create({
               data: { codigo: await proximoCodigo(tx), tituloEtiqueta: descricao.slice(0, 40), nome: descricao, categoriaId: l.cat.id, precoVenda: l.preco, pecaUnica: true, criadoPorId: u.id },
@@ -289,21 +291,25 @@ export async function rotasEstoque(app: FastifyInstance) {
             // quem carrega é o Administrador (estoque.ajustar): os itens já entram aprovados
             const it = await tx.item.create({
               data: {
-                loteId: lote.id, categoriaId: l.cat.id, tipoControle: l.controle, produtoId: produto?.id ?? null, descricao,
+                loteId: lote, categoriaId: l.cat.id, tipoControle: l.controle, produtoId: produto?.id ?? null, descricao,
                 valorAtribuido: l.valor, quantidadeInicial: l.quantidade, criadoPorId: u.id,
                 localDestinoId: LOCAL_ID[l.local], status: 'APROVADO', aprovadoPorId: u.id, aprovadoEm: agora,
               },
             });
             await tx.movimentacao.create({ data: { itemId: it.id, tipo: 'ENTRADA', localDestinoId: LOCAL_ID[l.local], quantidade: l.quantidade, usuarioId: u.id, motivo: 'Saldo inicial' } });
+            return lote;
           });
           aceitas.push({ linha: l.linha, nome: descricao, quantidade: l.quantidade });
         } catch (er) {
+          if (er instanceof AppError && er.code === 'CARGA_JA_FEITA') throw er; // outra carga ganhou a corrida: nada desta vale
           req.log.error({ erro: codigoErro(er), linha: l.linha }, 'carga inicial'); // sem a mensagem: o Prisma repete os valores da linha
           recusadas.push({ linha: l.linha, nome: descricao, motivo: 'Erro ao gravar a linha' });
         }
       }
-      await prisma.loteEntrada.update({ where: { id: lote.id }, data: { status: 'TRIADO' } }); // encerrado depois dos itens, como antes
-      await auditar(prisma, { usuarioId: u.id, ip: req.ip }, 'CARGA_INICIAL', 'lote_entrada', lote.id, undefined, { linhas: pl.linhas.length, aceitas: aceitas.length, recusadas: recusadas.length });
+      if (loteId) { // sem nenhuma linha gravada não há lote: a carga pode voltar corrigida
+        await prisma.loteEntrada.update({ where: { id: loteId }, data: { status: 'TRIADO' } }); // encerrado depois dos itens, como antes
+        await auditar(prisma, { usuarioId: u.id, ip: req.ip }, 'CARGA_INICIAL', 'lote_entrada', loteId, undefined, { linhas: pl.linhas.length, aceitas: aceitas.length, recusadas: recusadas.length });
+      }
     }
     return { total: pl.linhas.length, aceitas, recusadas: recusadas.sort((a, b) => a.linha - b.linha) };
   });

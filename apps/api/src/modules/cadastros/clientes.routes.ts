@@ -6,10 +6,10 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma, type Db, type Tx } from '../../shared/prisma.js';
-import { conflito, naoEncontrado } from '../../shared/errors.js';
+import { AppError, conflito, naoEncontrado } from '../../shared/errors.js';
 import { parse, zIdParam, zTexto, zUuid } from '../../shared/http.js';
 import { auditar } from '../../shared/audit.js';
-import { exigirUsuario } from '../../plugins/auth.js';
+import { exigirUsuario, tem } from '../../plugins/auth.js';
 import { normalizarDocumento } from '../../shared/documento.js';
 
 export const VERSAO_AVISO = 'v1-2026-10';
@@ -51,7 +51,11 @@ export async function obterClienteAtivo(db: Db, id: string) {
 
 export async function rotasClientes(app: FastifyInstance) {
   app.post('/clientes/busca', { config: { acesso: ['clientes.gerenciar', 'caixa.operar', 'contas_receber.receber', 'privacidade.gerenciar'] } }, async (req) => {
+    const u = exigirUsuario(req);
     const b = parse(z.object({ termo: z.string().trim().max(100).default(''), ativo: z.boolean().optional() }), req.body ?? {});
+    // S6-15: quem só chega aqui pelo PDV (caixa.operar) acha o cliente do fiado, mas não lista a base inteira (nome e telefone)
+    const soPdv = !tem(u, 'clientes.gerenciar') && !tem(u, 'contas_receber.receber') && !tem(u, 'privacidade.gerenciar');
+    if (soPdv && b.termo.length < 3) throw new AppError(400, 'Digite pelo menos 3 letras ou números do nome ou do telefone', 'TERMO_CURTO');
     const digitos = b.termo.replace(/\D/g, '');
     const where = {
       anonimizadoEm: null,

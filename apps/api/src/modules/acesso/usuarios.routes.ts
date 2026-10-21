@@ -44,9 +44,19 @@ const GRUPOS: Record<Permissao, string> = {
   'parametros.gerenciar': 'Administração', 'terminais.gerenciar': 'Administração', 'fiscal.gerenciar': 'Administração', 'privacidade.gerenciar': 'Administração',
 };
 
-const usuarioSelect = { id: true, nome: true, login: true, perfilId: true, ativo: true, perfil: { select: { nome: true } } } as const;
-type UsuarioRow = { id: string; nome: string; login: string; perfilId: string; ativo: boolean; perfil: { nome: string } };
-const usuarioDto = (u: UsuarioRow) => ({ id: u.id, nome: u.nome, login: u.login, perfilId: u.perfilId, perfilNome: u.perfil.nome, ativo: u.ativo });
+const usuarioSelect = { id: true, nome: true, login: true, perfilId: true, ativo: true, terminalId: true, perfil: { select: { nome: true } }, terminal: { select: { nome: true } } } as const;
+type UsuarioRow = { id: string; nome: string; login: string; perfilId: string; ativo: boolean; terminalId: string | null; perfil: { nome: string }; terminal: { nome: string } | null };
+const usuarioDto = (u: UsuarioRow) => ({
+  id: u.id, nome: u.nome, login: u.login, perfilId: u.perfilId, perfilNome: u.perfil.nome, ativo: u.ativo,
+  terminalId: u.terminalId, terminalNome: u.terminal?.nome ?? null, // terminal fixo, opcional (S6-21)
+});
+
+/** Terminal fixo do usuário (S6-21): só um terminal ativo; null tira o terminal. */
+async function conferirTerminal(terminalId: string | null | undefined) {
+  if (terminalId && !(await prisma.terminal.findFirst({ where: { id: terminalId, ativo: true }, select: { id: true } }))) {
+    throw new AppError(400, 'Dados inválidos', 'VALIDACAO', 'terminalId: terminal inexistente ou desativado');
+  }
+}
 
 const perfilInclude = { permissoes: { select: { permissaoCodigo: true } } } as const;
 type PerfilRow = { id: string; nome: string; padrao: boolean; ativo: boolean; limiteDescontoPct: { toFixed(n: number): string } | null; permissoes: { permissaoCodigo: string }[] };
@@ -82,16 +92,17 @@ export async function rotasUsuarios(app: FastifyInstance) {
 
   app.post('/usuarios', { config: { acesso: ['usuarios.gerenciar'] } }, async (req, reply) => {
     const ator = exigirUsuario(req);
-    const b = parse(z.object({ id: zUuid.optional(), nome: zTexto(120), login: zLogin, perfilId: zUuid }), req.body);
+    const b = parse(z.object({ id: zUuid.optional(), nome: zTexto(120), login: zLogin, perfilId: zUuid, terminalId: zUuid.nullable().optional() }), req.body);
     const perfil = await prisma.perfil.findFirst({ where: { id: b.perfilId, ativo: true } });
     if (!perfil) throw new AppError(400, 'Dados inválidos', 'VALIDACAO', 'perfilId: perfil inexistente ou inativo');
+    await conferirTerminal(b.terminalId);
     const senha = senhaProvisoria();
     const u = await prisma.$transaction(async (tx) => {
       const novo = await tx.usuario.create({
-        data: { ...(b.id ? { id: b.id } : {}), nome: b.nome, login: b.login, perfilId: b.perfilId, senhaHash: await hashSenha(senha), trocarSenha: true },
+        data: { ...(b.id ? { id: b.id } : {}), nome: b.nome, login: b.login, perfilId: b.perfilId, terminalId: b.terminalId ?? null, senhaHash: await hashSenha(senha), trocarSenha: true },
         select: usuarioSelect,
       });
-      await auditar(tx, { usuarioId: ator.id, ip: req.ip }, 'USUARIO_CRIADO', 'usuario', novo.id, undefined, { perfilId: novo.perfilId, ativo: true });
+      await auditar(tx, { usuarioId: ator.id, ip: req.ip }, 'USUARIO_CRIADO', 'usuario', novo.id, undefined, { perfilId: novo.perfilId, ativo: true, terminalId: novo.terminalId });
       return novo;
     });
     // Senha provisória devolvida UMA vez; nunca é logada nem armazenada em claro.
@@ -101,7 +112,7 @@ export async function rotasUsuarios(app: FastifyInstance) {
   app.patch('/usuarios/:id', { config: { acesso: ['usuarios.gerenciar'] } }, async (req) => {
     const ator = exigirUsuario(req);
     const { id } = parse(zIdParam, req.params);
-    const b = parse(z.object({ nome: zTexto(120).optional(), perfilId: zUuid.optional(), ativo: z.boolean().optional() }).strict(), req.body);
+    const b = parse(z.object({ nome: zTexto(120).optional(), perfilId: zUuid.optional(), ativo: z.boolean().optional(), terminalId: zUuid.nullable().optional() }).strict(), req.body);
     if (id === ator.id && b.ativo === false) conflito('AUTO_DESATIVACAO', 'Você não pode desativar o próprio usuário');
     if (id === ator.id && b.perfilId && b.perfilId !== ator.perfilId) conflito('AUTO_PERFIL', 'Você não pode alterar o próprio perfil');
     const antes = await prisma.usuario.findUnique({ where: { id }, select: usuarioSelect });
@@ -109,13 +120,14 @@ export async function rotasUsuarios(app: FastifyInstance) {
     if (b.perfilId && !(await prisma.perfil.findFirst({ where: { id: b.perfilId, ativo: true } }))) {
       throw new AppError(400, 'Dados inválidos', 'VALIDACAO', 'perfilId: perfil inexistente ou inativo');
     }
+    await conferirTerminal(b.terminalId);
     return prisma.$transaction(async (tx) => {
       const u = await tx.usuario.update({ where: { id }, data: b, select: usuarioSelect });
       if (b.ativo === false || (b.perfilId && b.perfilId !== antes!.perfilId)) {
         await tx.sessaoUsuario.updateMany({ where: { usuarioId: id, revogadaEm: null }, data: { revogadaEm: new Date() } });
       }
       await auditar(tx, { usuarioId: ator.id, ip: req.ip }, 'USUARIO_ALTERADO', 'usuario', id,
-        { perfilId: antes!.perfilId, ativo: antes!.ativo }, { perfilId: u.perfilId, ativo: u.ativo, nomeAlterado: b.nome !== undefined });
+        { perfilId: antes!.perfilId, ativo: antes!.ativo, terminalId: antes!.terminalId }, { perfilId: u.perfilId, ativo: u.ativo, terminalId: u.terminalId, nomeAlterado: b.nome !== undefined });
       return usuarioDto(u);
     });
   });

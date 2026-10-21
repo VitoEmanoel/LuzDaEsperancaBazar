@@ -2,7 +2,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma, type Db } from '../../shared/prisma.js';
-import { AppError, conflito, naoEncontrado } from '../../shared/errors.js';
+import { AppError, conflito, naoEncontrado, traduzirErroBanco } from '../../shared/errors.js';
 import { page, parse, skipTake, zBoolQuery, zIdParam, zMoney, zPage, zPeriodo, zTexto, zUuid } from '../../shared/http.js';
 import { auditar } from '../../shared/audit.js';
 import { fromCents, money, toCents } from '../../shared/money.js';
@@ -10,8 +10,19 @@ import { periodo } from '../../shared/dates.js';
 import { exigirUsuario, tem, type UsuarioCtx } from '../../plugins/auth.js';
 import { caixaDto, calcularPrevia, linhaDoTempo, registrarSangria } from './caixa.service.js';
 import { gerarPdfFechamento } from './fechamento.pdf.js';
+import { reservarChave } from '../../shared/idempotencia.js';
 
 const incTerminal = { terminal: { select: { nome: true } } } as const;
+
+/** Só o primeiro nome de quem ocupa o terminal (S6-18, decisão do humano): basta para a equipe se achar. */
+const primeiroNome = (nome: string) => nome.trim().split(/\s+/)[0] ?? '';
+
+/** Terminal aberto com outra pessoa (S6-18): a mensagem diz qual e com quem; quem tem o terminal fixo não escolhe outro (S6-21). */
+function terminalOcupado(terminal: string, ocupante: string, fixo: boolean): never {
+  return conflito('TERMINAL_OCUPADO', fixo
+    ? `O ${terminal} já está aberto com ${primeiroNome(ocupante)}. Peça para ${primeiroNome(ocupante)} fechar o caixa ou fale com o Administrador.`
+    : `O ${terminal} já está aberto com ${primeiroNome(ocupante)}. Escolha outro terminal.`);
+}
 
 /** Caixa do próprio operador e aberto (anti-IDOR: caixaId da URL é conferido contra o usuário). */
 async function meuCaixaAberto(db: Db, u: UsuarioCtx, id: string) {
@@ -38,23 +49,31 @@ export async function rotasCaixa(app: FastifyInstance) {
     const q = parse(z.object({ ativo: zBoolQuery.optional() }), req.query);
     const ativo = tem(u, 'terminais.gerenciar') ? q.ativo : true;
     const ts = await prisma.terminal.findMany({ where: ativo !== undefined ? { ativo } : {}, orderBy: { nome: 'asc' } });
-    return ts.map((t) => ({ id: t.id, nome: t.nome, ativo: t.ativo }));
+    // S6-18: quem está com o terminal aberto, só o primeiro nome e só de outra pessoa (sem id do caixa, fundo nem hora)
+    const abertos = await prisma.caixaSessao.findMany({ where: { status: 'ABERTO', terminalId: { in: ts.map((t) => t.id) } }, select: { terminalId: true, abertoPorId: true, abertoPor: { select: { nome: true } } } });
+    const ocupante = new Map(abertos.filter((c) => c.abertoPorId !== u.id).map((c) => [c.terminalId, primeiroNome(c.abertoPor.nome)]));
+    return ts.map((t) => ({ id: t.id, nome: t.nome, ativo: t.ativo, ...(ocupante.has(t.id) ? { ocupadoPor: ocupante.get(t.id) } : {}) }));
   });
 
   app.post('/terminais', { config: { acesso: ['terminais.gerenciar'] } }, async (req, reply) => {
     const u = exigirUsuario(req);
     const b = parse(z.object({ id: zUuid.optional(), nome: zTexto(60) }), req.body);
-    if (b.id) {
-      const ja = await prisma.terminal.findUnique({ where: { id: b.id } });
-      if (ja && ja.nome !== b.nome) conflito('ID_EM_USO', 'Este identificador já foi usado em outro terminal'); // S6-14
-      if (ja) return reply.code(200).send({ id: ja.id, nome: ja.nome, ativo: ja.ativo });
-    }
-    const t = await prisma.$transaction(async (tx) => {
+    const { t, reenvio } = await prisma.$transaction(async (tx) => {
+      if (b.id) {
+        // S6-14: o mesmo id com o mesmo pedido é o reenvio; com outro nome, de outro usuário ou de outra operação, 409
+        const nova = await reservarChave(tx, b.id, 'terminal', u.id, b);
+        const ja = await tx.terminal.findUnique({ where: { id: b.id } });
+        if (ja) {
+          if (nova && ja.nome !== b.nome) conflito('ID_EM_USO', 'Este identificador já foi usado em outro terminal'); // chave já limpa: confere o nome
+          return { t: ja, reenvio: true };
+        }
+        if (!nova) conflito('ID_EM_USO', 'Este identificador já foi usado em outra operação');
+      }
       const n = await tx.terminal.create({ data: { ...(b.id ? { id: b.id } : {}), nome: b.nome } });
       await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'TERMINAL_CRIADO', 'terminal', n.id);
-      return n;
+      return { t: n, reenvio: false };
     });
-    return reply.code(201).send({ id: t.id, nome: t.nome, ativo: t.ativo });
+    return reply.code(reenvio ? 200 : 201).send({ id: t.id, nome: t.nome, ativo: t.ativo });
   });
 
   app.patch('/terminais/:id', { config: { acesso: ['terminais.gerenciar'] } }, async (req) => {
@@ -87,23 +106,44 @@ export async function rotasCaixa(app: FastifyInstance) {
   app.post('/caixas', { config: { acesso: ['caixa.operar'] } }, async (req, reply) => {
     const u = exigirUsuario(req);
     const b = parse(z.object({ id: zUuid, terminalId: zUuid, fundoTroco: zMoney }), req.body);
-    const ja = await prisma.caixaSessao.findUnique({ where: { id: b.id }, include: incTerminal });
-    if (ja) {
-      if (ja.abertoPorId !== u.id) conflito('ID_EM_USO', 'Identificador já usado');
-      return reply.code(200).send(caixaDto(ja, u.nome));
-    }
-    const t = await prisma.terminal.findFirst({ where: { id: b.terminalId, ativo: true } });
-    if (!t) throw new AppError(400, 'Terminal inexistente ou desativado', 'VALIDACAO');
-    // RN-13: um caixa aberto por terminal e por operador (índices únicos parciais garantem na corrida)
-    const aberto = await prisma.caixaSessao.findFirst({ where: { status: 'ABERTO', OR: [{ terminalId: t.id }, { abertoPorId: u.id }] } });
-    if (aberto) conflito('CAIXA_JA_ABERTO', 'Já existe caixa aberto neste terminal ou para este operador');
-    const c = await prisma.$transaction(async (tx) => {
+    const fixo = (await prisma.usuario.findUnique({ where: { id: u.id }, select: { terminalId: true } }))?.terminalId ?? null;
+    const { c, reenvio } = await prisma.$transaction(async (tx) => {
+      // S6-14: a chave vem antes de qualquer conferência, senão o reenvio da própria abertura bateria no próprio caixa aberto
+      const nova = await reservarChave(tx, b.id, 'abrir_caixa', u.id, b);
+      const ja = await tx.caixaSessao.findUnique({ where: { id: b.id }, include: incTerminal });
+      if (ja) {
+        // chave já limpa: confere quem abriu, o terminal e o fundo
+        if (nova && (ja.abertoPorId !== u.id || ja.terminalId !== b.terminalId || toCents(money(ja.valorAbertura)) !== toCents(b.fundoTroco))) conflito('ID_EM_USO', 'Identificador já usado');
+        return { c: ja, reenvio: true };
+      }
+      if (!nova) conflito('ID_EM_USO', 'Identificador já usado');
+      // S6-21: quem tem terminal definido só abre nele, também chamando a API direto (o banco confere de novo)
+      if (fixo && fixo !== b.terminalId) {
+        const meu = await tx.terminal.findUnique({ where: { id: fixo }, select: { nome: true } });
+        throw new AppError(403, `Você só abre caixa no ${meu?.nome ?? 'terminal definido para você'}. Para trocar, fale com o Administrador.`, 'TERMINAL_DO_USUARIO');
+      }
+      const t = await tx.terminal.findFirst({ where: { id: b.terminalId, ativo: true } });
+      if (!t) throw new AppError(400, 'Terminal inexistente ou desativado', 'VALIDACAO');
+      // RN-13: um caixa aberto por terminal e por operador (índices únicos parciais garantem na corrida). Os dois casos
+      // são diferentes para quem opera (S6-18): o próprio caixa aberto volta ao PDV; o terminal com outra pessoa diz com quem.
+      if (await tx.caixaSessao.findFirst({ where: { status: 'ABERTO', abertoPorId: u.id }, select: { id: true } })) conflito('CAIXA_JA_ABERTO', 'Você já tem um caixa aberto');
+      const ocupado = await tx.caixaSessao.findFirst({ where: { status: 'ABERTO', terminalId: t.id }, select: { abertoPor: { select: { nome: true } } } });
+      if (ocupado) terminalOcupado(t.nome, ocupado.abertoPor.nome, !!fixo);
       const n = await tx.caixaSessao.create({ data: { id: b.id, terminalId: t.id, abertoPorId: u.id, valorAbertura: b.fundoTroco }, include: incTerminal });
       await tx.sessaoUsuario.update({ where: { id: u.sessaoId }, data: { terminalId: t.id } });
       await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'CAIXA_ABERTO', 'caixa_sessao', n.id, undefined, { terminalId: t.id, fundoTroco: b.fundoTroco });
-      return n;
+      return { c: n, reenvio: false };
+    }).catch(async (e: unknown) => {
+      // corrida (dois abrindo ao mesmo tempo): o índice recusa e a transação aborta; quem ocupa é lido FORA dela
+      const t = traduzirErroBanco(e);
+      if (t?.code !== 'TERMINAL_OCUPADO' && t?.code !== 'CAIXA_JA_ABERTO') throw e;
+      const abertos = await prisma.caixaSessao.findMany({ where: { status: 'ABERTO', OR: [{ terminalId: b.terminalId }, { abertoPorId: u.id }] }, select: { abertoPorId: true, abertoPor: { select: { nome: true } }, terminal: { select: { nome: true } }, terminalId: true } });
+      if (abertos.some((x) => x.abertoPorId === u.id)) conflito('CAIXA_JA_ABERTO', 'Você já tem um caixa aberto');
+      const outro = abertos.find((x) => x.terminalId === b.terminalId);
+      if (outro) terminalOcupado(outro.terminal.nome, outro.abertoPor.nome, !!fixo);
+      throw e;
     });
-    return reply.code(201).send(caixaDto(c, u.nome));
+    return reply.code(reenvio ? 200 : 201).send(caixaDto(c, u.nome));
   });
 
   app.post('/caixas/:id/lancamentos', { config: { acesso: ['caixa.operar'] } }, async (req, reply) => {
@@ -111,9 +151,12 @@ export async function rotasCaixa(app: FastifyInstance) {
     const { id } = parse(zIdParam, req.params);
     const b = parse(z.object({ id: zUuid, tipo: z.enum(['SANGRIA', 'SUPRIMENTO']), valor: zMoney.refine((v) => toCents(v) > 0, 'valor maior que zero'), motivo: zTexto(300) }).strict(), req.body);
     await prisma.$transaction(async (tx) => {
+      // reenvio idempotente; o mesmo id em outro caixa, com outro tipo, valor ou motivo é outro lançamento: 409 (S6-14).
+      // O caixa da URL entra na impressão do pedido.
+      const nova = await reservarChave(tx, b.id, 'lancamento', u.id, { caixaId: id, ...b });
       const ja = await tx.caixaLancamento.findUnique({ where: { id: b.id } });
-      // reenvio idempotente; o mesmo id em outro caixa, com outro tipo ou outro valor é outro lançamento: 409 (S6-14)
-      if (ja) { if (ja.sessaoId !== id || ja.tipo !== b.tipo || toCents(money(ja.valor)) !== toCents(b.valor)) conflito('ID_EM_USO', 'Identificador já usado'); return; }
+      if (ja) { if (nova && (ja.sessaoId !== id || ja.tipo !== b.tipo || toCents(money(ja.valor)) !== toCents(b.valor))) conflito('ID_EM_USO', 'Identificador já usado'); return; }
+      if (!nova) conflito('ID_EM_USO', 'Identificador já usado');
       const c = await meuCaixaAberto(tx, u, id);
       // trava a sessão para duas sangrias simultâneas não passarem do saldo
       await tx.$queryRaw`SELECT id FROM caixa_sessao WHERE id = ${c.id}::uuid FOR UPDATE`;

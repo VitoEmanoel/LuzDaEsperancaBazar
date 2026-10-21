@@ -24,6 +24,7 @@ import { PERFIL_ADMIN_ID } from '../../shared/permissoes.js';
 import { mudarPrecoProduto } from '../estoque/produtos.routes.js';
 import { codigoErro, lerPlanilha } from '../../shared/planilha.js';
 import { cortar, lerNfe, MAX_BYTES_NFE, nfeExemplo } from './nfe.js';
+import { reservarChave } from '../../shared/idempotencia.js';
 import type { MultipartFile } from '@fastify/multipart';
 
 /** Lê o arquivo do multipart; passou do `fileSize` dado no `req.file`, devolve o erro desta rota (com o código de sempre). */
@@ -704,20 +705,28 @@ export async function rotasLotes(app: FastifyInstance) {
     const u = exigirUsuario(req);
     const { id: loteId } = parse(zIdParam, req.params);
     const b = parse(zDescarte, req.body);
-    const ja = await prisma.descarte.findUnique({ where: { id: b.id }, include: descInclude });
-    if (ja && (ja.loteId !== loteId || ja.categoriaId !== b.categoriaId || ja.motivoId !== b.motivoId)) conflito('ID_EM_USO', 'Este identificador já foi usado em outro descarte'); // S6-14
-    if (ja) return reply.code(200).send(descarteDto(ja));
-    const lote = await prisma.loteEntrada.findUnique({ where: { id: loteId }, select: { status: true } });
-    if (!lote) naoEncontrado('Lote');
-    if (lote!.status === 'TRIADO') conflito('LOTE_TRIADO', 'Lote já triado não aceita registros');
-    if (!(await prisma.categoria.findUnique({ where: { id: b.categoriaId } }))) throw new AppError(400, 'Categoria inexistente', 'VALIDACAO');
-    if (!(await prisma.motivoDescarte.findFirst({ where: { id: b.motivoId, ativo: true } }))) throw new AppError(400, 'Motivo inexistente ou inativo', 'VALIDACAO');
-    // RN-01: descarte NUNCA gera movimentação de estoque
-    const d = await prisma.descarte.create({
-      data: { id: b.id, loteId, categoriaId: b.categoriaId, motivoId: b.motivoId, observacao: b.observacao ?? null, descricao: b.descricao ?? null, registradoPorId: u.id },
-      include: descInclude,
+    const { d, reenvio } = await prisma.$transaction(async (tx) => {
+      // S6-14: o mesmo id com o mesmo pedido (no mesmo lote) é o reenvio; com outro conteúdo, de outro usuário ou lote, 409
+      const nova = await reservarChave(tx, b.id, 'descarte', u.id, { loteId, ...b });
+      const ja = await tx.descarte.findUnique({ where: { id: b.id }, include: descInclude });
+      if (ja) {
+        if (nova && (ja.loteId !== loteId || ja.categoriaId !== b.categoriaId || ja.motivoId !== b.motivoId)) conflito('ID_EM_USO', 'Este identificador já foi usado em outro descarte'); // chave já limpa
+        return { d: ja, reenvio: true };
+      }
+      if (!nova) conflito('ID_EM_USO', 'Este identificador já foi usado em outra operação');
+      const lote = await tx.loteEntrada.findUnique({ where: { id: loteId }, select: { status: true } });
+      if (!lote) naoEncontrado('Lote');
+      if (lote!.status === 'TRIADO') conflito('LOTE_TRIADO', 'Lote já triado não aceita registros');
+      if (!(await tx.categoria.findUnique({ where: { id: b.categoriaId } }))) throw new AppError(400, 'Categoria inexistente', 'VALIDACAO');
+      if (!(await tx.motivoDescarte.findFirst({ where: { id: b.motivoId, ativo: true } }))) throw new AppError(400, 'Motivo inexistente ou inativo', 'VALIDACAO');
+      // RN-01: descarte NUNCA gera movimentação de estoque
+      const n = await tx.descarte.create({
+        data: { id: b.id, loteId, categoriaId: b.categoriaId, motivoId: b.motivoId, observacao: b.observacao ?? null, descricao: b.descricao ?? null, registradoPorId: u.id },
+        include: descInclude,
+      });
+      return { d: n, reenvio: false };
     });
-    return reply.code(201).send(descarteDto(d));
+    return reply.code(reenvio ? 200 : 201).send(descarteDto(d));
   });
 
   app.post('/lotes/:id/encerrar', { config: { acesso: ['entrada.registrar'] } }, async (req) => {
