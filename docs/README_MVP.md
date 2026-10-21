@@ -167,6 +167,8 @@ e o carrinho em andamento (sem dado pessoal, token ou senha), e o logout apaga i
 **Fluxo:** abrir (terminal + fundo de troco) → vender / receber / sangria / suprimento → fechar (contado × esperado).
 
 - **Um caixa aberto por terminal e um por operador** (RN-12/13, garantido no banco).
+- **Terminal fixo no usuário** (S6-21, opcional): o Administrador define em **Usuários** ("Ana → Caixa 1"); vários usuários podem ter o mesmo terminal (turnos). Quem tem terminal entra direto em "Abrir caixa · Caixa 1" em qualquer aparelho e só digita o troco; não abre outro terminal, nem pela API (403) nem pelo banco. Quem não tem escolhe na lista. Terminal fixo desativado: a tela avisa para falar com o Administrador.
+- **Terminal ocupado** (S6-18): na lista, o terminal aberto com outra pessoa aparece com o **primeiro nome** dela ("Caixa 1 (aberto com Ana)") e não dá para escolher; a recusa diz qual terminal e com quem. A própria pessoa com caixa aberto continua nele (vai direto ao PDV).
 - **Sangria e suprimento** com motivo. A tela da sangria mostra o **dinheiro que há na gaveta agora** e bloqueia valor acima dele (o servidor também recusa, e duas sangrias simultâneas não passam juntas).
 - **Abertura** com saldo inicial (troco) obrigatório: o operador digita o valor (0 se não houver troco).
 - **Total do caixa** (fechamento parcial): no PDV, mostra o dinheiro da gaveta, as vendas por forma e tudo o que aconteceu desde a abertura, sem fechar o caixa, com PDF.
