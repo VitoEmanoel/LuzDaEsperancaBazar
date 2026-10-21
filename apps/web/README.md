@@ -5,6 +5,8 @@ Baseado na *Especificação Técnica* (seções 4 e 5). Não contém lógica de 
 
 ## Rodar
 
+Passo a passo completo, com a instalação no Linux e no Windows e a API real: [`README.md` da raiz](../../README.md#começar). Aqui, só o resumo do front:
+
 ```bash
 npm install                      # na RAIZ do monorepo (workspaces)
 cd apps/web
@@ -18,7 +20,7 @@ Usuários da API simulada (**somente dev**; o build de produção não inclui `s
 
 | Login | Senha | Perfil |
 |---|---|---|
-| `admin` | `Admin@123` | Administrador (tudo, menos operar o PDV) |
+| `admin` | `Admin@123` | Administrador (tudo; abre caixa para pagar contas e receber fiado) |
 | `vendedor` | `Vendedor@123` | Vendedor (vai direto ao PDV) |
 | `estoquista` | `Estoquista@123` | Estoquista |
 | `financeiro` | `Financeiro@123` | Financeiro |
@@ -93,7 +95,8 @@ Todas as cores ficam em `src/styles/tokens.css`; telas não usam cor fixa.
 - Pagamento: o operador digita quanto recebeu em cada forma; o sistema mostra o que falta e o troco (só em dinheiro) e só finaliza quando a conta fecha. Fiado (cliente + vencimento), cadastro rápido de cliente com ciência LGPD, desconto limitado pelo perfil.
 - **CPF:** no primeiro bip da venda o PDV pergunta Sim/Não; em Sim valida os dígitos e mostra o saldo do mês; o CPF fica só na memória da tela e sai inteiro só no comprovante. O Admin define em Parâmetros o limite por CPF (em reais) e se o CPF é obrigatório.
 - O PDV bloqueia venda acima do estoque do Bazar e avisa a quantidade; o ✕ do carrinho pergunta quantas unidades tirar; Esc só tira item com o campo vazio.
-- **Total do caixa** (parcial), **sangria** com o dinheiro da gaveta e **fechamento** com linha do tempo e PDF.
+- **Caixa às cegas** (S6-19): sangria e fechamento sem ver o esperado nem a gaveta; o fechamento é definitivo e só depois mostra o esperado, a diferença, a linha do tempo e o PDF; com diferença, a justificativa vem em seguida (ou num aviso no Início até ser feita).
+- **Fiado recebido em dinheiro** (S6-20, Contas a receber): "Valor a receber" (a parte da dívida) e "Valor recebido" (o que o cliente entregou), com o troco na tela; só a dívida entra no caixa.
 - A venda é gravada direto no servidor. O id da venda (UUID do cliente) é a chave de idempotência: se a resposta se perder
   e o operador repetir, a mesma venda é devolvida, sem duplicar. O carrinho é preservado no aparelho se a sessão expirar.
 - Sem modo offline: se faltar internet, o PDV mostra o erro e a venda não é registrada.
