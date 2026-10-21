@@ -12,7 +12,7 @@ import { auditar } from '../../shared/audit.js';
 import { fromCents, money, toCents } from '../../shared/money.js';
 import { fromDbDate, inicioDoDia, fimDoDiaExclusivo, toDbDate } from '../../shared/dates.js';
 import { exigirUsuario } from '../../plugins/auth.js';
-import { caixaAbertoDoOperador, registrarSangria, FORMAS, type Forma } from '../caixa/caixa.service.js';
+import { auditarSangriaRecusada, caixaAbertoDoOperador, registrarSangria, FORMAS, type Forma } from '../caixa/caixa.service.js';
 import { CATEGORIA_REEMBOLSO_ID, registrarReembolso } from './reembolso.service.js';
 import { obterClienteAtivo } from '../cadastros/clientes.routes.js';
 import { gerarPdfResumo } from './resumo.pdf.js';
@@ -42,11 +42,29 @@ const contaReceberDto = (c: CrRow) => {
     vencimento: fromDbDate(c.vencimento), status: c.status,
   };
 };
-type RecRow = { id: string; contaReceberId: string; valor: { toFixed(n: number): string }; recebidoEm: Date; sessaoId: string | null; estornadoEm: Date | null; forma: string };
+type Dec = { toFixed(n: number): string };
+type RecRow = { id: string; contaReceberId: string; valor: Dec; recebidoEm: Date; sessaoId: string | null; estornadoEm: Date | null; forma: string; valorRecebido: Dec | null; troco: Dec };
 const recebimentoDto = (r: RecRow) => ({
   id: r.id, contaReceberId: r.contaReceberId, valor: money(r.valor), recebidoEm: r.recebidoEm.toISOString(),
   caixaId: r.sessaoId ?? undefined, estornado: !!r.estornadoEm, forma: r.forma,
+  // S6-20: só em dinheiro (os recebimentos antigos não têm); informativo, a conta e o caixa usam o valor
+  valorRecebido: r.valorRecebido ? money(r.valorRecebido) : undefined, troco: r.valorRecebido ? money(r.troco) : undefined,
 });
+
+/**
+ * S6-20 (P-11): em dinheiro, o recebido (ausente = o valor) não pode ser menor que o valor e a diferença é o troco;
+ * PIX e cartão não têm troco. Mesmas regras e códigos da venda. O servidor calcula o troco.
+ */
+function trocoDoRecebimento(forma: string, valor: string, valorRecebido: string | undefined) {
+  const v = toCents(valor);
+  if (forma !== 'DINHEIRO') {
+    if (valorRecebido !== undefined && toCents(valorRecebido) !== v) throw new AppError(400, 'PIX e cartão não têm troco: o valor recebido deve ser igual ao valor', 'TROCO_INVALIDO');
+    return { valorRecebido: null, troco: '0.00' };
+  }
+  const rec = valorRecebido === undefined ? v : toCents(valorRecebido);
+  if (rec < v) throw new AppError(400, 'Valor recebido menor que o valor a receber', 'RECEBIDO_INSUFICIENTE');
+  return { valorRecebido: fromCents(rec), troco: fromCents(rec - v) };
+}
 
 /** "Reembolso de venda" só nasce do cancelamento com reembolso: lançada à mão, a despesa sairia das saídas e inflaria o resultado (S6-14). */
 function semReembolsoManual(categoriaDespesaId: string | undefined) {
@@ -131,6 +149,7 @@ export async function rotasFinanceiro(app: FastifyInstance) {
     const u = exigirUsuario(req);
     const { id } = parse(zIdParam, req.params);
     const b = parse(z.object({ saiuDoCaixa: z.boolean().default(false), formaPagamento: z.enum(['DINHEIRO', 'PIX', 'CARTAO_DEBITO', 'CARTAO_CREDITO']).optional() }), req.body ?? {});
+    let caixaDaSangria: string | null = null; // o caixa que recusou a sangria, para a auditoria fora da transação
     await prisma.$transaction(async (tx) => {
       const c = await obterContaPagar(tx, id);
       if (c.status !== 'ABERTA') conflito('CONTA_NAO_ABERTA', 'Conta não está aberta');
@@ -140,6 +159,7 @@ export async function rotasFinanceiro(app: FastifyInstance) {
         const cx = await caixaAbertoDoOperador(tx, u.id);
         if (!cx) conflito('SEM_CAIXA_ABERTO', 'Você não tem caixa aberto para registrar a sangria');
         await tx.$queryRaw`SELECT id FROM caixa_sessao WHERE id = ${cx!.id}::uuid FOR UPDATE`;
+        caixaDaSangria = cx!.id;
         lancamentoId = (await registrarSangria(tx, cx!.id, u.id, toCents(c.valor), `Pagamento: ${c.descricao}`)).id;
       }
       await tx.contaPagar.update({
@@ -147,6 +167,11 @@ export async function rotasFinanceiro(app: FastifyInstance) {
         data: { status: 'PAGA', pagoEm: new Date(), valorPago: c.valor, formaPagamento: b.saiuDoCaixa ? 'DINHEIRO' : b.formaPagamento ?? 'PIX', caixaLancamentoId: lancamentoId },
       });
       await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'CONTA_PAGA', 'conta_pagar', id, { status: 'ABERTA' }, { status: 'PAGA', saiuDoCaixa: b.saiuDoCaixa });
+    }).catch(async (e: unknown) => {
+      // S6-19: a sangria do pagamento recusada (às cegas, sem o saldo na mensagem) fica na auditoria, fora da transação
+      if (!(e instanceof AppError && e.code === 'SANGRIA_ACIMA_SALDO') || !caixaDaSangria) throw e;
+      const conta = await obterContaPagar(prisma, id);
+      throw await auditarSangriaRecusada(prisma, e, { usuarioId: u.id, ip: req.ip }, caixaDaSangria, money(conta.valor), 'CONTA_PAGA');
     });
     return contaPagarDto(await obterContaPagar(prisma, id));
   });
@@ -207,20 +232,23 @@ export async function rotasFinanceiro(app: FastifyInstance) {
     const u = exigirUsuario(req);
     const { id } = parse(zIdParam, req.params);
     const b = parse(z.object({
-      id: zUuid, valor: zValor, caixaId: zUuid.optional(),
+      id: zUuid, valor: zValor, caixaId: zUuid.optional(), valorRecebido: zValor.optional(),
       forma: z.enum(['DINHEIRO', 'PIX', 'CARTAO_DEBITO', 'CARTAO_CREDITO']).default('DINHEIRO'),
       observacao: z.string().trim().max(300).optional(),
     }).strict(), req.body);
     const { r, reenvio } = await prisma.$transaction(async (tx) => {
-      // reenvio do MESMO recebimento volta o gravado; outra conta, valor, forma, caixa ou observação com o mesmo id: 409 (S6-14).
+      // reenvio do MESMO recebimento volta o gravado; outra conta, valor, forma, recebido, caixa ou observação com o mesmo id: 409 (S6-14).
       // A conta da URL entra na impressão do pedido.
       const nova = await reservarChave(tx, b.id, 'recebimento', u.id, { contaId: id, ...b });
       const ja = await tx.recebimento.findUnique({ where: { id: b.id } });
       if (ja) {
-        if (nova && (ja.contaReceberId !== id || toCents(money(ja.valor)) !== toCents(b.valor) || ja.forma !== b.forma)) conflito('ID_EM_USO', 'Identificador já usado');
+        // o recebido gravado (em PIX, cartão e nos antigos, o próprio valor) contra o do reenvio (ausente = o valor)
+        const recebidoIgual = toCents(money(ja.valorRecebido ?? ja.valor)) === toCents(b.valorRecebido ?? b.valor);
+        if (nova && (ja.contaReceberId !== id || toCents(money(ja.valor)) !== toCents(b.valor) || ja.forma !== b.forma || !recebidoIgual)) conflito('ID_EM_USO', 'Identificador já usado');
         return { r: ja, reenvio: true };
       }
       if (!nova) conflito('ID_EM_USO', 'Identificador já usado');
+      const troco = trocoDoRecebimento(b.forma, b.valor, b.valorRecebido);
       const conta = await tx.contaReceber.findUnique({ where: { id }, include: crInclude });
       if (!conta) naoEncontrado('Conta');
       if (conta!.status === 'CANCELADA' || conta!.status === 'QUITADA') conflito('CONTA_NAO_ABERTA', 'Conta não aceita recebimento');
@@ -232,9 +260,9 @@ export async function rotasFinanceiro(app: FastifyInstance) {
         if (cx.status !== 'ABERTO') conflito('CAIXA_FECHADO', 'Caixa fechado');
       }
       const n = await tx.recebimento.create({
-        data: { id: b.id, contaReceberId: id, valor: b.valor, forma: b.forma, sessaoId: b.caixaId ?? null, usuarioId: u.id, observacao: b.observacao ?? null },
+        data: { id: b.id, contaReceberId: id, valor: b.valor, forma: b.forma, sessaoId: b.caixaId ?? null, usuarioId: u.id, observacao: b.observacao ?? null, ...troco },
       });
-      await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'RECEBIMENTO', 'conta_receber', id, undefined, { recebimentoId: n.id, valor: b.valor, noCaixa: !!b.caixaId });
+      await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'RECEBIMENTO', 'conta_receber', id, undefined, { recebimentoId: n.id, valor: b.valor, noCaixa: !!b.caixaId, troco: troco.troco });
       return { r: n, reenvio: false };
     });
     return reply.code(reenvio ? 200 : 201).send(recebimentoDto(r));

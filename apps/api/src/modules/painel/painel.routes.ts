@@ -117,7 +117,8 @@ export async function rotasPainel(app: FastifyInstance) {
     const totalCents = porDia.reduce((s, r) => s + toCents(Number(r.total).toFixed(2)), 0);
     const quantidade = porDia.reduce((s, r) => s + Number(r.qtd), 0);
 
-    const abertos = await prisma.caixaSessao.findMany({ where: { status: 'ABERTO' }, include: { terminal: { select: { nome: true } } }, orderBy: { abertoEm: 'asc' } });
+    // S6-19: o caixa aberto de quem consulta não entra (o dono não vê o esperado do próprio caixa enquanto ele está aberto)
+    const abertos = await prisma.caixaSessao.findMany({ where: { status: 'ABERTO', abertoPorId: { not: u.id } }, include: { terminal: { select: { nome: true } } }, orderBy: { abertoEm: 'asc' } });
     const nomes = new Map((await prisma.usuario.findMany({ where: { id: { in: abertos.map((c) => c.abertoPorId) } }, select: { id: true, nome: true } })).map((u) => [u.id, u.nome]));
     const caixasAbertos = await Promise.all(abertos.map(async (c) => ({
       id: c.id, terminalNome: c.terminal.nome, operadorNome: nomes.get(c.abertoPorId) ?? '—', abertoEm: c.abertoEm.toISOString(),

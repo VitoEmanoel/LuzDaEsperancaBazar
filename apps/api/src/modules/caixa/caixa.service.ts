@@ -2,6 +2,7 @@
 import type { Db } from '../../shared/prisma.js';
 import { fromCents, money, moneyOpt, toCents } from '../../shared/money.js';
 import { AppError } from '../../shared/errors.js';
+import { auditar } from '../../shared/audit.js';
 
 export const FORMAS = ['DINHEIRO', 'PIX', 'CARTAO_DEBITO', 'CARTAO_CREDITO', 'FIADO'] as const;
 export type Forma = (typeof FORMAS)[number];
@@ -45,27 +46,45 @@ export async function caixaAbertoDoOperador(db: Db, usuarioId: string) {
   return db.caixaSessao.findFirst({ where: { abertoPorId: usuarioId, status: 'ABERTO' } });
 }
 
-/** Registra sangria conferindo que há dinheiro suficiente no caixa. */
+/**
+ * Registra sangria conferindo que há dinheiro suficiente no caixa. S6-19 (às cegas): a recusa não diz quanto há na gaveta;
+ * quem chama grava a tentativa na auditoria com `auditarSangriaRecusada`, FORA da transação (o rollback levaria a linha junto).
+ */
 export async function registrarSangria(db: Db, caixaId: string, usuarioId: string, valorCents: number, motivo: string, id?: string) {
   const { esperadoCents } = await calcularPrevia(db, caixaId);
   if (valorCents > esperadoCents) {
-    throw new AppError(409, 'Sangria maior que o dinheiro em caixa', 'SANGRIA_ACIMA_SALDO', `Disponível: ${fromCents(Math.max(0, esperadoCents))}`);
+    throw new AppError(409, 'Valor maior do que o dinheiro disponível no caixa', 'SANGRIA_ACIMA_SALDO');
   }
   return db.caixaLancamento.create({
     data: { ...(id ? { id } : {}), sessaoId: caixaId, tipo: 'SANGRIA', valor: fromCents(valorCents), motivo: motivo.slice(0, 300), usuarioId },
   });
 }
 
+/**
+ * S6-19: testar valores na sangria revela o saldo da gaveta (limite aceito pelo humano); cada recusa fica na auditoria
+ * com o valor tentado, sem o saldo. Grava fora da transação recusada e devolve o erro original para ser relançado.
+ */
+export async function auditarSangriaRecusada(db: Db, e: unknown, ctx: { usuarioId: string; ip?: string }, caixaId: string, valorTentado: string, origem: 'LANCAMENTO' | 'CONTA_PAGA') {
+  if (e instanceof AppError && e.code === 'SANGRIA_ACIMA_SALDO') {
+    await auditar(db, ctx, 'SANGRIA_RECUSADA', 'caixa_sessao', caixaId, undefined, { valorTentado, origem }).catch(() => {});
+  }
+  return e;
+}
+
 type CaixaRow = {
   id: string; terminalId: string; abertoPorId: string; status: 'ABERTO' | 'FECHADO'; abertoEm: Date; valorAbertura: { toFixed(n: number): string };
   fechadoEm: Date | null; valorEsperado: { toFixed(n: number): string } | null; valorContado: { toFixed(n: number): string } | null;
   diferenca: { toFixed(n: number): string } | null; observacao: string | null; terminal: { nome: string };
+  justificativaDiferenca?: string | null;
 };
 export const caixaDto = (c: CaixaRow, operadorNome: string) => ({
   id: c.id, terminalId: c.terminalId, terminalNome: c.terminal.nome, operadorId: c.abertoPorId, operadorNome,
   abertoEm: c.abertoEm.toISOString(), fundoTroco: money(c.valorAbertura), status: c.status,
   fechadoEm: c.fechadoEm?.toISOString(), esperado: moneyOpt(c.valorEsperado), contado: moneyOpt(c.valorContado),
-  diferenca: moneyOpt(c.diferenca), observacao: c.observacao ?? undefined,
+  diferenca: moneyOpt(c.diferenca),
+  // S6-19: a justificativa (depois do fechamento) ou a observação antiga (caixas fechados antes da 0016)
+  observacao: c.justificativaDiferenca ?? c.observacao ?? undefined,
+  ...(c.status === 'FECHADO' && c.diferenca !== null && c.diferenca.toFixed(2) !== '0.00' && !c.justificativaDiferenca && !c.observacao ? { semJustificativa: true } : {}),
 });
 
 // ---------------- linha do tempo do caixa (da abertura ao fechamento) ----------------
@@ -107,7 +126,10 @@ export async function linhaDoTempo(db: Db, caixaId: string) {
   }
   for (const r of receb) {
     const din = r.forma === 'DINHEIRO' ? toCents(r.valor) : 0;
-    ev.push({ em: r.recebidoEm, tipo: 'RECEBIMENTO_FIADO', descricao: `Recebimento de fiado em ${NOME_FORMA[r.forma] ?? r.forma}`, valor: money(r.valor), efeitoDinheiro: fromCents(din), cents: din });
+    // S6-20: o recebido e o troco são informativos, como na venda; na gaveta entra só o valor da dívida
+    const troco = toCents(r.troco);
+    const recebido = r.valorRecebido ? ` (recebido ${money(r.valorRecebido)}${troco ? `, troco ${fromCents(troco)}` : ''})` : '';
+    ev.push({ em: r.recebidoEm, tipo: 'RECEBIMENTO_FIADO', descricao: `Recebimento de fiado em ${NOME_FORMA[r.forma] ?? r.forma}${recebido}`, valor: money(r.valor), efeitoDinheiro: fromCents(din), cents: din });
     if (r.estornadoEm) ev.push({ em: r.estornadoEm, tipo: 'RECEBIMENTO_ESTORNADO', descricao: 'Estorno de recebimento de fiado', valor: money(r.valor), efeitoDinheiro: fromCents(-din), cents: -din });
   }
   ev.sort((a, b) => a.em.getTime() - b.em.getTime());

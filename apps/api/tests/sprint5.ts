@@ -118,8 +118,9 @@ async function main() {
   console.log('Caixas do dia e fechamentos (S5-06 e S5-09)');
   const term = (await admin.post('/terminais', { id: uuid(), nome: `Caixa S5 ${sufixo}` })).data;
   const cxv = (await vend.post('/caixas', { id: uuid(), terminalId: term.id, fundoTroco: '20.00' })).data;
-  r = await vend.post(`/caixas/${cxv.id}/fechar`, { contado: '18.50', observacao: 'Faltou troco na conferência' });
+  r = await vend.post(`/caixas/${cxv.id}/fechar`, { id: uuid(), contado: '18.50' });
   check(r.status === 200 && r.data.diferenca === '-1.50', 'caixa fechado com R$ 1,50 a menos', r.data);
+  await vend.post(`/caixas/${cxv.id}/justificativa`, { texto: 'Faltou troco na conferência' }); // S6-19: a justificativa vem depois
   const hoje = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Fortaleza' }).format(new Date());
   r = await fin.get('/caixas?status=ABERTO&pageSize=100');
   check(r.status === 200 && (r.data.items as any[]).some((c) => c.id === cx.id) && (r.data.items as any[]).every((c) => c.status === 'ABERTO'), 'o Financeiro vê os caixas abertos agora, de qualquer operador', r.data?.items?.length);
@@ -133,7 +134,8 @@ async function main() {
   check(r.status === 200 && r.data.caixa?.id === cx.id && r.data.caixa.operadorNome && r.data.totaisPorForma?.DINHEIRO !== undefined && r.data.esperadoDinheiro !== undefined, 'o detalhe traz o caixa, os totais por forma e o dinheiro esperado', r.data);
   r = await admin.get(`/caixas/${cxv.id}/resumo`);
   check(r.status === 200 && r.data.caixa.diferenca === '-1.50' && r.data.fundoTroco === '20.00', 'o Admin abre o detalhe de um caixa fechado', r.data);
-  check((await caixa.get(`/caixas/${cx.id}/resumo`)).status === 200, 'o operador vê o detalhe do próprio caixa');
+  check((await caixa.get(`/caixas/${cx.id}/resumo`)).data?.code === 'CAIXA_ABERTO_AS_CEGAS', 'o operador não vê o detalhe do próprio caixa aberto (às cegas, S6-19)');
+  check((await vend.get(`/caixas/${cxv.id}/resumo`)).status === 200, 'depois de fechado, o operador vê o detalhe do próprio caixa');
   check((await vend.get(`/caixas/${cx.id}/resumo`)).data?.code === 'CAIXA_DE_OUTRO_OPERADOR', 'mas não o de outro operador');
   check((await est.get('/caixas')).status === 403 && (await est.get(`/caixas/${cx.id}/resumo`)).status === 403, 'o Estoquista não vê os caixas');
   check((await fin.get(`/caixas/${uuid()}/resumo`)).status === 404, 'caixa inexistente: 404');

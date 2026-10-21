@@ -206,20 +206,28 @@ async function main() {
   check((await caixa.put(`/vendas/${uuid()}`, { ...base, itens: [{ categoriaId: catRoupa.id, quantidade: 999 }], pagamentos: [{ forma: 'PIX', valor: '9990.00', valorRecebido: '9990.00' }] })).data?.code === 'SALDO_INSUFICIENTE', 'venda por categoria sem saldo');
 
   console.log('CXA/FIN — sangria, recebimento, fechamento');
-  check((await caixa.post(`/caixas/${cxId}/lancamentos`, { id: uuid(), tipo: 'SANGRIA', valor: '999.00', motivo: 'Teste' })).data?.code === 'SANGRIA_ACIMA_SALDO', 'sangria acima do dinheiro');
+  const sAcima = (await caixa.post(`/caixas/${cxId}/lancamentos`, { id: uuid(), tipo: 'SANGRIA', valor: '999.00', motivo: 'Teste' })).data;
+  check(sAcima?.code === 'SANGRIA_ACIMA_SALDO' && !/\d/.test(`${sAcima.title} ${sAcima.detail ?? ''}`), 'sangria acima do dinheiro, sem dizer quanto há (às cegas, S6-19)', sAcima);
   check((await caixa.post(`/caixas/${cxId}/lancamentos`, { id: uuid(), tipo: 'SUPRIMENTO', valor: '20.00', motivo: 'Reforço de troco' })).status === 204, 'suprimento');
   const cr = (await caixa.get(`/contas-receber?clienteId=${cli.id}`)).data.items[0];
   check(cr.saldo === '20.00' && cr.vendaNumero === rf2.data.numero, 'conta a receber do fiado', cr);
-  const rec = (await caixa.post(`/contas-receber/${cr.id}/recebimentos`, { id: uuid(), valor: '8.00', caixaId: cxId })).data;
+  const rec = (await caixa.post(`/contas-receber/${cr.id}/recebimentos`, { id: uuid(), valor: '8.00', caixaId: cxId, forma: 'DINHEIRO', valorRecebido: '10.00' })).data;
+  check(rec?.valor === '8.00' && rec?.troco === '2.00', 'recebimento em dinheiro com R$ 10,00: troco R$ 2,00, a conta abate R$ 8,00 (S6-20)', rec);
   check(rec.id && !rec.estornado, 'recebimento parcial no caixa');
   check((await caixa.post(`/contas-receber/${cr.id}/recebimentos`, { id: uuid(), valor: '50.00' })).data?.code === 'RECEBIMENTO_ACIMA_SALDO', 'recebimento acima do saldo');
-  const prev = (await caixa.get(`/caixas/${cxId}/previa-fechamento`)).data;
+  // S6-19: o esperado do caixa aberto só para quem não é o dono e vê relatórios (o Administrador aqui)
+  const prev = (await admin.get(`/caixas/${cxId}/resumo`)).data;
   // 50 fundo + 95 venda dinheiro + 8 fiado recebido + 20 suprimento = 173
-  check(prev.esperadoDinheiro === '173.00' && prev.totaisPorForma.FIADO === '20.00', 'prévia RN-19', prev);
-  check((await vend.get(`/caixas/${cxId}/previa-fechamento`)).status === 403, 'prévia de caixa alheio => 403 (anti-IDOR)');
-  check((await caixa.post(`/caixas/${cxId}/fechar`, { contado: '170.00' })).data?.code === 'OBSERVACAO_OBRIGATORIA', 'diferença exige observação');
-  const fech = (await caixa.post(`/caixas/${cxId}/fechar`, { contado: '170.00', observacao: 'Faltou troco de moedas' })).data;
-  check(fech.status === 'FECHADO' && fech.diferenca === '-3.00', 'caixa fechado com diferença', fech);
+  check(prev.esperadoDinheiro === '173.00' && prev.totaisPorForma.FIADO === '20.00', 'esperado RN-19 (visto pelo Administrador)', prev);
+  check((await caixa.get(`/caixas/${cxId}/resumo`)).data?.code === 'CAIXA_ABERTO_AS_CEGAS', 'o dono do caixa aberto não vê o total (às cegas, S6-19)');
+  check((await vend.get(`/caixas/${cxId}/resumo`)).status === 403, 'caixa alheio => 403 (anti-IDOR)');
+  check((await caixa.get(`/caixas/${cxId}/previa-fechamento`)).status === 404, 'a prévia do fechamento não existe mais (S6-19)');
+  check((await caixa.post(`/caixas/${cxId}/fechar`, { contado: '170.00' })).status === 400, 'fechar sem o id da operação é recusado');
+  check((await caixa.post(`/caixas/${cxId}/fechar`, { id: uuid(), contado: '170.00', observacao: 'x' })).status === 400, 'fechar com observação é recusado (a justificativa vem depois)');
+  const idFech = uuid();
+  const fech = (await caixa.post(`/caixas/${cxId}/fechar`, { id: idFech, contado: '170.00' })).data;
+  check(fech.status === 'FECHADO' && fech.diferenca === '-3.00' && fech.esperado === '173.00' && fech.semJustificativa === true, 'caixa fecha na hora com diferença e mostra o esperado só agora; justificativa pendente', fech);
+  check((await caixa.post(`/caixas/${cxId}/justificativa`, { texto: 'Faltou troco de moedas' })).data?.observacao === 'Faltou troco de moedas', 'quem fechou justifica a diferença depois');
   check((await caixa.put(`/vendas/${uuid()}`, { ...base, itens: [{ codigo: pec2.codigo, quantidade: 1 }], pagamentos: [{ forma: 'PIX', valor: '55.00', valorRecebido: '55.00' }] })).data?.code === 'CAIXA_FECHADO', 'venda com caixa fechado (RN-12)');
 
   console.log('PDV — cancelamento e estornos (admin)');
@@ -255,15 +263,15 @@ async function main() {
   const centavos = await vnd(itRoupa(1), [{ forma: 'DINHEIRO', valor: '9.95', valorRecebido: '20.00' }], { desconto: '0.05' });
   check(centavos.status === 201 && centavos.data.total === '9.95' && centavos.data.troco === '10.05', 'centavos: conta de R$ 9,95 paga com nota de R$ 20 dá troco de R$ 10,05', centavos.data);
   check((await vend.post('/caixas', { id: uuid(), terminalId: term1.id })).status === 400, 'abertura de caixa sem saldo inicial é recusada');
-  const tempoCx3 = (await caixa.get(`/caixas/${cx3}/linha-do-tempo`)).data;
+  const tempoCx3 = (await admin.get(`/caixas/${cx3}/linha-do-tempo`)).data;
   check(tempoCx3.eventos.some((e: any) => e.tipo === 'VENDA' && e.descricao.includes('troco 85.00')), 'a linha do tempo do caixa mostra o recebido e o troco', tempoCx3.eventos.map((e: any) => e.descricao));
   // Cancelar venda em dinheiro com o caixa AINDA ABERTO: sai do valor esperado e NÃO gera reembolso no financeiro
-  const prevAntes = (await caixa.get(`/caixas/${cx3}/previa-fechamento`)).data;
+  const prevAntes = (await admin.get(`/caixas/${cx3}/resumo`)).data;
   const vAberto = uuid();
   check((await caixa.put(`/vendas/${vAberto}`, { ...base, caixaId: cx3, itens: [{ categoriaId: catRoupa.id, quantidade: 1 }], pagamentos: [{ forma: 'DINHEIRO', valor: '10.00', valorRecebido: '10.00' }] })).status === 201, 'venda em dinheiro no caixa aberto');
-  check((await caixa.get(`/caixas/${cx3}/previa-fechamento`)).data.esperadoDinheiro === fromMoney(Number(prevAntes.esperadoDinheiro) + 10), 'dinheiro esperado sobe com a venda', prevAntes);
+  check((await admin.get(`/caixas/${cx3}/resumo`)).data.esperadoDinheiro === fromMoney(Number(prevAntes.esperadoDinheiro) + 10), 'dinheiro esperado sobe com a venda', prevAntes);
   check((await admin.post(`/vendas/${vAberto}/cancelar`, { motivo: 'Cancelada com o caixa aberto' })).status === 200, 'venda cancelada com o caixa aberto');
-  check((await caixa.get(`/caixas/${cx3}/previa-fechamento`)).data.esperadoDinheiro === prevAntes.esperadoDinheiro, 'cancelar com caixa aberto devolve o dinheiro esperado ao valor anterior');
+  check((await admin.get(`/caixas/${cx3}/resumo`)).data.esperadoDinheiro === prevAntes.esperadoDinheiro, 'cancelar com caixa aberto devolve o dinheiro esperado ao valor anterior');
   const reembAposAberto = (await admin.get('/contas-pagar?status=PAGA')).data.items.filter((c: any) => c.categoriaDespesaNome === 'Reembolso de venda');
   check(reembAposAberto.length === 2, 'cancelar com caixa aberto NÃO cria reembolso no financeiro', reembAposAberto.length);
   // Cada operador vê só as próprias vendas
@@ -285,12 +293,15 @@ async function main() {
   const cpAdm = (await admin.post('/contas-pagar', { id: uuid(), descricao: 'Conta paga pelo Administrador com dinheiro do caixa', valor: '20.00', vencimento: hoje })).data;
   const pgAdm = (await admin.post(`/contas-pagar/${cpAdm.id}/pagar`, { saiuDoCaixa: true })).data;
   check(pgAdm.status === 'PAGA' && pgAdm.saiuDoCaixa === true, 'Administrador paga conta com dinheiro do caixa (sangria automática)', pgAdm);
-  check((await admin.get(`/caixas/${cxAdm}/previa-fechamento`)).data.esperadoDinheiro === '30.00', 'dinheiro da gaveta do Administrador: fundo 50 menos a conta paga de 20');
+  check((await admin.get(`/caixas/${cxAdm}/resumo`)).data?.code === 'CAIXA_ABERTO_AS_CEGAS', 'o Administrador também fecha às cegas o próprio caixa (S6-19)');
+  const painelAdm = await admin.get(`/painel/admin?de=${hoje}&ate=${hoje}`);
+  check(painelAdm.status === 200 && !(painelAdm.data?.caixasAbertos ?? []).some((c: any) => c.id === cxAdm), 'o painel do Administrador não mostra o esperado do caixa dele', painelAdm.status);
   check((await admin.post(`/caixas/${cxAdm}/lancamentos`, { id: uuid(), tipo: 'SANGRIA', valor: '30.01', motivo: 'Acima do que há na gaveta' })).data?.code === 'SANGRIA_ACIMA_SALDO', 'sangria acima do dinheiro da gaveta é bloqueada (R$ 30,01 de R$ 30,00)');
   check((await admin.post(`/caixas/${cxAdm}/lancamentos`, { id: uuid(), tipo: 'SANGRIA', valor: '30.00', motivo: 'Tudo o que há na gaveta' })).status === 204, 'sangria do valor exato da gaveta passa');
   check((await admin.put(`/vendas/${uuid()}`, { terminalId: term4.id, caixaId: cxAdm, itens: [{ categoriaId: catRoupa.id, quantidade: 1 }], desconto: '10.00', pagamentos: [] })).data?.code === 'VENDA_SEM_VALOR', 'venda com total zero (100% de desconto) é recusada'); 
-  const pdfCx = await caixa.req('GET', `/caixas/${cx3}/fechamento.pdf`);
-  check(pdfCx.status === 200 && Buffer.from(pdfCx.data as ArrayBuffer).subarray(0, 4).toString() === '%PDF', 'PDF do fechamento (parcial, caixa aberto)', pdfCx.status);
+  const pdfCx = await admin.req('GET', `/caixas/${cx3}/fechamento.pdf`);
+  check(pdfCx.status === 200 && Buffer.from(pdfCx.data as ArrayBuffer).subarray(0, 4).toString() === '%PDF', 'PDF do fechamento (parcial, caixa aberto de outra pessoa)', pdfCx.status);
+  check((await caixa.req('GET', `/caixas/${cx3}/fechamento.pdf`)).status === 403 && (await caixa.get(`/caixas/${cx3}/linha-do-tempo`)).status === 403, 'o dono do caixa aberto não baixa a parcial nem vê a linha do tempo (às cegas)');
   check((await vend.req('GET', `/caixas/${cx3}/fechamento.pdf`)).status === 403 && (await vend.get(`/caixas/${cx3}/linha-do-tempo`)).status === 403, 'o Vendedor não vê a linha do tempo nem o PDF do caixa de outro operador');
   check((await admin.get(`/caixas/${cx3}/linha-do-tempo`)).status === 200, 'o Administrador vê a linha do tempo de qualquer caixa');
   const compra = await admin.post('/lotes', { id: uuid(), tipo: 'COMPRA', parceiroId: fornecedor.id, valorCompra: '120.00', pago: false, vencimento: hoje });
@@ -345,7 +356,7 @@ async function main() {
   check(vV.status === 201 && vV.data.total === '10.00', 'Vendedor padrão registra uma venda', vV.data);
   check((await vend.post(`/caixas/${cxV}/lancamentos`, { id: uuid(), tipo: 'SUPRIMENTO', valor: '10.00', motivo: 'Reforço de troco' })).status === 204, 'Vendedor padrão faz suprimento');
   // fundo 20 + venda 10 + suprimento 10 = 40
-  const fV = (await vend.post(`/caixas/${cxV}/fechar`, { contado: '40.00' })).data;
+  const fV = (await vend.post(`/caixas/${cxV}/fechar`, { id: uuid(), contado: '40.00' })).data;
   check(fV.status === 'FECHADO' && fV.diferenca === '0.00', 'Vendedor padrão fecha o caixa sem diferença', fV);
   // Isolamento mútuo com os dois operadores já tendo vendido: cada um enxerga só a(s) sua(s) venda(s)
   const vendasVend2 = (await vend.get('/vendas')).data, vendasCaixa2 = (await caixa.get('/vendas')).data;

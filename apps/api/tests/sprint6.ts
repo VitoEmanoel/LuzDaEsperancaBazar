@@ -2,6 +2,7 @@
  * Sprint 6, achados da revisão do protótipo (S6-06): id de operação repetido com outro conteúdo é recusado (S6-14),
  * "Reembolso de venda" não se lança à mão (S6-14), corpos de dinheiro com lista branca estrita (S6-14), o Vendedor sem a base
  * de clientes (S6-15) e sem os dados do doador na consulta do código (S6-16). A carga inicial única (S6-17) está no sprint5.
+ * Também: reenvio do cadastro de cliente e de lote (S6-22), caixa às cegas (S6-19) e troco no recebimento do fiado (S6-20).
  * Dados 100% fictícios. Rodar DEPOIS do smoke (senha do admin e caixa aberto do operador caixa1). Uso: API_URL=... npm run test:sprint6
  */
 import { randomUUID as uuid } from 'node:crypto';
@@ -9,6 +10,7 @@ import { randomUUID as uuid } from 'node:crypto';
 const BASE = process.env.API_URL ?? 'http://127.0.0.1:3999/api/v1';
 const SENHA_ADMIN = process.env.ADMIN_SENHA ?? 'Nova-Senha-Forte-1';
 const CATEGORIA_REEMBOLSO_ID = '00000000-0000-4000-8000-0000000000c1';
+const centavos = (v: string) => Math.round(Number(v) * 100);
 let falhas = 0, oks = 0;
 function check(cond: unknown, nome: string, extra?: unknown) {
   if (cond) { oks++; console.log(`  ✔ ${nome}`); } else { falhas++; console.log(`  ✘ ${nome}`, extra !== undefined ? JSON.stringify(extra).slice(0, 320) : ''); }
@@ -161,7 +163,7 @@ async function main() {
   check(r.status === 200 && r.data?.id === abre.id, 'reenvio da mesma abertura devolve o caixa (não CAIXA_JA_ABERTO)', r.data);
   r = await vendA.post('/caixas', { ...abre, fundoTroco: '40.00' });
   check(r.status === 409 && r.data?.code === 'ID_EM_USO', 'o mesmo id com outro fundo de troco é recusado (409)', r.data);
-  const fechar = (await vendA.post(`/caixas/${abre.id}/fechar`, { contado: '30.00' }));
+  const fechar = (await vendA.post(`/caixas/${abre.id}/fechar`, { id: uuid(), contado: '30.00' }));
   check(fechar.status === 200, 'caixa de teste fechado', fechar.data);
 
   console.log('S6-15 e S6-16 — Vendedor');
@@ -232,7 +234,7 @@ async function main() {
   const duas = await Promise.all([eva.c.post('/caixas', { id: uuid(), terminalId: t3.id, fundoTroco: '0.00' }), eva.c.post('/caixas', { id: uuid(), terminalId: t4.id, fundoTroco: '0.00' })]);
   check(duas.filter((x) => x.status === 201).length === 1 && duas.some((x) => x.status === 409 && x.data?.code === 'CAIXA_JA_ABERTO'), 'a mesma pessoa em dois terminais ao mesmo tempo: um abre, o outro é CAIXA_JA_ABERTO (não "aberto com ela mesma")', duas.map((x) => [x.status, x.data?.code]));
   // ao fechar, o terminal fica livre
-  check((await ana.c.post(`/caixas/${caixaAna}/fechar`, { contado: '10.00' })).status === 200, 'Ana fecha o caixa');
+  check((await ana.c.post(`/caixas/${caixaAna}/fechar`, { id: uuid(), contado: '10.00' })).status === 200, 'Ana fecha o caixa');
   check(((await bia.c.get('/terminais')).data as any[]).find((t) => t.id === t1.id)?.ocupadoPor === undefined, 'terminal liberado ao fechar');
   // o Admin tira o terminal: a pessoa volta a escolher
   r = await admin.patch(`/usuarios/${ana.id}`, { terminalId: null });
@@ -257,6 +259,168 @@ async function main() {
   check((await est.get('/terminais')).status === 403, 'Estoquista não lista terminais (403)');
   check((await est.patch(`/usuarios/${ana.id}`, { terminalId: t1.id })).status === 403, 'nem define o terminal de alguém (403)');
   check((await bia.c.patch(`/usuarios/${ana.id}`, { terminalId: t1.id })).status === 403, 'nem o Vendedor (403)');
+
+  console.log('S6-22 — cadastro de cliente e de lote: o mesmo id com outros dados é recusado; corrigido depois de um 400, grava');
+  const JA_GRAVADO = 'Este cadastro já foi gravado com outros dados';
+  const idCli = uuid();
+  const cli22 = (nome: string) => ({ id: idCli, nome, telefone: '86988887777', cienciaAviso: true });
+  r = await admin.post('/clientes', cli22(`Maria S622 ${sufixo}`));
+  check(r.status === 201, 'cliente cadastrado', r.data);
+  r = await admin.post('/clientes', cli22(`Maria S622 ${sufixo}`));
+  check(r.status === 200 && r.data?.id === idCli, 'reenvio igual devolve o mesmo cliente (não duplica)', r.data);
+  r = await admin.post('/clientes', cli22(`Maria Corrigida ${sufixo}`));
+  check(r.status === 409 && r.data?.code === 'ID_EM_USO' && r.data?.title === JA_GRAVADO, 'o mesmo id com outro nome: 409 "já gravado com outros dados" (antes: ok com o nome antigo)', r.data);
+  const doCli = (await admin.post('/clientes/busca', { termo: `S622 ${sufixo}` })).data;
+  check(Array.isArray(doCli) ? doCli.length === 1 : (doCli?.items ?? []).length === 1, 'continua um cliente só', doCli);
+  const idCli2 = uuid();
+  r = await admin.post('/clientes', { id: idCli2, nome: `Joana S622 ${sufixo}`, telefone: '8888', cienciaAviso: true });
+  check(r.status === 400, 'cliente com telefone sem DDD: 400 (não grava nada)', r.data);
+  r = await admin.post('/clientes', { id: idCli2, nome: `Joana S622 ${sufixo}`, telefone: '86988886666', cienciaAviso: true });
+  check(r.status === 201, 'corrigido e reenviado com o MESMO id: grava (a recusa não guardou a chave)', r.data);
+  r = await vend.post('/clientes', cli22(`Maria Outra ${sufixo}`));
+  check(r.status === 409 && r.data?.code === 'ID_EM_USO', 'o id de um cliente usado por outra pessoa com outros dados: 409', r.data);
+
+  const parcs = (await admin.get('/parceiros')).data;
+  const parc = (Array.isArray(parcs) ? parcs : parcs.items).find((p: any) => p.ativo !== false);
+  const outroParc = (Array.isArray(parcs) ? parcs : parcs.items).find((p: any) => p.ativo !== false && p.id !== parc.id);
+  const idLote = uuid();
+  r = await admin.post('/lotes', { id: idLote, tipo: 'DOACAO' });
+  check(r.status === 400 && r.data?.code === 'PARCEIRO_OBRIGATORIO', 'lote sem doador: 400', r.data);
+  r = await admin.post('/lotes', { id: idLote, tipo: 'DOACAO', parceiroId: parc.id });
+  check(r.status === 201, 'corrigido e reenviado com o MESMO id: o lote nasce', r.data);
+  const numeroLote = r.data?.numero;
+  r = await admin.post('/lotes', { id: idLote, tipo: 'DOACAO', parceiroId: parc.id });
+  check(r.status === 200 && r.data?.numero === numeroLote, 'reenvio igual devolve o mesmo lote', r.data);
+  if (outroParc) {
+    r = await admin.post('/lotes', { id: idLote, tipo: 'DOACAO', parceiroId: outroParc.id });
+    check(r.status === 409 && r.data?.title === JA_GRAVADO, 'o mesmo id com outro doador: 409 (antes: ok com o doador antigo)', r.data);
+  } else check(false, 'falta um segundo parceiro para testar o lote');
+
+  const idItem = uuid();
+  const item22 = (quantidade: number) => ({ id: idItem, categoriaId: categ?.id ?? (cat.categorias as any[])[0].id, controle: 'CATEGORIA', quantidade, preco: '5.00', valorAtribuido: '1.00', localDestino: 'BAZAR' });
+  r = await admin.post(`/lotes/${idLote}/itens`, item22(2));
+  check(r.status === 201, 'item cadastrado no lote', r.data);
+  r = await admin.post(`/lotes/${idLote}/itens`, item22(2));
+  check(r.status === 200 && r.data?.id === idItem, 'reenvio igual devolve o mesmo item', r.data);
+  r = await admin.post(`/lotes/${idLote}/itens`, item22(3));
+  check(r.status === 409 && r.data?.title === JA_GRAVADO, 'o mesmo id com outra quantidade: 409 (antes: ok com a quantidade antiga)', r.data);
+  const doLote = (await admin.get(`/lotes/${idLote}`)).data;
+  const itensDoLote = doLote?.itens ?? [];
+  check(itensDoLote.filter((i: any) => i.id === idItem).length === 1 && itensDoLote.find((i: any) => i.id === idItem)?.quantidade === 2, 'no lote, um item só, com a quantidade do primeiro envio', itensDoLote.map((i: any) => [i.id === idItem, i.quantidade]));
+
+  console.log('S6-19 — sangria e fechamento às cegas; fechamento definitivo; justificativa depois, uma vez só');
+  const semNumero = (d: any) => d && !/\d/.test(`${d.title ?? ''} ${d.detail ?? ''}`);
+  const t19 = (await admin.post('/terminais', { id: uuid(), nome: `Cegas ${sufixo}` })).data;
+  const cx19 = uuid();
+  r = await vend.post('/caixas', { id: cx19, terminalId: t19.id, fundoTroco: '20.00' });
+  check(r.status === 201, 'Vendedor abre o caixa com R$ 20,00', r.data);
+  r = await vend.post(`/caixas/${cx19}/lancamentos`, { id: uuid(), tipo: 'SANGRIA', valor: '25.00', motivo: 'Acima do que há' });
+  check(r.status === 409 && r.data?.code === 'SANGRIA_ACIMA_SALDO' && semNumero(r.data), 'sangria acima do que há: recusada SEM dizer quanto há', r.data);
+  const aud = (await admin.get(`/auditoria?acao=SANGRIA_RECUSADA&pageSize=50`)).data?.items ?? [];
+  check(aud.some((x: any) => x.entidadeId === cx19), 'a sangria recusada fica na auditoria (gravada fora da transação que recusou)', aud.length);
+  check((await vend.post(`/caixas/${cx19}/lancamentos`, { id: uuid(), tipo: 'SANGRIA', valor: '5.00', motivo: 'Dentro do que há' })).status === 204, 'sangria dentro do que há passa (sobram R$ 15,00)');
+  for (const [rota, nome] of [[`/caixas/${cx19}/resumo`, 'o total'], [`/caixas/${cx19}/linha-do-tempo`, 'a linha do tempo'], [`/caixas/${cx19}/fechamento.pdf`, 'a parcial em PDF']] as const) {
+    r = await vend.get(rota);
+    check(r.status === 403 && r.data?.code === 'CAIXA_ABERTO_AS_CEGAS', `o dono do caixa aberto não vê ${nome}`, r.data ?? r.status);
+  }
+  check((await vend.get(`/caixas/${cx19}/previa-fechamento`)).status === 404, 'a prévia do fechamento não existe mais');
+  r = await admin.get(`/caixas/${cx19}/resumo`);
+  check(r.status === 200 && r.data?.esperadoDinheiro === '15.00', 'quem não é o dono e vê relatórios vê o esperado do caixa aberto (R$ 15,00)', r.data);
+  const hoje19 = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Fortaleza' }).format(new Date());
+  check(((await admin.get(`/painel/admin?de=${hoje19}&ate=${hoje19}`)).data?.caixasAbertos ?? []).some((c: any) => c.id === cx19 && c.esperadoDinheiro === '15.00'), 'o painel do Admin mostra o caixa aberto de outra pessoa com o esperado');
+  // fechamento definitivo
+  const idF = uuid();
+  r = await vend.post(`/caixas/${cx19}/fechar`, { id: idF, contado: '12.00' });
+  check(r.status === 200 && r.data?.status === 'FECHADO' && r.data.esperado === '15.00' && r.data.diferenca === '-3.00' && r.data.semJustificativa === true, 'fecha na hora: só agora aparecem o esperado (R$ 15,00) e a diferença (− R$ 3,00)', r.data);
+  r = await vend.post(`/caixas/${cx19}/fechar`, { id: idF, contado: '12.00' });
+  check(r.status === 200 && r.data?.diferenca === '-3.00', 'reenvio do mesmo fechamento (resposta perdida) devolve o resultado', r.data);
+  r = await vend.post(`/caixas/${cx19}/fechar`, { id: idF, contado: '15.00' });
+  check(r.status === 409 && r.data?.code === 'ID_EM_USO', 'o mesmo id com outra contagem é recusado (não dá para recontar)', r.data);
+  r = await vend.post(`/caixas/${cx19}/fechar`, { id: uuid(), contado: '15.00' });
+  check(r.status === 409 && r.data?.code === 'CAIXA_FECHADO', 'nem com outro id: o caixa já fechou', r.data);
+  r = await vend.get(`/caixas/${cx19}/resumo`);
+  check(r.status === 200 && r.data?.esperadoDinheiro === '15.00', 'depois de fechado, o dono vê o total', r.data);
+  check(((await vend.get('/caixas/minhas-pendencias')).data ?? []).some((c: any) => c.id === cx19), 'a justificativa fica pendente (aviso no próximo acesso)');
+  // justificativa
+  check((await vend.post(`/caixas/${cx19}/justificativa`, { texto: 'oi' })).status === 400, 'justificativa curta: 400');
+  r = await caixa.post(`/caixas/${cx19}/justificativa`, { texto: 'Não fui eu que fechei' });
+  check(r.status === 403 && r.data?.code === 'JUSTIFICATIVA_DE_OUTRO', 'outra pessoa não justifica (403)', r.data);
+  r = await vend.post(`/caixas/${cx19}/justificativa`, { texto: 'Troco dado a mais numa venda' });
+  check(r.status === 200 && r.data?.observacao === 'Troco dado a mais numa venda' && !r.data.semJustificativa, 'quem fechou justifica', r.data);
+  r = await vend.post(`/caixas/${cx19}/justificativa`, { texto: 'Troco dado a mais numa venda' });
+  check(r.status === 200, 'reenvio do mesmo texto: ok (resposta perdida)', r.data);
+  r = await vend.post(`/caixas/${cx19}/justificativa`, { texto: 'Mudei de ideia sobre o motivo' });
+  check(r.status === 409 && r.data?.code === 'JUSTIFICATIVA_JA_REGISTRADA', 'outra justificativa depois: 409 (uma vez só)', r.data);
+  check(!((await vend.get('/caixas/minhas-pendencias')).data ?? []).some((c: any) => c.id === cx19), 'justificado, o aviso some');
+  // caixa sem diferença e caixa aberto
+  const cx19b = uuid();
+  check((await vend.post('/caixas', { id: cx19b, terminalId: t19.id, fundoTroco: '10.00' })).status === 201, 'abre outro caixa (não bloqueia por pendência)');
+  r = await vend.post(`/caixas/${cx19b}/justificativa`, { texto: 'Antes de fechar' });
+  check(r.status === 409 && r.data?.code === 'CAIXA_ABERTO', 'caixa aberto não recebe justificativa', r.data);
+  check((await vend.post(`/caixas/${cx19b}/fechar`, { id: uuid(), contado: '10.00' })).data?.diferenca === '0.00', 'fecha sem diferença');
+  r = await vend.post(`/caixas/${cx19b}/justificativa`, { texto: 'Nada a justificar' });
+  check(r.status === 409 && r.data?.code === 'SEM_DIFERENCA', 'caixa sem diferença não recebe justificativa', r.data);
+  // conta paga com dinheiro do caixa acima do que há: a mesma recusa às cegas
+  const atualAdm = await admin.get('/caixas/atual');
+  if (atualAdm.status === 200) {
+    const cp19 = (await admin.post('/contas-pagar', { id: uuid(), descricao: `Conta cega ${sufixo}`, valor: '9999.00', vencimento: '2026-12-10' })).data;
+    r = await admin.post(`/contas-pagar/${cp19.id}/pagar`, { saiuDoCaixa: true });
+    check(r.status === 409 && r.data?.code === 'SANGRIA_ACIMA_SALDO' && semNumero(r.data), 'conta paga com o dinheiro do caixa acima do que há: recusada sem número', r.data);
+    const c19 = (await admin.get('/contas-pagar?status=ABERTA&pageSize=100')).data.items.find((c: any) => c.id === cp19.id);
+    check(c19?.status === 'ABERTA', 'a conta continua aberta', c19);
+    check(((await admin.get(`/auditoria?acao=SANGRIA_RECUSADA&pageSize=50`)).data?.items ?? []).some((x: any) => x.entidadeId === atualAdm.data.id), 'e a tentativa fica na auditoria');
+  } else check(false, 'o Admin precisa de um caixa aberto (o smoke deixa um)');
+
+  console.log('S6-20 — troco no recebimento do fiado: só a dívida entra no caixa e na conta; o troco é informativo');
+  const cli20 = (await admin.post('/clientes', { id: uuid(), nome: `Cliente Troco ${sufixo}`, telefone: '86977776666', cienciaAviso: true })).data;
+  const conta20 = async (valor: string) => (await admin.post('/contas-receber', { id: uuid(), clienteId: cli20.id, descricao: `Fiado troco ${sufixo}`, valor, vencimento: '2026-12-10' })).data;
+  const saldo20 = async (id: string) => (await admin.get(`/contas-receber?clienteId=${cli20.id}&pageSize=50`)).data?.items?.find((c: any) => c.id === id);
+  const cr20 = await conta20('30.00');
+  const cxAdm20 = (await admin.get('/caixas/atual')).data;
+  // o Admin opera às cegas o próprio caixa: quem confere o esperado é o Financeiro (relatorios.consultar)
+  const esperado20 = async () => (await fin.get(`/caixas/${cxAdm20.id}/resumo`)).data?.esperadoDinheiro;
+  const antes20 = await esperado20();
+  check(typeof antes20 === 'string', 'o Financeiro vê o esperado do caixa aberto do Admin', antes20);
+  const idT20 = uuid();
+  const receb20 = { id: idT20, valor: '8.00', forma: 'DINHEIRO', valorRecebido: '10.00', caixaId: cxAdm20.id };
+  r = await admin.post(`/contas-receber/${cr20.id}/recebimentos`, receb20);
+  check(r.status === 201 && r.data?.valor === '8.00' && r.data?.valorRecebido === '10.00' && r.data?.troco === '2.00', 'parcial em dinheiro: recebe R$ 8,00 com R$ 10,00, troco R$ 2,00', r.data);
+  check((await saldo20(cr20.id))?.saldo === '22.00', 'a conta abate só a dívida (saldo R$ 22,00)');
+  check(centavos(await esperado20()) - centavos(antes20) === 800, 'o esperado da gaveta sobe só R$ 8,00, não os R$ 10,00 recebidos');
+  const desc20 = ((await fin.get(`/caixas/${cxAdm20.id}/linha-do-tempo`)).data?.eventos ?? []).find((e: any) => e.tipo === 'RECEBIMENTO_FIADO' && /recebido 10\.00, troco 2\.00/.test(e.descricao));
+  check(desc20?.efeitoDinheiro === '8.00', 'a linha do tempo mostra o recebido e o troco, com efeito de R$ 8,00 na gaveta', desc20);
+  r = await admin.post(`/contas-receber/${cr20.id}/recebimentos`, receb20);
+  check(r.status === 200 && r.data?.id === idT20 && r.data?.troco === '2.00', 'reenvio igual devolve o gravado (200)', r.data);
+  r = await admin.post(`/contas-receber/${cr20.id}/recebimentos`, { ...receb20, valorRecebido: '20.00' });
+  check(r.status === 409 && r.data?.code === 'ID_EM_USO', 'o mesmo id com outro recebido: 409', r.data);
+  r = await admin.post(`/contas-receber/${cr20.id}/recebimentos`, { id: uuid(), valor: '5.00', forma: 'DINHEIRO', valorRecebido: '4.99' });
+  check(r.status === 400 && r.data?.code === 'RECEBIDO_INSUFICIENTE', 'recebido menor que o valor: 400', r.data);
+  r = await admin.post(`/contas-receber/${cr20.id}/recebimentos`, { id: uuid(), valor: '5.00', forma: 'PIX', valorRecebido: '6.00' });
+  check(r.status === 400 && r.data?.code === 'TROCO_INVALIDO', 'PIX com recebido diferente do valor: 400', r.data);
+  r = await admin.post(`/contas-receber/${cr20.id}/recebimentos`, { id: uuid(), valor: '5.00', forma: 'CARTAO_DEBITO', valorRecebido: '4.00' });
+  check(r.status === 400 && r.data?.code === 'TROCO_INVALIDO', 'cartão com recebido diferente do valor: 400', r.data);
+  r = await admin.post(`/contas-receber/${cr20.id}/recebimentos`, { id: uuid(), valor: '5.00', forma: 'DINHEIRO', valorRecebido: '0.00' });
+  check(r.status === 400, 'recebido zero: 400', r.data);
+  r = await admin.post(`/contas-receber/${cr20.id}/recebimentos`, { id: uuid(), valor: '5.00', forma: 'PIX', valorRecebido: '5.00' });
+  check(r.status === 201 && r.data?.valorRecebido === undefined && r.data?.troco === undefined, 'PIX com recebido igual ao valor passa, sem recebido nem troco gravados', r.data);
+  r = await admin.post(`/contas-receber/${cr20.id}/recebimentos`, { id: uuid(), valor: '17.00', forma: 'DINHEIRO', valorRecebido: '20.00' });
+  check(r.status === 201 && r.data?.troco === '3.00', 'o recebido pode passar do saldo (R$ 20,00 para R$ 17,00): troco R$ 3,00, fora do caixa', r.data);
+  check((await saldo20(cr20.id))?.status === 'QUITADA', 'a conta fica quitada');
+  r = await admin.post(`/contas-receber/${cr20.id}/recebimentos`, { id: uuid(), valor: '0.01', forma: 'DINHEIRO', valorRecebido: '50.00' });
+  check(r.status === 409 && r.data?.code === 'CONTA_NAO_ABERTA', 'conta quitada não recebe, nem com recebido alto', r.data);
+  const cr20b = await conta20('12.50');
+  r = await admin.post(`/contas-receber/${cr20b.id}/recebimentos`, { id: uuid(), valor: '12.50', forma: 'DINHEIRO' });
+  check(r.status === 201 && r.data?.valorRecebido === '12.50' && r.data?.troco === '0.00', 'dinheiro sem o recebido: o recebido é o próprio valor, troco zero', r.data);
+  r = await admin.post(`/contas-receber/${cr20b.id}/recebimentos`, { id: uuid(), valor: '1.00', forma: 'DINHEIRO', valorRecebido: '2.00', troco: '1.00' });
+  check(r.status === 400, 'o troco não vem da tela: campo desconhecido é recusado (400)', r.data);
+  const ext20 = (await admin.get(`/clientes/${cli20.id}/extrato`)).data;
+  check(ext20?.recebimentos?.find((x: any) => x.id === idT20)?.troco === '2.00', 'o extrato mostra o recebido e o troco', ext20?.recebimentos?.find((x: any) => x.id === idT20));
+  // estorno: devolve só o valor da dívida, no caixa e na conta
+  check((await admin.post(`/recebimentos/${idT20}/estornar`, { motivo: 'Lançado em duplicidade' })).status === 204, 'estorno do recebimento com troco');
+  check(centavos(await esperado20()) === centavos(antes20), 'o esperado volta ao que era (sai só R$ 8,00)');
+  check((await saldo20(cr20.id))?.saldo === '8.00', 'a conta volta a dever só R$ 8,00');
+  r = await vend.post(`/contas-receber/${cr20b.id}/recebimentos`, { id: uuid(), valor: '1.00', forma: 'DINHEIRO', valorRecebido: '2.00' });
+  check(r.status === 403, 'o Vendedor não recebe fiado (403)', r.status);
 
   console.log(`\n${oks} ok, ${falhas} falha(s)`);
   process.exit(falhas ? 1 : 0);

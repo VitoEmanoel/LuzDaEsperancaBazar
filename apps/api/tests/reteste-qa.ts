@@ -107,13 +107,13 @@ async function main() {
   const caixaId = cx.data.id;
   const cliente = (await admin.post('/clientes', { id: uuid(), nome: 'Cliente Reteste', telefone: `8699${String(Date.now()).slice(-7)}`, cienciaAviso: true })).data;
   const conta = (await mista.post('/contas-receber', { id: uuid(), clienteId: cliente.id, descricao: 'Fiado reteste', valor: '30.00', vencimento: hoje })).data;
-  const antes = (await mista.get(`/caixas/${caixaId}/previa-fechamento`)).data;
+  const antes = (await admin.get(`/caixas/${caixaId}/resumo`)).data;
   r = await mista.post(`/contas-receber/${conta.id}/recebimentos`, { id: uuid(), valor: '10.00', caixaId, forma: 'PIX' });
   check(r.status === 201 && r.data.forma === 'PIX', 'recebimento PIX no caixa gravado como PIX', r.data);
-  const depoisPix = (await mista.get(`/caixas/${caixaId}/previa-fechamento`)).data;
+  const depoisPix = (await admin.get(`/caixas/${caixaId}/resumo`)).data;
   check(depoisPix.esperadoDinheiro === antes.esperadoDinheiro, 'PIX não entra no dinheiro esperado', { antes: antes.esperadoDinheiro, depois: depoisPix.esperadoDinheiro });
-  await mista.post(`/contas-receber/${conta.id}/recebimentos`, { id: uuid(), valor: '5.00', caixaId, forma: 'DINHEIRO' });
-  const depoisDin = (await mista.get(`/caixas/${caixaId}/previa-fechamento`)).data;
+  await mista.post(`/contas-receber/${conta.id}/recebimentos`, { id: uuid(), valor: '5.00', caixaId, forma: 'DINHEIRO', valorRecebido: '5.00' });
+  const depoisDin = (await admin.get(`/caixas/${caixaId}/resumo`)).data;
   check(cents(depoisDin.esperadoDinheiro) - cents(antes.esperadoDinheiro) === 500, 'dinheiro entra no esperado (+5,00)', depoisDin);
   const catDesp = ((await mista.get('/categorias-despesa')).data as any[]).find((c) => c.id !== '00000000-0000-4000-8000-0000000000c1') ?? // "Reembolso de venda" é reservada (S6-14)
     (await admin.post('/categorias-despesa', { id: uuid(), nome: 'Despesas gerais (reteste)' })).data;

@@ -8,7 +8,7 @@ import { auditar } from '../../shared/audit.js';
 import { fromCents, money, toCents } from '../../shared/money.js';
 import { periodo } from '../../shared/dates.js';
 import { exigirUsuario, tem, type UsuarioCtx } from '../../plugins/auth.js';
-import { caixaDto, calcularPrevia, linhaDoTempo, registrarSangria } from './caixa.service.js';
+import { auditarSangriaRecusada, caixaDto, calcularPrevia, linhaDoTempo, registrarSangria } from './caixa.service.js';
 import { gerarPdfFechamento } from './fechamento.pdf.js';
 import { reservarChave } from '../../shared/idempotencia.js';
 
@@ -33,10 +33,17 @@ async function meuCaixaAberto(db: Db, u: UsuarioCtx, id: string) {
   return c!;
 }
 
-/** Caixa do próprio operador (aberto ou fechado) ou, para quem pode ver relatórios, qualquer caixa. */
+/**
+ * Caixa do próprio operador depois de fechado ou, para quem pode ver relatórios, o caixa de outra pessoa (aberto ou fechado).
+ * S6-19 (às cegas): o dono de um caixa ABERTO não vê o total, a gaveta nem a linha do tempo dele, qualquer que seja o perfil
+ * (o Admin também, no caixa dele); vê tudo depois de fechar.
+ */
 async function caixaVisivel(db: Db, u: UsuarioCtx, id: string) {
   const c = await db.caixaSessao.findUnique({ where: { id }, include: incTerminal });
   if (!c) naoEncontrado('Caixa');
+  if (c!.abertoPorId === u.id && c!.status === 'ABERTO') {
+    throw new AppError(403, 'Seu caixa está aberto: o total e a gaveta aparecem depois do fechamento', 'CAIXA_ABERTO_AS_CEGAS');
+  }
   if (c!.abertoPorId !== u.id && !tem(u, 'relatorios.consultar')) throw new AppError(403, 'Caixa não pertence a esta sessão', 'CAIXA_DE_OUTRO_OPERADOR');
   return c!;
 }
@@ -163,16 +170,11 @@ export async function rotasCaixa(app: FastifyInstance) {
       if (b.tipo === 'SANGRIA') await registrarSangria(tx, c.id, u.id, toCents(b.valor), b.motivo, b.id);
       else await tx.caixaLancamento.create({ data: { id: b.id, sessaoId: c.id, tipo: 'SUPRIMENTO', valor: b.valor, motivo: b.motivo, usuarioId: u.id } });
       await auditar(tx, { usuarioId: u.id, ip: req.ip }, b.tipo, 'caixa_sessao', c.id, undefined, { valor: b.valor });
-    });
+    }).catch(async (e: unknown) => { throw await auditarSangriaRecusada(prisma, e, { usuarioId: u.id, ip: req.ip }, id, b.valor, 'LANCAMENTO'); });
     return reply.code(204).send();
   });
 
-  app.get('/caixas/:id/previa-fechamento', { config: { acesso: ['caixa.operar'] } }, async (req) => {
-    const u = exigirUsuario(req);
-    const { id } = parse(zIdParam, req.params);
-    await meuCaixaAberto(prisma, u, id);
-    return (await calcularPrevia(prisma, id)).dto;
-  });
+  // S6-19: a prévia do fechamento (o esperado do caixa aberto) saiu: quem opera fecha às cegas e vê o resultado depois.
 
   // Detalhe do caixa (S5-06): totais por forma, suprimentos, sangrias e o dinheiro esperado; o de outro operador só com relatórios
   app.get('/caixas/:id/resumo', { config: { acesso: ['caixa.operar', 'relatorios.consultar'] } }, async (req) => {
@@ -213,28 +215,69 @@ export async function rotasCaixa(app: FastifyInstance) {
     return reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `attachment; filename="fechamento-caixa-${id.slice(0, 8)}.pdf"`).send(pdf);
   });
 
+  // S6-19: fechamento definitivo e às cegas. A pessoa informa só o contado (o id da operação vem da tela; nunca o id do caixa,
+  // que já é a chave da abertura); o caixa fecha na hora e a resposta traz o esperado e a diferença. A justificativa vem depois.
   app.post('/caixas/:id/fechar', { config: { acesso: ['caixa.operar'] } }, async (req) => {
     const u = exigirUsuario(req);
     const { id } = parse(zIdParam, req.params);
-    const b = parse(z.object({ contado: zMoney, observacao: z.string().trim().max(500).optional() }), req.body);
+    const b = parse(z.object({ id: zUuid, contado: zMoney }).strict(), req.body);
     const c = await prisma.$transaction(async (tx) => {
+      // a chave vem antes: o reenvio de um fechamento já feito (resposta perdida) devolve o resultado, sem bater no CAIXA_FECHADO
+      const nova = await reservarChave(tx, b.id, 'fechar_caixa', u.id, { caixaId: id, contado: b.contado });
+      if (!nova) {
+        const ja = await tx.caixaSessao.findUnique({ where: { id }, include: incTerminal });
+        if (!ja || ja.status !== 'FECHADO' || ja.fechadoPorId !== u.id) conflito('ID_EM_USO', 'Identificador já usado');
+        return ja!;
+      }
       await meuCaixaAberto(tx, u, id);
       await tx.$queryRaw`SELECT id FROM caixa_sessao WHERE id = ${id}::uuid FOR UPDATE`;
       const { esperadoCents } = await calcularPrevia(tx, id);
       const contado = toCents(b.contado);
       const dif = contado - esperadoCents;
-      if (dif !== 0 && (b.observacao ?? '').length < 5) {
-        throw new AppError(400, 'Diferença de caixa exige observação', 'OBSERVACAO_OBRIGATORIA', `Esperado ${fromCents(esperadoCents)}, contado ${b.contado}`);
-      }
       const n = await tx.caixaSessao.update({
         where: { id },
-        data: { status: 'FECHADO', fechadoPorId: u.id, fechadoEm: new Date(), valorEsperado: fromCents(esperadoCents), valorContado: fromCents(contado), diferenca: fromCents(dif), observacao: b.observacao || null },
+        data: { status: 'FECHADO', fechadoPorId: u.id, fechadoEm: new Date(), valorEsperado: fromCents(esperadoCents), valorContado: fromCents(contado), diferenca: fromCents(dif) },
         include: incTerminal,
       });
       await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'CAIXA_FECHADO', 'caixa_sessao', id, undefined, { esperado: fromCents(esperadoCents), contado: b.contado, diferenca: fromCents(dif) });
       return n;
     });
     return caixaDto(c, u.nome);
+  });
+
+  // S6-19: a justificativa da diferença, depois do fechamento, uma vez só e só de quem fechou (o banco também garante, 0016)
+  app.post('/caixas/:id/justificativa', { config: { acesso: ['caixa.operar'] } }, async (req) => {
+    const u = exigirUsuario(req);
+    const { id } = parse(zIdParam, req.params);
+    const b = parse(z.object({ texto: zTexto(500).refine((t) => t.length >= 5, 'escreva pelo menos 5 caracteres') }).strict(), req.body);
+    const c = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM caixa_sessao WHERE id = ${id}::uuid FOR UPDATE`;
+      const cx = await tx.caixaSessao.findUnique({ where: { id }, include: incTerminal });
+      if (!cx) naoEncontrado('Caixa');
+      if (cx!.status !== 'FECHADO') conflito('CAIXA_ABERTO', 'A justificativa vem depois do fechamento');
+      if (cx!.fechadoPorId !== u.id) throw new AppError(403, 'Só quem fechou o caixa justifica a diferença', 'JUSTIFICATIVA_DE_OUTRO');
+      if (cx!.diferenca === null || toCents(money(cx!.diferenca)) === 0) conflito('SEM_DIFERENCA', 'Este caixa fechou sem diferença');
+      if (cx!.justificativaDiferenca !== null || cx!.observacao !== null) {
+        // reenvio do mesmo texto (resposta perdida) volta o caixa; outro texto é recusado
+        if (cx!.justificativaDiferenca === b.texto) return cx!;
+        conflito('JUSTIFICATIVA_JA_REGISTRADA', 'A justificativa deste caixa já foi registrada');
+      }
+      const n = await tx.caixaSessao.update({ where: { id }, data: { justificativaDiferenca: b.texto, justificadaEm: new Date(), justificadaPorId: u.id }, include: incTerminal });
+      // texto livre fica fora da auditoria (pode ter nome de alguém): só o tamanho
+      await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'CAIXA_JUSTIFICADO', 'caixa_sessao', id, undefined, { tamanho: b.texto.length });
+      return n;
+    });
+    return caixaDto(c, u.nome);
+  });
+
+  // S6-19: caixas que a pessoa fechou com diferença e ainda não justificou (aviso no próximo acesso, até ela responder)
+  app.get('/caixas/minhas-pendencias', { config: { acesso: ['caixa.operar'] } }, async (req) => {
+    const u = exigirUsuario(req);
+    const rows = await prisma.caixaSessao.findMany({
+      where: { fechadoPorId: u.id, status: 'FECHADO', diferenca: { not: 0 }, justificativaDiferenca: null, observacao: null },
+      include: incTerminal, orderBy: { fechadoEm: 'asc' }, take: 20,
+    });
+    return rows.map((r) => caixaDto(r, u.nome));
   });
 
   // Caixas do dia e fechamentos (S5-06 e S5-09, uma tela só): por período, situação e diferença na conferência

@@ -11,6 +11,7 @@ import { parse, zIdParam, zTexto, zUuid } from '../../shared/http.js';
 import { auditar } from '../../shared/audit.js';
 import { exigirUsuario, tem } from '../../plugins/auth.js';
 import { normalizarDocumento } from '../../shared/documento.js';
+import { reservarChave } from '../../shared/idempotencia.js';
 
 export const VERSAO_AVISO = 'v1-2026-10';
 export const FINALIDADE_CLIENTE = 'Venda fiada (crediário) e contato de cobrança';
@@ -31,8 +32,15 @@ const comConsent = { consentimentos: { where: { revogadoEm: null }, select: { id
 
 /** Cria cliente com consentimento — idempotente pelo id gerado no cliente. */
 export async function criarCliente(tx: Tx, usuarioId: string, ip: string | undefined, b: z.infer<typeof zNovoCliente>) {
+  // S6-22: o mesmo id com outro nome ou telefone é recusado (antes voltava "ok" com o cadastro antigo e a correção se perdia)
+  const nova = await reservarChave(tx, b.id, 'criar_cliente', usuarioId, b, 'Este cadastro já foi gravado com outros dados');
   const existente = await tx.cliente.findUnique({ where: { id: b.id }, include: comConsent });
-  if (existente) return { cliente: existente, criado: false };
+  if (existente) {
+    // chave já limpa: confere o nome e o telefone
+    if (nova && (existente.nome !== b.nome || existente.telefone !== b.telefone)) conflito('ID_EM_USO', 'Este cadastro já foi gravado com outros dados');
+    return { cliente: existente, criado: false };
+  }
+  if (!nova) conflito('ID_EM_USO', 'Este cadastro já foi gravado com outros dados');
   const c = await tx.cliente.create({
     data: {
       id: b.id, nome: b.nome, telefone: b.telefone,

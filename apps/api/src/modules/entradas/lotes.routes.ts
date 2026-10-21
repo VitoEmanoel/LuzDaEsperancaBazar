@@ -281,21 +281,31 @@ export async function rotasLotes(app: FastifyInstance) {
     const u = exigirUsuario(req);
     const b = parse(zNovoLote, req.body);
     if (b.tipo !== 'COMPRA' && !tem(u, 'entrada.registrar')) proibido('Sem permissão de entrada: só é possível lançar compra');
-    const existente = await prisma.loteEntrada.findUnique({ where: { id: b.id }, select: { id: true } });
-    if (existente) return reply.code(200).send(semCusto(u, await obterLoteDto(prisma, b.id))); // reenvio idempotente
+    const criado = await prisma.$transaction(async (tx) => {
+      // S6-22: a chave vem antes das conferências; o mesmo id com outro lote (outro doador, tipo, valor...) é recusado,
+      // em vez de "ok" com o lote antigo. As conferências vêm depois: o reenvio do que já foi gravado não esbarra nelas.
+      const nova = await reservarChave(tx, b.id, 'criar_lote', u.id, b, 'Este cadastro já foi gravado com outros dados');
+      const existente = await tx.loteEntrada.findUnique({ where: { id: b.id }, select: { tipo: true, parceiroId: true, recebidoPorId: true } });
+      if (existente) {
+        // chave já limpa: confere o tipo, o parceiro e quem recebeu
+        if (nova && (existente.tipo !== b.tipo || existente.parceiroId !== (b.parceiroId ?? null) || existente.recebidoPorId !== u.id)) {
+          conflito('ID_EM_USO', 'Este cadastro já foi gravado com outros dados');
+        }
+        return false;
+      }
+      if (!nova) conflito('ID_EM_USO', 'Este cadastro já foi gravado com outros dados');
 
-    if (b.tipo === 'SALDO_INICIAL' && !tem(u, 'estoque.ajustar')) proibido('Lote de saldo inicial é criado pela carga inicial');
-    // RN-04 (S2-06): doação exige o parceiro; a campanha é opcional. Sem saber quem doou: "Doador não identificado".
-    if (b.tipo === 'DOACAO' && !b.parceiroId) throw new AppError(400, 'Informe o parceiro (doador) do lote', 'PARCEIRO_OBRIGATORIO');
-    if (b.tipo === 'COMPRA') {
-      if (!tem(u, 'contas_pagar.gerenciar')) proibido('Registrar compra exige permissão de contas a pagar');
-      if (!b.parceiroId) throw new AppError(400, 'Compra exige fornecedor', 'FORNECEDOR_OBRIGATORIO'); // RN-05
-      if (!b.valorCompra || toCents(b.valorCompra) <= 0) throw new AppError(400, 'Compra exige valor pago', 'VALOR_OBRIGATORIO');
-    }
-    if (b.parceiroId && !(await prisma.parceiro.findFirst({ where: { id: b.parceiroId, ativo: true } }))) throw new AppError(400, 'Parceiro inexistente ou inativo', 'VALIDACAO');
-    if (b.campanhaId && !(await prisma.campanha.findFirst({ where: { id: b.campanhaId, ativa: true } }))) throw new AppError(400, 'Campanha inexistente ou inativa', 'VALIDACAO');
+      if (b.tipo === 'SALDO_INICIAL' && !tem(u, 'estoque.ajustar')) proibido('Lote de saldo inicial é criado pela carga inicial');
+      // RN-04 (S2-06): doação exige o parceiro; a campanha é opcional. Sem saber quem doou: "Doador não identificado".
+      if (b.tipo === 'DOACAO' && !b.parceiroId) throw new AppError(400, 'Informe o parceiro (doador) do lote', 'PARCEIRO_OBRIGATORIO');
+      if (b.tipo === 'COMPRA') {
+        if (!tem(u, 'contas_pagar.gerenciar')) proibido('Registrar compra exige permissão de contas a pagar');
+        if (!b.parceiroId) throw new AppError(400, 'Compra exige fornecedor', 'FORNECEDOR_OBRIGATORIO'); // RN-05
+        if (!b.valorCompra || toCents(b.valorCompra) <= 0) throw new AppError(400, 'Compra exige valor pago', 'VALOR_OBRIGATORIO');
+      }
+      if (b.parceiroId && !(await tx.parceiro.findFirst({ where: { id: b.parceiroId, ativo: true } }))) throw new AppError(400, 'Parceiro inexistente ou inativo', 'VALIDACAO');
+      if (b.campanhaId && !(await tx.campanha.findFirst({ where: { id: b.campanhaId, ativa: true } }))) throw new AppError(400, 'Campanha inexistente ou inativa', 'VALIDACAO');
 
-    await prisma.$transaction(async (tx) => {
       const agora = new Date();
       const lote = await tx.loteEntrada.create({
         data: {
@@ -315,7 +325,9 @@ export async function rotasLotes(app: FastifyInstance) {
         });
       }
       await auditar(tx, { usuarioId: u.id, ip: req.ip }, 'LOTE_CRIADO', 'lote_entrada', lote.id, undefined, { tipo: b.tipo, parceiroId: b.parceiroId, campanhaId: b.campanhaId });
+      return true;
     });
+    if (!criado) return reply.code(200).send(semCusto(u, await obterLoteDto(prisma, b.id))); // reenvio idempotente
     return reply.code(201).send(semCusto(u, await obterLoteDto(prisma, b.id)));
   });
 
@@ -438,33 +450,40 @@ export async function rotasLotes(app: FastifyInstance) {
     const u = exigirUsuario(req);
     const { id: loteId } = parse(zIdParam, req.params);
     const b = parse(zItem, req.body);
-    const ja = await prisma.item.findUnique({ where: { id: b.id }, include: itemTriagemInclude });
-    if (ja) {
-      if (ja.loteId !== loteId) conflito('ID_EM_USO', 'Identificador já usado em outro lote');
-      return reply.code(200).send(semCusto(u, itemTriagemDto(ja))); // reenvio idempotente
-    }
-    const lote = await prisma.loteEntrada.findUnique({ where: { id: loteId }, select: { numero: true, status: true, tipo: true } });
-    if (!lote) naoEncontrado('Lote');
-    if (lote!.status === 'TRIADO' && !b.descarteOrigemId) conflito('LOTE_TRIADO', 'Lote já triado não aceita registros');
-    // RF-TRI-01 cenário 5: em compra, o valor atribuído é o CUSTO unitário — não pode cair no preço de venda
-    if (lote!.tipo === 'COMPRA' && !(b.valorAtribuido && toCents(b.valorAtribuido) > 0)) invalido('valorAtribuido', 'obrigatório em lote de compra (custo unitário maior que zero)');
-    const cat = await prisma.categoria.findFirst({ where: { id: b.categoriaId, ativa: true } });
-    if (!cat) throw new AppError(400, 'Categoria inexistente ou inativa', 'VALIDACAO');
+    const r = await prisma.$transaction(async (tx) => {
+      // S6-22: a chave vem antes das conferências; o mesmo id com outro produto, quantidade ou preço é recusado,
+      // em vez de "ok" com o cadastro antigo. As conferências vêm depois: o reenvio do que já foi gravado não esbarra nelas.
+      const nova = await reservarChave(tx, b.id, 'cadastrar_item', u.id, { loteId, ...b }, 'Este cadastro já foi gravado com outros dados');
+      const ja = await tx.item.findUnique({ where: { id: b.id }, include: itemTriagemInclude });
+      if (ja) {
+        // chave já limpa: confere o lote
+        if (nova && ja.loteId !== loteId) conflito('ID_EM_USO', 'Identificador já usado em outro lote');
+        return { item: ja, criado: false };
+      }
+      if (!nova) conflito('ID_EM_USO', 'Este cadastro já foi gravado com outros dados');
+      const lote = await tx.loteEntrada.findUnique({ where: { id: loteId }, select: { numero: true, status: true, tipo: true } });
+      if (!lote) naoEncontrado('Lote');
+      if (lote!.status === 'TRIADO' && !b.descarteOrigemId) conflito('LOTE_TRIADO', 'Lote já triado não aceita registros');
+      // RF-TRI-01 cenário 5: em compra, o valor atribuído é o CUSTO unitário — não pode cair no preço de venda
+      if (lote!.tipo === 'COMPRA' && !(b.valorAtribuido && toCents(b.valorAtribuido) > 0)) invalido('valorAtribuido', 'obrigatório em lote de compra (custo unitário maior que zero)');
+      const cat = await tx.categoria.findFirst({ where: { id: b.categoriaId, ativa: true } });
+      if (!cat) throw new AppError(400, 'Categoria inexistente ou inativa', 'VALIDACAO');
 
-    let existente: { id: string; nome: string; categoriaId: string; pecaUnica: boolean } | null = null;
-    if (b.produtoId) {
-      // nova entrada de um produto que já existe: o preço do produto não muda (P-14)
-      existente = await prisma.produto.findFirst({ where: { id: b.produtoId, ativo: true }, select: { id: true, nome: true, categoriaId: true, pecaUnica: true } });
-      if (!existente) throw new AppError(400, 'Produto inexistente ou inativo', 'VALIDACAO');
-      if (existente.categoriaId !== b.categoriaId) conflito('CATEGORIA_DO_PRODUTO', 'A entrada tem a categoria do produto');
-      if (existente.pecaUnica) conflito('PECA_UNICA_ENTRADA', 'Peça única não recebe nova entrada: cadastre um produto novo');
-    }
-    if (b.produto?.pecaUnica && b.quantidade !== 1) throw new AppError(400, 'Peça única tem quantidade 1', 'PECA_UNICA_QTD'); // RN-08
+      let existente: { id: string; nome: string; categoriaId: string; pecaUnica: boolean } | null = null;
+      if (b.produtoId) {
+        // nova entrada de um produto que já existe: o preço do produto não muda (P-14)
+        existente = await tx.produto.findFirst({ where: { id: b.produtoId, ativo: true }, select: { id: true, nome: true, categoriaId: true, pecaUnica: true } });
+        if (!existente) throw new AppError(400, 'Produto inexistente ou inativo', 'VALIDACAO');
+        if (existente.categoriaId !== b.categoriaId) conflito('CATEGORIA_DO_PRODUTO', 'A entrada tem a categoria do produto');
+        if (existente.pecaUnica) conflito('PECA_UNICA_ENTRADA', 'Peça única não recebe nova entrada: cadastre um produto novo');
+      }
+      if (b.produto?.pecaUnica && b.quantidade !== 1) throw new AppError(400, 'Peça única tem quantidade 1', 'PECA_UNICA_QTD'); // RN-08
 
-    const item = await prisma.$transaction(async (tx) => {
       await cadastrarItem(tx, { usuarioId: u.id, ip: req.ip }, { id: loteId, numero: lote!.numero }, cat!.nome, b, existente);
-      return tx.item.findUniqueOrThrow({ where: { id: b.id }, include: itemTriagemInclude });
+      return { item: await tx.item.findUniqueOrThrow({ where: { id: b.id }, include: itemTriagemInclude }), criado: true };
     });
+    if (!r.criado) return reply.code(200).send(semCusto(u, itemTriagemDto(r.item))); // reenvio idempotente
+    const item = r.item;
     return reply.code(201).send(semCusto(u, itemTriagemDto(item)));
   });
 
