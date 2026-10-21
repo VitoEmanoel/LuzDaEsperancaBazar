@@ -261,6 +261,7 @@ export function PdvPage() {
       if (me) armazenamento.gravar(CHAVES.carrinho, { usuarioId: me.id, vendaId: vendaId.current, linhas } satisfies CarrinhoSalvo);
     }
     let venda: Venda;
+    let jaGravada = false;
     try {
       venda = await pdvApi.registrarVenda(vendaId.current, {
         terminalId: caixa.terminalId, caixaId: caixa.id,
@@ -270,36 +271,42 @@ export function PdvPage() {
         ...(pg.clienteId ? { clienteId: pg.clienteId, vencimentoFiado: pg.vencimentoFiado } : {}),
       } satisfies VendaRequest);
     } catch (e) {
-      // Outro caixa vendeu antes: o estoque mudou e nada foi gravado. O carrinho vai sozinho ao que há agora e o operador
-      // confere o total e recebe de novo (S6-13). Sem reenvio automático: cada tentativa é do operador. Nada mudou no
-      // catálogo (corrida entre a consulta e a venda) ou o catálogo não veio: a mensagem de antes, para ajustar no ✕.
-      if (e instanceof ApiError && ['SALDO_INSUFICIENTE', 'ITEM_INDISPONIVEL', 'ITEM_EM_DOACOES'].includes(e.code ?? '')) {
-        const c = await sessao.recarregarCatalogo().catch(() => null);
-        setPagando(false);
-        const aj = c ? ajustarAoEstoque(linhas, c) : null;
-        if (!aj || (!aj.mudancas.length && !aj.precoMudou)) {
-          feedback('erro', `O estoque mudou e a venda não foi gravada: ${e.message}. Ajuste o carrinho (use o ✕) e tente de novo.`);
+      // S6-14: este id de venda já estava gravado (a resposta da tentativa anterior se perdeu) e o pedido mudou depois
+      // (outra forma de pagamento, desconto ou CPF): vale a venda gravada. Mostra o comprovante dela, sem cobrar de novo.
+      const gravada = e instanceof ApiError && e.code === 'ID_EM_USO' ? await pdvApi.comprovante(vendaId.current!).catch(() => null) : null;
+      if (gravada) { venda = gravada; jaGravada = true; }
+      else {
+        // Outro caixa vendeu antes: o estoque mudou e nada foi gravado. O carrinho vai sozinho ao que há agora e o operador
+        // confere o total e recebe de novo (S6-13). Sem reenvio automático: cada tentativa é do operador. Nada mudou no
+        // catálogo (corrida entre a consulta e a venda) ou o catálogo não veio: a mensagem de antes, para ajustar no ✕.
+        if (e instanceof ApiError && ['SALDO_INSUFICIENTE', 'ITEM_INDISPONIVEL', 'ITEM_EM_DOACOES'].includes(e.code ?? '')) {
+          const c = await sessao.recarregarCatalogo().catch(() => null);
+          setPagando(false);
+          const aj = c ? ajustarAoEstoque(linhas, c) : null;
+          if (!aj || (!aj.mudancas.length && !aj.precoMudou)) {
+            feedback('erro', `O estoque mudou e a venda não foi gravada: ${e.message}. Ajuste o carrinho (use o ✕) e tente de novo.`);
+            return;
+          }
+          setLinhas(aj.linhas); // linhas novas = venda nova: o id da venda recusada (não gravada) é trocado
+          const lista = aj.mudancas.slice(0, 3).join('; ') + (aj.mudancas.length > 3 ? `; e mais ${aj.mudancas.length - 3}` : '');
+          feedback('aviso', !aj.linhas.length
+            ? `Atenção: o estoque mudou e a venda não foi gravada. Nada do carrinho resta no Bazar (${lista}).`
+            : `Atenção: o estoque mudou e a venda não foi gravada. Ajustei o carrinho ao que há agora${lista ? `: ${lista}` : ''}${aj.precoMudou ? '; o preço de algum produto também mudou' : ''}. Confira o total e receba de novo (F4).`);
           return;
         }
-        setLinhas(aj.linhas); // linhas novas = venda nova: o id da venda recusada (não gravada) é trocado
-        const lista = aj.mudancas.slice(0, 3).join('; ') + (aj.mudancas.length > 3 ? `; e mais ${aj.mudancas.length - 3}` : '');
-        feedback('aviso', !aj.linhas.length
-          ? `Atenção: o estoque mudou e a venda não foi gravada. Nada do carrinho resta no Bazar (${lista}).`
-          : `Atenção: o estoque mudou e a venda não foi gravada. Ajustei o carrinho ao que há agora${lista ? `: ${lista}` : ''}${aj.precoMudou ? '; o preço de algum produto também mudou' : ''}. Confira o total e receba de novo (F4).`);
-        return;
+        // O preço ou o desconto de um produto mudou com a venda aberta (S3-08, S3-09): o carrinho passa ao preço atual.
+        if (e instanceof ApiError && e.code === 'PAGAMENTO_DIVERGENTE') {
+          const c = await sessao.recarregarCatalogo().catch(() => null);
+          if (c) setLinhas((ls) => ls.map((l) => {
+            const p = l.codigo ? c.itensEtiquetados.find((i) => i.codigo === l.codigo)?.preco : c.categorias.find((x) => x.id === l.categoriaId)?.precoPadrao;
+            return p ? { ...l, precoCents: toCents(p) } : l;
+          }));
+          setPagando(false);
+          feedback('erro', 'O preço de algum produto mudou (preço novo ou desconto) e a venda não foi gravada. O carrinho já está com o preço de agora: confira o total e receba de novo.');
+          return;
+        }
+        throw e;
       }
-      // O preço ou o desconto de um produto mudou com a venda aberta (S3-08, S3-09): o carrinho passa ao preço atual.
-      if (e instanceof ApiError && e.code === 'PAGAMENTO_DIVERGENTE') {
-        const c = await sessao.recarregarCatalogo().catch(() => null);
-        if (c) setLinhas((ls) => ls.map((l) => {
-          const p = l.codigo ? c.itensEtiquetados.find((i) => i.codigo === l.codigo)?.preco : c.categorias.find((x) => x.id === l.categoriaId)?.precoPadrao;
-          return p ? { ...l, precoCents: toCents(p) } : l;
-        }));
-        setPagando(false);
-        feedback('erro', 'O preço de algum produto mudou (preço novo ou desconto) e a venda não foi gravada. O carrinho já está com o preço de agora: confira o total e receba de novo.');
-        return;
-      }
-      throw e;
     }
     // Atualiza o catálogo carregado: baixa o saldo dos produtos vendidos (peça única sai) e o das categorias.
     const vendidos = new Map(linhas.filter((l) => l.codigo).map((l) => [l.codigo!, l.quantidade]));
@@ -316,7 +323,8 @@ export function PdvPage() {
     cpfAtual.current = null; setCpfSel(null); // a próxima venda pergunta o CPF de novo
     setPagando(false);
     setComprovante(venda);
-    setMsgLeitura(null);
+    if (jaGravada) feedback('aviso', 'Atenção: esta venda já tinha sido gravada na tentativa anterior, com o pagamento daquela vez. Confira no comprovante o que foi cobrado.');
+    else setMsgLeitura(null);
   }
 
   return (

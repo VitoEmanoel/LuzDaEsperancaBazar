@@ -75,7 +75,8 @@ function ReceberModal({ conta, onFechar, onOk }: { conta: ContaReceber | null; o
     caixaApi.atual().then(setCaixa).catch(() => setCaixa(null));
   }, [conta]);
   const cents = tryCents(valor);
-  useEffect(() => { opId.current = uuid(); }, [conta?.id, cents, forma, noCaixa]);
+  // o caixa entra no pedido: quando ele termina de carregar, o pedido muda e o id também (senão o reenvio daria 409)
+  useEffect(() => { opId.current = uuid(); }, [conta?.id, cents, forma, noCaixa, caixa?.id]);
   const valido = conta && cents !== null && cents > 0 && cents <= toCents(conta.saldo);
   async function salvar() {
     if (!valido || enviando) return; setErro(null); setEnviando(true); // clique duplo não manda dois recebimentos

@@ -17,7 +17,7 @@ export const sid = (p: string) => `${p.padEnd(8, '0').slice(0, 8)}-0000-4000-800
 const dias = (d: number) => new Date(Date.now() + d * 86_400_000).toISOString();
 const data = (d: number) => dias(d).slice(0, 10);
 
-export interface UsuarioDb { id: string; nome: string; login: string; senha: string; perfilId: string; ativo: boolean; trocarSenha: boolean }
+export interface UsuarioDb { id: string; nome: string; login: string; senha: string; perfilId: string; ativo: boolean; trocarSenha: boolean; /** terminal fixo, opcional (S6-21) */ terminalId?: string | null }
 export interface LoteDb {
   id: string; numero: number; tipo: TipoEntrada; parceiroId?: string; campanhaId?: string; documento?: string;
   temAnexo: boolean; recebidoEm: string; status: 'ABERTO' | 'TRIADO'; valorCompra?: number; pago?: boolean;

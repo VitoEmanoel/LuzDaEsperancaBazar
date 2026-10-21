@@ -198,7 +198,7 @@ function SeletorCliente({ clientesLocais, cliente, onSelecionar, onNovoClienteLo
   }, [termo, clientesLocais]);
 
   useEffect(() => {
-    if (termo.trim().length < 2) { setRemotos(null); return; }
+    if (termo.trim().length < 3) { setRemotos(null); return; } // a API só busca a partir de 3 para quem opera o PDV (S6-15)
     const t = setTimeout(() => { clientesApi.buscar(termo.trim(), true).then(setRemotos).catch(() => setRemotos(null)); }, 300);
     return () => clearTimeout(t);
   }, [termo]);
