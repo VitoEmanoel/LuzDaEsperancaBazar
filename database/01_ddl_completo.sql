@@ -1,6 +1,6 @@
 -- =====================================================================================
 -- Sistema de Bazar — Luz da Esperança · DDL COMPLETA (instalação do zero, PostgreSQL 11+; testado no 16)
--- Gerado pela concatenação das migrações oficiais (0001 a 0015) — a fonte da verdade continua sendo
+-- Gerado pela concatenação das migrações oficiais (0001 a 0017) — a fonte da verdade continua sendo
 -- prisma/migrations/* aplicadas com `prisma migrate deploy`. Use este arquivo para revisão,
 -- ambientes sem Node/Prisma ou para recriar um banco de teste:
 --   createdb -O bazar_owner bazar_teste
@@ -2417,3 +2417,111 @@ BEGIN
   RETURN NEW;
 END $$;
 CREATE TRIGGER tg_caixa_no_terminal_do_usuario BEFORE INSERT ON "caixa_sessao" FOR EACH ROW EXECUTE FUNCTION fn_caixa_no_terminal_do_usuario();
+
+-- #####################################################################################
+-- ## 0016_caixa_as_cegas — sangria e fechamento às cegas; justificativa da diferença depois do fechamento
+-- #####################################################################################
+-- Sprint 6, S6-19 (decisões do humano em 21/10/2026): sangria e fechamento às cegas, como no mercado, sem senha de supervisor.
+-- Fechamento definitivo: a pessoa informa o contado e o caixa fecha na hora; só depois ela vê o esperado e a diferença.
+-- Com diferença, a justificativa vem em seguida, uma vez só, e só de quem fechou. A observação antiga fica para o histórico.
+
+-- Justificativa da diferença, gravada depois do fechamento
+ALTER TABLE "caixa_sessao" ADD COLUMN "justificativa_diferenca" TEXT;
+ALTER TABLE "caixa_sessao" ADD COLUMN "justificada_em" TIMESTAMPTZ(3);
+ALTER TABLE "caixa_sessao" ADD COLUMN "justificada_por_id" UUID;
+ALTER TABLE "caixa_sessao" ADD CONSTRAINT "caixa_sessao_justificada_por_id_fkey" FOREIGN KEY ("justificada_por_id") REFERENCES "usuario"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- O fechamento não exige mais a observação (a justificativa vem depois): o resto da regra do fechamento continua igual (0002)
+ALTER TABLE caixa_sessao DROP CONSTRAINT ck_caixa_fechamento;
+ALTER TABLE caixa_sessao ADD CONSTRAINT ck_caixa_fechamento CHECK (
+  (status = 'ABERTO' AND fechado_em IS NULL)
+  OR (status = 'FECHADO' AND fechado_em IS NOT NULL AND fechado_por_id IS NOT NULL
+      AND valor_esperado IS NOT NULL AND valor_contado IS NOT NULL AND valor_contado >= 0
+      AND diferenca = valor_contado - valor_esperado)
+);
+
+-- Justificativa só em caixa fechado com diferença, com texto de verdade e as três colunas juntas
+ALTER TABLE caixa_sessao ADD CONSTRAINT ck_caixa_justificativa CHECK (
+  (justificativa_diferenca IS NULL AND justificada_em IS NULL AND justificada_por_id IS NULL)
+  OR (status = 'FECHADO' AND diferenca <> 0 AND length(trim(justificativa_diferenca)) >= 5
+      AND justificada_em IS NOT NULL AND justificada_por_id IS NOT NULL)
+);
+
+-- Caixa fechado continua sem mudar nem reabrir (0002), com UMA exceção: gravar a justificativa uma vez, por quem fechou,
+-- sem mexer em mais nada. Duas gravações ao mesmo tempo: a segunda já vê a primeira (OLD preenchido) e é recusada.
+-- Caixa fechado antes desta migração com a observação obrigatória da 0002 já está justificado: não recebe outra.
+CREATE OR REPLACE FUNCTION fn_valida_alteracao_caixa() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE v_resto_igual boolean;
+BEGIN
+  IF OLD.status = 'FECHADO' THEN
+    IF OLD.justificativa_diferenca IS NOT NULL OR OLD.observacao IS NOT NULL THEN
+      PERFORM fn_falha('JUSTIFICATIVA_JA_REGISTRADA', 'A justificativa deste caixa já foi registrada');
+    END IF;
+    v_resto_igual := (to_jsonb(NEW) - 'justificativa_diferenca' - 'justificada_em' - 'justificada_por_id')
+                   = (to_jsonb(OLD) - 'justificativa_diferenca' - 'justificada_em' - 'justificada_por_id');
+    IF NEW.justificativa_diferenca IS NULL OR NOT v_resto_igual THEN
+      PERFORM fn_falha('CAIXA_FECHADO', 'Caixa fechado não muda nem reabre');
+    END IF;
+    IF NEW.justificada_por_id IS DISTINCT FROM OLD.fechado_por_id THEN
+      PERFORM fn_falha('JUSTIFICATIVA_DE_OUTRO', 'Só quem fechou o caixa justifica a diferença');
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF NEW.terminal_id <> OLD.terminal_id OR NEW.aberto_por_id <> OLD.aberto_por_id OR NEW.aberto_em <> OLD.aberto_em
+     OR NEW.valor_abertura <> OLD.valor_abertura THEN
+    PERFORM fn_falha('REGISTRO_IMUTAVEL', 'Dados de abertura do caixa não mudam');
+  END IF;
+  RETURN NEW;
+END $$;
+
+-- Pendências de justificativa de quem fechou (aviso no próximo acesso). Caixas fechados antes desta migração já têm a
+-- observação obrigatória da 0002, então nunca ficam pendentes.
+CREATE INDEX "caixa_sessao_justificativa_pendente_idx" ON "caixa_sessao"("fechado_por_id")
+  WHERE status = 'FECHADO' AND diferenca <> 0 AND justificativa_diferenca IS NULL AND observacao IS NULL;
+
+-- #####################################################################################
+-- ## 0017_troco_no_fiado — valor recebido e troco no recebimento do fiado em dinheiro (só informativos)
+-- #####################################################################################
+-- Sprint 6, S6-20 (P-11, decisão do humano em 21/10/2026): recebimento do fiado em dinheiro informa o valor recebido e
+-- mostra o troco, como na venda. Só o valor da dívida entra no caixa e na conta; o troco é informativo.
+-- Mesmo desenho da venda (0001/0007): o recebido só existe em dinheiro e é o valor mais o troco.
+
+ALTER TABLE "recebimento" ADD COLUMN "valor_recebido" DECIMAL(10,2);
+ALTER TABLE "recebimento" ADD COLUMN "troco" DECIMAL(10,2) NOT NULL DEFAULT 0;
+
+-- Troco só em dinheiro; o recebido só em dinheiro e sempre igual a valor + troco (logo, nunca menor que o valor).
+-- Os recebimentos antigos ficam com o recebido nulo e troco 0, e continuam válidos.
+ALTER TABLE recebimento ADD CONSTRAINT ck_receb_troco CHECK (troco >= 0 AND (troco = 0 OR forma = 'DINHEIRO'));
+ALTER TABLE recebimento ADD CONSTRAINT ck_receb_dinheiro CHECK (
+  valor_recebido IS NULL OR (forma = 'DINHEIRO' AND valor_recebido = valor + troco)
+);
+
+-- O recebido é obrigatório no recebimento NOVO em dinheiro (no INSERT, não num CHECK: o estorno de um recebimento antigo,
+-- sem o recebido, é um UPDATE e não pode ser barrado). O recebido e o troco não mudam depois, como o resto (RN-27).
+CREATE OR REPLACE FUNCTION fn_valida_recebimento() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE v_conta conta_receber%ROWTYPE; v_pago numeric;
+BEGIN
+  SELECT * INTO v_conta FROM conta_receber WHERE id = NEW.conta_receber_id FOR UPDATE;
+  IF TG_OP = 'INSERT' THEN
+    IF v_conta.status IN ('CANCELADA', 'QUITADA') THEN PERFORM fn_falha('CONTA_NAO_ABERTA', 'Conta não aceita recebimento'); END IF;
+    IF NEW.sessao_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM caixa_sessao WHERE id = NEW.sessao_id AND status = 'ABERTO') THEN
+      PERFORM fn_falha('CAIXA_FECHADO', 'Recebimento no caixa exige caixa aberto');
+    END IF;
+    IF NEW.forma = 'DINHEIRO' AND NEW.valor_recebido IS NULL THEN
+      PERFORM fn_falha('RECEBIDO_OBRIGATORIO', 'Recebimento em dinheiro exige o valor recebido');
+    END IF;
+    SELECT coalesce(sum(valor), 0) INTO v_pago FROM recebimento WHERE conta_receber_id = NEW.conta_receber_id AND estornado_em IS NULL;
+    IF v_pago + NEW.valor > v_conta.valor THEN
+      PERFORM fn_falha('RECEBIMENTO_ACIMA_SALDO', 'RN-27: recebimentos ativos não podem passar do valor da conta');
+    END IF;
+  ELSE
+    IF OLD.estornado_em IS NOT NULL THEN PERFORM fn_falha('ESTORNO_DUPLICADO', 'RN-27: recebimento já estornado'); END IF;
+    IF NEW.conta_receber_id <> OLD.conta_receber_id OR NEW.valor <> OLD.valor OR NEW.forma <> OLD.forma
+       OR NEW.recebido_em <> OLD.recebido_em OR NEW.sessao_id IS DISTINCT FROM OLD.sessao_id OR NEW.usuario_id <> OLD.usuario_id
+       OR NEW.valor_recebido IS DISTINCT FROM OLD.valor_recebido OR NEW.troco <> OLD.troco
+       OR NEW.estornado_em IS NULL THEN
+      PERFORM fn_falha('REGISTRO_IMUTAVEL', 'RN-27: recebimento só pode ser estornado');
+    END IF;
+  END IF;
+  RETURN NEW;
+END $$;

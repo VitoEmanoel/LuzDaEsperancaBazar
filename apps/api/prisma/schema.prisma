@@ -235,6 +235,7 @@ model Usuario {
   movimentacaoUsuario        Movimentacao[]    @relation("MovimentacaoUsuario")
   caixaAbertoPor             CaixaSessao[]     @relation("CaixaAbertoPor")
   caixaFechadoPor            CaixaSessao[]     @relation("CaixaFechadoPor")
+  caixaJustificadaPor        CaixaSessao[]     @relation("CaixaJustificadaPor")
   lancamentoUsuario          CaixaLancamento[] @relation("LancamentoUsuario")
   vendaRegistradaPor         Venda[]           @relation("VendaRegistradaPor")
   vendaCanceladaPor          Venda[]           @relation("VendaCanceladaPor")
@@ -614,25 +615,30 @@ model SaldoEstoque {
 // =========================== 4.5 Caixa e venda ===========================
 
 model CaixaSessao {
-  id            String      @id @default(uuid()) @db.Uuid
-  terminalId    String      @map("terminal_id") @db.Uuid
-  status        StatusCaixa @default(ABERTO)
-  abertoPorId   String      @map("aberto_por_id") @db.Uuid
-  abertoEm      DateTime    @default(now()) @map("aberto_em") @db.Timestamptz(3)
-  valorAbertura Decimal     @map("valor_abertura") @db.Decimal(10, 2)
-  fechadoPorId  String?     @map("fechado_por_id") @db.Uuid
-  fechadoEm     DateTime?   @map("fechado_em") @db.Timestamptz(3)
-  valorEsperado Decimal?    @map("valor_esperado") @db.Decimal(10, 2)
-  valorContado  Decimal?    @map("valor_contado") @db.Decimal(10, 2)
-  diferenca     Decimal?    @db.Decimal(10, 2)
-  observacao    String?
+  id                     String      @id @default(uuid()) @db.Uuid
+  terminalId             String      @map("terminal_id") @db.Uuid
+  status                 StatusCaixa @default(ABERTO)
+  abertoPorId            String      @map("aberto_por_id") @db.Uuid
+  abertoEm               DateTime    @default(now()) @map("aberto_em") @db.Timestamptz(3)
+  valorAbertura          Decimal     @map("valor_abertura") @db.Decimal(10, 2)
+  fechadoPorId           String?     @map("fechado_por_id") @db.Uuid
+  fechadoEm              DateTime?   @map("fechado_em") @db.Timestamptz(3)
+  valorEsperado          Decimal?    @map("valor_esperado") @db.Decimal(10, 2)
+  valorContado           Decimal?    @map("valor_contado") @db.Decimal(10, 2)
+  diferenca              Decimal?    @db.Decimal(10, 2)
+  observacao             String?
+  // S6-19: a justificativa da diferença vem depois do fechamento, uma vez só, de quem fechou (0016)
+  justificativaDiferenca String?     @map("justificativa_diferenca")
+  justificadaEm          DateTime?   @map("justificada_em") @db.Timestamptz(3)
+  justificadaPorId       String?     @map("justificada_por_id") @db.Uuid
 
-  terminal     Terminal          @relation(fields: [terminalId], references: [id])
-  lancamentos  CaixaLancamento[]
-  vendas       Venda[]
-  recebimentos Recebimento[]
-  abertoPor    Usuario           @relation("CaixaAbertoPor", fields: [abertoPorId], references: [id], onDelete: Restrict)
-  fechadoPor   Usuario?          @relation("CaixaFechadoPor", fields: [fechadoPorId], references: [id], onDelete: Restrict)
+  terminal       Terminal          @relation(fields: [terminalId], references: [id])
+  lancamentos    CaixaLancamento[]
+  vendas         Venda[]
+  recebimentos   Recebimento[]
+  abertoPor      Usuario           @relation("CaixaAbertoPor", fields: [abertoPorId], references: [id], onDelete: Restrict)
+  fechadoPor     Usuario?          @relation("CaixaFechadoPor", fields: [fechadoPorId], references: [id], onDelete: Restrict)
+  justificadaPor Usuario?          @relation("CaixaJustificadaPor", fields: [justificadaPorId], references: [id], onDelete: Restrict)
 
   @@index([terminalId])
   @@index([abertoPorId, abertoEm])
@@ -780,6 +786,8 @@ model Recebimento {
   estornadoEm    DateTime?      @map("estornado_em") @db.Timestamptz(3)
   estornadoPorId String?        @map("estornado_por_id") @db.Uuid
   motivoEstorno  String?        @map("motivo_estorno")
+  valorRecebido  Decimal?       @map("valor_recebido") @db.Decimal(10, 2)
+  troco          Decimal        @default(0) @db.Decimal(10, 2)
 
   contaReceber ContaReceber @relation(fields: [contaReceberId], references: [id])
   sessao       CaixaSessao? @relation(fields: [sessaoId], references: [id])
