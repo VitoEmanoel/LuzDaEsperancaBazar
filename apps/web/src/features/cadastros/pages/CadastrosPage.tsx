@@ -2,7 +2,7 @@
  * Cadastros genéricos (categorias, parceiros, campanhas, motivos, categorias de despesa, clientes).
  * Nada é excluído: só desativa (RN-24). Busca de clientes vai no corpo de POST (sem PII na URL).
  */
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { cadastrosApi, clientesApi, type TipoCadastro } from '../cadastros.api';
 import { errorMessage, errosPorCampo } from '../../../shared/api/http';
@@ -65,6 +65,12 @@ export function CadastrosPage() {
   const [ativo, setAtivo] = useState<'true' | 'false' | ''>('true');
   const [editando, setEditando] = useState<Registro | 'novo' | null>(null);
 
+  useEffect(() => {
+    setBusca('');
+    setTermo('');
+    setAtivo('true');
+  }, [tipo]);
+
   const abas = (Object.keys(CONFIG) as Tipo[])
     .filter(permitido)
     .map((t) => ({ id: t, rotulo: CONFIG[t].titulo }));
@@ -79,7 +85,7 @@ export function CadastrosPage() {
     try {
       if (tipo === 'clientes') await clientesApi.atualizar(r.id, { ativo: !r.ativo });
       else await cadastrosApi.atualizar(tipo, r.id, { ativo: !r.ativo } as never);
-      toast(r.ativo ? 'Desativado.' : 'Reativado.'); await lista.reload();
+      toast(tipo === 'parceiros' ? (r.ativo ? 'Reativado.' : 'Desativado.') : (!r.ativo ? 'Desativado.' : 'Reativado.')); await lista.reload();
     } catch (e) { toast(errorMessage(e), 'erro'); }
   }
 
@@ -152,6 +158,10 @@ function EditarModal({ tipo, campos, registro, onFechar, onOk }: { tipo: Tipo; c
       if (String(v).trim() && (cents === null || cents < 0)) return 'Valor inválido';
       const exige = c.obrigatorioSe ? !!vals[c.obrigatorioSe] : !c.opcional;
       if (exige && !(cents && cents > 0)) return 'Informe um valor maior que zero';
+    }
+    if (tipo === 'campanhas' && c.chave === 'fim' && typeof v === 'string' && v.trim()) {
+      const ini = String(vals.inicio ?? '').trim();
+      if (ini && v < ini) return 'A data de fim não pode ser anterior à de início';
     }
     return null;
   };
