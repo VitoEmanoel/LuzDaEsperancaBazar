@@ -2,7 +2,7 @@
  * Contas a receber / fiado: lista por cliente; receber total/parcial com ou sem caixa; extrato; estorno (Admin);
  * lançamento manual (contas_receber.lancar).
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { caixaApi } from '../../caixa/caixa.api';
 import { clientesApi } from '../../cadastros/cadastros.api';
 import { contasReceberApi } from '../financeiro.api';
@@ -65,6 +65,9 @@ function ReceberModal({ conta, onFechar, onOk }: { conta: ContaReceber | null; o
   const [forma, setForma] = useState<FormaQuitacao>('DINHEIRO');
   const [caixa, setCaixa] = useState<CaixaSessao | null | undefined>(undefined);
   const [erro, setErro] = useState<string | null>(null);
+  const [enviando, setEnviando] = useState(false);
+  // Id da OPERAÇÃO (S6-06): o mesmo nas novas tentativas (resposta perdida → reenvio não duplica); muda quando muda o recebimento
+  const opId = useRef(uuid());
   // Descobre se o operador tem caixa aberto (para oferecer "receber no caixa").
   useEffect(() => {
     if (!conta) return;
@@ -72,15 +75,17 @@ function ReceberModal({ conta, onFechar, onOk }: { conta: ContaReceber | null; o
     caixaApi.atual().then(setCaixa).catch(() => setCaixa(null));
   }, [conta]);
   const cents = tryCents(valor);
+  useEffect(() => { opId.current = uuid(); }, [conta?.id, cents, forma, noCaixa]);
   const valido = conta && cents !== null && cents > 0 && cents <= toCents(conta.saldo);
   async function salvar() {
-    if (!valido) return; setErro(null);
-    try { await contasReceberApi.receber(conta!.id, { id: uuid(), valor: fromCents(cents!), forma, caixaId: noCaixa && caixa ? caixa.id : undefined }); onFechar(); await onOk(); }
+    if (!valido || enviando) return; setErro(null); setEnviando(true); // clique duplo não manda dois recebimentos
+    try { await contasReceberApi.receber(conta!.id, { id: opId.current, valor: fromCents(cents!), forma, caixaId: noCaixa && caixa ? caixa.id : undefined }); opId.current = uuid(); onFechar(); await onOk(); }
     catch (e) { setErro(errorMessage(e)); }
+    finally { setEnviando(false); }
   }
   return (
     <Modal titulo={`Receber de ${conta?.clienteNome ?? ''}`} aberto={!!conta} onFechar={onFechar} largura="sm"
-      rodape={<><button className="btn" onClick={onFechar}>Voltar</button><button className="btn btn-primary" disabled={!valido} onClick={salvar}>Registrar</button></>}>
+      rodape={<><button className="btn" onClick={onFechar}>Voltar</button><button className="btn btn-primary" disabled={!valido || enviando} onClick={salvar}>{enviando ? 'Registrando…' : 'Registrar'}</button></>}>
       <p>Saldo: <MoneyText value={conta?.saldo} /></p>
       <Field label="Valor recebido (R$)" hint="Pode ser parcial." erro={cents !== null && conta && cents > toCents(conta.saldo) ? 'Maior que o saldo' : null}>
         <input inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} autoFocus />

@@ -24,7 +24,8 @@
     "test:produto": "tsx tests/produto.ts",
     "test:sprint3": "tsx tests/sprint3.ts",
     "test:sprint4": "tsx tests/sprint4.ts",
-    "test:sprint5": "tsx tests/sprint5.ts"
+    "test:sprint5": "tsx tests/sprint5.ts",
+    "test:sprint6": "tsx tests/sprint6.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",

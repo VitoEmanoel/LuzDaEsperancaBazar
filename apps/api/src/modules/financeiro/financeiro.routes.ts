@@ -47,6 +47,11 @@ const recebimentoDto = (r: RecRow) => ({
   caixaId: r.sessaoId ?? undefined, estornado: !!r.estornadoEm, forma: r.forma,
 });
 
+/** "Reembolso de venda" só nasce do cancelamento com reembolso: lançada à mão, a despesa sairia das saídas e inflaria o resultado (S6-14). */
+function semReembolsoManual(categoriaDespesaId: string | undefined) {
+  if (categoriaDespesaId === CATEGORIA_REEMBOLSO_ID) throw new AppError(400, 'Reembolso de venda só é lançado pelo cancelamento da venda', 'CATEGORIA_RESERVADA');
+}
+
 async function obterContaPagar(db: Db, id: string) {
   const c = await db.contaPagar.findUnique({ where: { id }, include: cpInclude });
   if (!c) naoEncontrado('Conta');
@@ -73,9 +78,14 @@ export async function rotasFinanceiro(app: FastifyInstance) {
     const b = parse(z.object({
       id: zUuid, descricao: zTexto(200), favorecido: z.string().trim().max(120).optional(),
       categoriaDespesaId: zUuid.optional().or(z.literal('').transform(() => undefined)), valor: zValor, vencimento: zData,
-    }), req.body);
+    }).strict(), req.body);
     const ja = await prisma.contaPagar.findUnique({ where: { id: b.id }, include: cpInclude });
-    if (ja) return reply.code(200).send(contaPagarDto(ja));
+    if (ja) { // reenvio: a mesma conta volta; o mesmo id com outra conta é recusado (S6-14)
+      const d = contaPagarDto(ja);
+      if (d.descricao !== b.descricao || toCents(d.valor) !== toCents(b.valor) || d.vencimento !== b.vencimento || (d.categoriaDespesaId || undefined) !== b.categoriaDespesaId) conflito('ID_EM_USO', 'Este identificador já foi usado em outra conta');
+      return reply.code(200).send(d);
+    }
+    semReembolsoManual(b.categoriaDespesaId);
     if (b.categoriaDespesaId && !(await prisma.categoriaDespesa.findFirst({ where: { id: b.categoriaDespesaId, ativa: true } }))) {
       throw new AppError(400, 'Categoria de despesa inexistente ou inativa', 'VALIDACAO');
     }
@@ -94,6 +104,7 @@ export async function rotasFinanceiro(app: FastifyInstance) {
     const u = exigirUsuario(req);
     const { id } = parse(zIdParam, req.params);
     const b = parse(z.object({ descricao: zTexto(200).optional(), favorecido: z.string().trim().max(120).optional(), valor: zValor.optional(), vencimento: zData.optional(), categoriaDespesaId: zUuid.optional() }).strict(), req.body);
+    semReembolsoManual(b.categoriaDespesaId);
     const atual = await obterContaPagar(prisma, id);
     if (atual.status !== 'ABERTA') conflito('CONTA_NAO_ABERTA', 'Só conta em aberto pode ser editada'); // RN-32
     if (b.valor && atual.loteId && b.valor !== money(atual.valor)) conflito('ORIGEM_IMUTAVEL', 'Conta do lote de compra não muda de valor');
@@ -169,9 +180,13 @@ export async function rotasFinanceiro(app: FastifyInstance) {
 
   app.post('/contas-receber', { config: { acesso: ['contas_receber.lancar'] } }, async (req, reply) => {
     const u = exigirUsuario(req);
-    const b = parse(z.object({ id: zUuid, clienteId: zUuid, descricao: zTexto(200), valor: zValor, vencimento: zData }), req.body);
+    const b = parse(z.object({ id: zUuid, clienteId: zUuid, descricao: zTexto(200), valor: zValor, vencimento: zData }).strict(), req.body);
     const ja = await prisma.contaReceber.findUnique({ where: { id: b.id }, include: crInclude });
-    if (ja) return reply.code(200).send(contaReceberDto(ja));
+    if (ja) { // reenvio: a mesma conta volta; o mesmo id com outra conta é recusado (S6-14)
+      const d = contaReceberDto(ja);
+      if (d.clienteId !== b.clienteId || d.descricao !== b.descricao || toCents(d.valor) !== toCents(b.valor) || d.vencimento !== b.vencimento) conflito('ID_EM_USO', 'Este identificador já foi usado em outra conta');
+      return reply.code(200).send(d);
+    }
     if (!(await obterClienteAtivo(prisma, b.clienteId))) throw new AppError(400, 'Cliente inexistente ou inativo', 'VALIDACAO');
     const c = await prisma.$transaction(async (tx) => {
       const n = await tx.contaReceber.create({ data: { id: b.id, clienteId: b.clienteId, descricao: b.descricao, valor: b.valor, vencimento: toDbDate(b.vencimento), criadaPorId: u.id }, include: crInclude });
@@ -188,10 +203,10 @@ export async function rotasFinanceiro(app: FastifyInstance) {
       id: zUuid, valor: zValor, caixaId: zUuid.optional(),
       forma: z.enum(['DINHEIRO', 'PIX', 'CARTAO_DEBITO', 'CARTAO_CREDITO']).default('DINHEIRO'),
       observacao: z.string().trim().max(300).optional(),
-    }), req.body);
+    }).strict(), req.body);
     const ja = await prisma.recebimento.findUnique({ where: { id: b.id } });
-    if (ja) {
-      if (ja.contaReceberId !== id) conflito('ID_EM_USO', 'Identificador já usado');
+    if (ja) { // reenvio do MESMO recebimento volta o gravado; outra conta, outro valor ou outra forma com o mesmo id: 409 (S6-14)
+      if (ja.contaReceberId !== id || toCents(money(ja.valor)) !== toCents(b.valor) || ja.forma !== b.forma) conflito('ID_EM_USO', 'Identificador já usado');
       return reply.code(200).send(recebimentoDto(ja));
     }
     const r = await prisma.$transaction(async (tx) => {

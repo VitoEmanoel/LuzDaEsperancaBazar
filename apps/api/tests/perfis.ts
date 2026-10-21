@@ -98,6 +98,8 @@ const ACESSOS: [string, string, unknown, Perfil[], number[]?][] = [
   ['GET', '/pdv/catalogo', undefined, ['vendedor', 'admin']],
   ['GET', '/vendas', undefined, ['admin', 'vendedor']],
   ['GET', '/terminais', undefined, ['admin', 'vendedor']],
+  // S6-15: a base de clientes (nome e telefone de todos) é só de quem gerencia clientes; o Vendedor cadastra e busca pelo PDV
+  ['GET', '/clientes', undefined, ['admin']],
   ['GET', '/relatorios/vendas?de=2026-01-01&ate=2026-12-31', undefined, ['admin', 'financeiro']],
   ['GET', '/relatorios/fiado?de=2026-01-01&ate=2026-12-31', undefined, ['admin', 'financeiro']],
   ['GET', '/relatorios/estoque?de=2026-01-01&ate=2026-12-31', undefined, ['admin', 'estoquista', 'financeiro']],
@@ -108,7 +110,7 @@ const ACESSOS: [string, string, unknown, Perfil[], number[]?][] = [
 /** O que cada perfil padrão carrega (a migração 0005). */
 const PERMISSOES_ESPERADAS: Record<Perfil, string[]> = {
   admin: [], // calculado: todas as permissões (inclusive abrir caixa)
-  vendedor: ['caixa.operar', 'clientes.gerenciar'],
+  vendedor: ['caixa.operar'], // sem clientes.gerenciar desde a 0014 (S6-15)
   // parceiros.criar: 0009; custo, preço e aprovação: 0010; etiquetas: 0011
   estoquista: ['cadastros.consultar', 'custo.consultar', 'entrada.registrar', 'estoque.consultar', 'estoque.transferir', 'etiquetas.imprimir', 'parceiros.criar', 'produtos.aprovar', 'produtos.preco', 'relatorios.estoque'],
   // parceiros.criar: 0012 (o fornecedor da compra, S5-11)

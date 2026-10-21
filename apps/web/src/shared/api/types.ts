@@ -193,6 +193,8 @@ export interface ItemEstoque {
   valorAtribuido?: Money;
   loteId: Uuid; loteNumero: number; parceiroNome?: string; campanhaNome?: string;
   saldoBazar: number; saldoDoacoes: number;
+  /** Só para quem não consulta o estoque (o PDV): no lugar do saldo de Doações, só se a peça está lá (S6-16). */
+  estaEmDoacoes?: boolean;
 }
 export interface HistoricoEvento {
   ocorridoEm: IsoDateTime; tipo: TipoMovimentacao | 'TRIAGEM'; descricao: string;

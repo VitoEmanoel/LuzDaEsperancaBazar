@@ -56,6 +56,9 @@ export function ContasPagarPage() {
   );
 }
 
+/** "Reembolso de venda" só nasce do cancelamento da venda; a API recusa o lançamento à mão (S6-14). */
+const CATEGORIA_REEMBOLSO_ID = '00000000-0000-4000-8000-0000000000c1';
+
 function NovaContaModal({ aberto, onFechar, onOk }: { aberto: boolean; onFechar: () => void; onOk: () => Promise<void> }) {
   const cats = useAsync(() => cadastrosApi.listar('categorias-despesa', { ativo: true }), []);
   const [descricao, setDescricao] = useState(''); const [cat, setCat] = useState(''); const [valor, setValor] = useState(''); const [venc, setVenc] = useState(todayLocal(7));
@@ -71,7 +74,7 @@ function NovaContaModal({ aberto, onFechar, onOk }: { aberto: boolean; onFechar:
     <Modal titulo="Lançar conta a pagar" aberto={aberto} onFechar={onFechar} largura="sm"
       rodape={<><button className="btn" onClick={onFechar}>Cancelar</button><button className="btn btn-primary" disabled={!valido} onClick={salvar}>Salvar</button></>}>
       <Field label="Descrição"><input value={descricao} onChange={(e) => setDescricao(e.target.value)} maxLength={150} autoFocus /></Field>
-      <Field label="Categoria de despesa"><select value={cat} onChange={(e) => setCat(e.target.value)}><option value="">Selecione…</option>{cats.data?.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}</select></Field>
+      <Field label="Categoria de despesa"><select value={cat} onChange={(e) => setCat(e.target.value)}><option value="">Selecione…</option>{cats.data?.filter((c) => c.id !== CATEGORIA_REEMBOLSO_ID).map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}</select></Field>
       <div className="grid-2">
         <Field label="Valor (R$)"><input inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} /></Field>
         <Field label="Vencimento"><input type="date" value={venc} onChange={(e) => setVenc(e.target.value)} /></Field>

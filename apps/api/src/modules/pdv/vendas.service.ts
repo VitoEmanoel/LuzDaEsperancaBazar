@@ -38,9 +38,9 @@ export const zVendaRequest = z.object({
   pagamentos: z.array(z.object({
     forma: z.enum(['DINHEIRO', 'PIX', 'CARTAO_DEBITO', 'CARTAO_CREDITO', 'FIADO']),
     valor: zMoney, valorRecebido: zMoney.optional(),
-  })).max(5),
+  }).strict()).max(5),
   vencimentoFiado: zData.optional(),
-});
+}).strict(); // S6-14: lista branca também no corpo da venda (campo desconhecido é recusado, não ignorado)
 export type VendaRequest = z.infer<typeof zVendaRequest>;
 
 export interface Operador { id: string; nome: string; permissoes: Set<Permissao>; limiteDescontoPct: number }
@@ -195,14 +195,28 @@ async function montarPedidos(tx: Tx, porCodigo: Map<string, { qtd: number; desc:
 // ---------------- processamento ----------------
 export interface ResultadoVenda { id: string; numero: number; jaExistia: boolean }
 
+/** Os itens como "produto ou categoria → quantidade somada", em ordem: a venda gravada (linhas por entrada, PEPS) e o pedido comparam igual. */
+function assinaturaItens(itens: { chave: string; quantidade: number }[]): string {
+  const soma = new Map<string, number>();
+  for (const i of itens) soma.set(i.chave, (soma.get(i.chave) ?? 0) + i.quantidade);
+  return [...soma].sort(([a], [b]) => a.localeCompare(b)).map(([k, q]) => `${k}=${q}`).join('|');
+}
+
 /**
  * Grava a venda dentro de `tx`. Lança AppError (regra de negócio) ou erro do banco.
  * A hora da venda é sempre a do servidor.
  */
 export async function processarVenda(tx: Tx, id: string, req: VendaRequest, op: Operador): Promise<ResultadoVenda> {
-  const existente = await tx.venda.findUnique({ where: { id }, select: { numero: true, registradaPorId: true } });
+  const existente = await tx.venda.findUnique({ where: { id }, select: {
+    numero: true, registradaPorId: true, sessaoId: true,
+    itens: { select: { quantidade: true, formaSelecao: true, item: { select: { categoriaId: true, produto: { select: { codigo: true } } } } } },
+  } });
   if (existente) {
-    if (existente.registradaPorId !== op.id) throw new AppError(409, 'Identificador de venda já usado', 'ID_EM_USO');
+    // reenvio da MESMA venda (resposta perdida): devolve a gravada. O mesmo id com outro carrinho, outro caixa ou outro
+    // operador é outra venda: 409 (S6-14), senão o operador receberia o comprovante de uma venda que não é a dele
+    const gravada = assinaturaItens(existente.itens.map((i) => ({ chave: i.formaSelecao === 'CODIGO' ? `p:${i.item.produto?.codigo ?? ''}` : `c:${i.item.categoriaId}`, quantidade: i.quantidade })));
+    const pedida = assinaturaItens(req.itens.map((i) => ({ chave: 'codigo' in i ? `p:${i.codigo.toUpperCase()}` : `c:${i.categoriaId}`, quantidade: i.quantidade })));
+    if (existente.registradaPorId !== op.id || existente.sessaoId !== req.caixaId || gravada !== pedida) throw new AppError(409, 'Identificador de venda já usado', 'ID_EM_USO');
     return { id, numero: existente.numero, jaExistia: true };
   }
 

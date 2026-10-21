@@ -25,7 +25,7 @@ const saldo = est.items.reduce((s: number, i: any) => s + i.saldoBazar, 0);
 const cat = await (await fetch(B + '/pdv/catalogo', { headers: j(cx) })).json();
 const peca = cat.itensEtiquetados[0];
 console.log('saldo roupa bazar', saldo, 'peça', peca.codigo);
-const venda = (t: string, caixaId: string, terminalId: string, itens: any[], valor: string) => fetch(B + `/vendas/${uuid()}`, { method: 'PUT', headers: j(t), body: JSON.stringify({ terminalId, caixaId, ocorridaEm: new Date().toISOString(), origem: 'ONLINE', itens, pagamentos: [{ forma: 'PIX', valor, valorRecebido: valor }] }) }).then(async (r) => ({ s: r.status, b: await r.json() }));
+const venda = (t: string, caixaId: string, terminalId: string, itens: any[], valor: string) => fetch(B + `/vendas/${uuid()}`, { method: 'PUT', headers: j(t), body: JSON.stringify({ terminalId, caixaId, itens, /* sem ocorridaEm/origem: o servidor nunca usou, e o corpo é estrito (S6-14) */ pagamentos: [{ forma: 'PIX', valor, valorRecebido: valor }] }) }).then(async (r) => ({ s: r.status, b: await r.json() }));
 // 1) mesma peça em 2 caixas simultâneos
 const r = await Promise.all([venda(cx, atual1.id, atual1.terminalId, [{ codigo: peca.codigo, quantidade: 1 }], peca.preco), venda(t2, cx2id, term3.id, [{ codigo: peca.codigo, quantidade: 1 }], peca.preco)]);
 console.log('peça concorrente:', r.map((x) => x.s + ':' + (x.b.code ?? 'ok')).join(' '));

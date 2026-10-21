@@ -31,6 +31,15 @@ import { rotasAdmin } from './modules/admin/admin.routes.js';
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // teto técnico; o limite de negócio vem do parâmetro anexo.tamanho_max_mb
 
+/**
+ * Log do erro sem dado pessoal (S6-14): a mensagem do Prisma repete os valores da consulta (CPF, nome, telefone), então
+ * vão só o código, o tipo e a pilha SEM a primeira linha (que é a mensagem). O redact cobre só caminhos fixos.
+ */
+function semDadoPessoal(err: unknown) {
+  const e = err as { code?: string; name?: string; stack?: string };
+  return { erro: { codigo: e.code ?? 'sem código', tipo: e.name ?? 'Error', pilha: (e.stack ?? '').split('\n').slice(1).join('\n') } };
+}
+
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
     trustProxy: env.TRUST_PROXY,
@@ -44,6 +53,7 @@ export async function buildApp(): Promise<FastifyInstance> {
         paths: [
           'req.headers.authorization', 'req.headers.cookie', 'res.headers["set-cookie"]',
           '*.senha', '*.senhaAtual', '*.novaSenha', '*.telefone', '*.nome', '*.accessToken', '*.cpf', '*.*.cpf', 'req.body.cpf',
+          '*.documento', '*.email', // S6-04: CPF/CNPJ do parceiro e e-mail também ficam fora do log
         ],
         censor: '[omitido]',
       },
@@ -96,7 +106,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     const app409 = traduzirErroBanco(err);
     if (app409 instanceof AppError) {
       p = { type: `https://bazar.local/erros/${app409.code ?? app409.status}`, title: app409.title, status: app409.status, code: app409.code, detail: app409.detail, errors: app409.errors };
-      if (app409.status >= 500) req.log.error({ err }, 'erro de aplicação');
+      if (app409.status >= 500) req.log.error(semDadoPessoal(err), 'erro de aplicação');
     } else if (err.statusCode === 429) {
       p = { type: 'about:blank', title: 'Muitas tentativas. Aguarde e tente novamente.', status: 429, code: 'RATE_LIMIT' };
     } else if (err.code === 'FST_REQ_FILE_TOO_LARGE' || err.code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
@@ -106,7 +116,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     } else if (err.statusCode && err.statusCode >= 400 && err.statusCode < 500) {
       p = { type: 'about:blank', title: 'Requisição inválida', status: err.statusCode, code: 'REQUISICAO_INVALIDA' };
     } else {
-      req.log.error({ err }, 'erro interno'); // stack só no log do servidor
+      req.log.error(semDadoPessoal(err), 'erro interno'); // stack só no log do servidor, sem a mensagem (S6-14)
       p = { type: 'about:blank', title: 'Erro interno', status: 500, code: 'ERRO_INTERNO' };
     }
     p.requestId = req.id;
