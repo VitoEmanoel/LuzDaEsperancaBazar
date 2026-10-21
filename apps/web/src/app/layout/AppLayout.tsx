@@ -2,7 +2,7 @@
  * Layout do Backoffice: navegação lateral filtrada pelas permissões do perfil.
  * Esconder item de menu é só conforto — a API recusa com 403 de qualquer forma.
  */
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { useAuth } from '../../features/auth/AuthContext';
 import type { Permissao } from '../../shared/api/types';
@@ -52,6 +52,12 @@ export function AppLayout() {
   const toast = useToast();
   const nav = useNavigate();
   const [menuAberto, setMenuAberto] = useState(false);
+  const { pathname } = useLocation();
+  // Só UM item ativo: o de endereço mais específico que bate com a página (em /estoque/transferir, "Transferência", não também
+  // "Estoque"; em /estoque/produtos/…, "Estoque"). O NavLink marcaria os dois (S6-01).
+  const ativo = MENU.flatMap((g) => g.itens).map((i) => i.to)
+    .filter((to) => pathname === to || pathname.startsWith(`${to}/`))
+    .sort((a, b) => b.length - a.length)[0];
 
   async function sair() {
     try { await logout(); nav('/login', { replace: true }); }
@@ -71,7 +77,7 @@ export function AppLayout() {
             return (
               <div key={g.grupo} className="nav-group" data-cor={g.cor}>
                 <div className="nav-group-title">{g.grupo}</div>
-                {itens.map((i) => <NavLink key={i.to} to={i.to} className="nav-item">{i.rotulo}</NavLink>)}
+                {itens.map((i) => <Link key={i.to} to={i.to} className={`nav-item ${i.to === ativo ? 'active' : ''}`} aria-current={i.to === ativo ? 'page' : undefined}>{i.rotulo}</Link>)}
               </div>
             );
           })}
@@ -80,7 +86,7 @@ export function AppLayout() {
       </aside>
       <div className="main">
         <header className="topbar">
-          <button className="btn btn-ghost menu-toggle" onClick={() => setMenuAberto((v) => !v)} aria-label="Abrir menu">☰</button>
+          <button className="btn btn-ghost menu-toggle" onClick={() => setMenuAberto((v) => !v)} aria-label={menuAberto ? 'Fechar menu' : 'Abrir menu'} aria-expanded={menuAberto}><span aria-hidden="true">☰</span> Menu</button>
           <div className="spacer" />
           <span className="user">{me?.nome}<small>{me?.perfil.nome}</small></span>
           <span className="avatar" aria-hidden="true">{iniciais(me?.nome)}</span>

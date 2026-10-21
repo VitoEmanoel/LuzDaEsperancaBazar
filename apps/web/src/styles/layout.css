@@ -36,6 +36,8 @@
   background: var(--primary-soft); color: var(--primary); font-family: var(--fonte-titulo); font-weight: 700;
 }
 .menu-toggle { display: none; }
+.menu-toggle { gap: .4rem; min-height: 44px; font-size: 1rem; font-weight: 700; padding: .35rem .75rem; } /* S6-12: maior e com a palavra Menu */
+.menu-toggle span { font-size: 1.3rem; line-height: 1; }
 .content { padding: 1.5rem 1.75rem 2.5rem; }
 .page { max-width: 1280px; }
 .page.narrow, .narrow { max-width: 760px; }
@@ -135,4 +137,13 @@
   .auth-hero h1 { font-size: 1.8rem; }
   .auth-hero .descricao, .auth-hero .local { display: none; }
   .topbar .user { display: none; }
+}
+
+/* --- Celular (até 600 px): atalhos do Início em 2 colunas, mais baixos (S6-12) --- */
+@media (max-width: 600px) {
+  .shortcut-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; }
+  .shortcut { min-height: 84px; padding: .75rem .85rem; margin-bottom: 0; }
+  .shortcut strong { font-size: 1.02rem; overflow-wrap: anywhere; }
+  .shortcut span { font-size: .85rem; }
+  .shortcut-grid > .shortcut:last-child:nth-child(odd) { grid-column: 1 / -1; }
 }

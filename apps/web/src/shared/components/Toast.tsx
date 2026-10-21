@@ -15,7 +15,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={show}>
       {children}
-      <div className="toasts" aria-live="polite">
+      {/* cada aviso já é uma região viva (alert/status): o container não repete o anúncio (S6-05) */}
+      <div className="toasts">
         {msgs.map((m) => <div key={m.id} className={`toast toast-${m.tipo}`} role={m.tipo === 'erro' ? 'alert' : 'status'}>{m.texto}</div>)}
       </div>
     </Ctx.Provider>
