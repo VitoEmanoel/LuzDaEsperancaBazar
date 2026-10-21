@@ -3,7 +3,7 @@
  * à parte), estoque, descartes (por parceiro/campanha e motivo), transferências, fiado. Exporta PDF/CSV/XLSX
  * com o MESMO filtro da tela (RF-REL-07).
  */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { relatoriosApi, type AgrupamentoVendas, type FiltroRelatorio, type FormatoExportacao } from '../relatorios.api';
 import { cadastrosApi } from '../../cadastros/cadastros.api';
@@ -42,6 +42,16 @@ export function RelatoriosPage() {
   const [porMotivo, setPorMotivo] = useState(false);
   const [parceiroId, setParceiroId] = useState('');
   const [campanhaId, setCampanhaId] = useState('');
+
+  useEffect(() => {
+    setDe(todayLocal(-30));
+    setAte(todayLocal());
+    setModo('parceiro');
+    setAgruparVendas('dia');
+    setPorMotivo(false);
+    setParceiroId('');
+    setCampanhaId('');
+  }, [t]);
 
   const opcoes = useAsync(async () => (t === 'descartes'
     ? Promise.all([cadastrosApi.listar('parceiros'), cadastrosApi.listar('campanhas')])
